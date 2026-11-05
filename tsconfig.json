@@ -1,8 +1,3 @@
 {
-  "extends": "./.wxt/tsconfig.json",
-  "compilerOptions": {
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true
-  }
+  "extends": "./.wxt/tsconfig.json"
 }

@@ -45,6 +45,7 @@ Each step is reviewed and committed before the next one starts.
 
 ## Architecture Decisions
 
+- **Dependencies:** exact-pinned, and only versions published at least two weeks ago. `web-ext` (WXT's optional auto-launch-browser peer) is deliberately not installed, because its Firefox tooling pulls in vulnerable packages. In dev, load `.output/chrome-mv3-dev` unpacked once; WXT reloads it on change.
 - **Framework:** [WXT](https://wxt.dev) + TypeScript. Two build modes:
     - `dev` — includes the selector-authoring tools (write configs to repo). Only for me.
     - `store` — dev tools stripped out, no extra permissions.
