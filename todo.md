@@ -15,13 +15,13 @@ Each step is reviewed and committed before the next one starts.
 - [ ] **Step 0 — Update this todo** with the technical review, architecture decisions, and build order.
 - [ ] **Step 1 — Project scaffold + site config format + loader**
     - WXT + TypeScript project, `dev` and `store` build modes, Vitest wired up.
-    - Site config JSON schema (versioned), bundled configs in `src/sites/`, override layering + version stamping.
+    - Site config JSON schema (versioned), bundled configs in `src/sites/`, override layering + hash stamping.
     - `chrome.storage` wrappers, `onInstalled` migration from the previous extension's data.
 - [ ] **Step 2 — Media detection**
     - MAIN-world `document_start` hook on `HTMLMediaElement.prototype.play` (and `attachShadow`).
     - Primary-media heuristic + fallback to config selectors. Works across shadow roots and `all_frames`.
 - [ ] **Step 3 — Ad detection + tab mute + skip**
-    - Typed detectors, `MutationObserver` driven, debounce/grace period.
+    - `exists` / `visible` conditions, `MutationObserver` driven, debounce/grace period.
     - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
 - [ ] **Step 4 — Overlay iframe**
     - Extension-origin iframe for blackout, quotes, slideshow, click shield.
@@ -68,18 +68,21 @@ Each step is reviewed and committed before the next one starts.
 
 ### Site configs + overrides
 
-- One JSON file per site: `domains`, `roles`, `detectors`, optional `quirks` (e.g. control-bar inset for the click shield), `schemaVersion`, `configVersion`.
+- One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (e.g. control-bar inset for the click shield). The folder holds only data, so the dev repo writer can be pointed at it.
+- Validated at build time (`wxt.config.ts` fails the build) and in tests. Bundled `host_permissions` are generated from `domains`.
 - **Roles:** `video`, `adIndicator`, `skip`, `playButton` (optional), `title`, `description`, `keywords`, `creator`.
-- **Each role is an ordered list of fallback selectors**, not a single selector. First match wins.
-- **Selector format supports shadow DOM** traversal, e.g. `["ytd-app", ">>>", "#movie_player"]`.
-- **Typed detectors** instead of plain "selector exists", since many sites leave ad nodes in the DOM and only hide them:
-    - `exists`, `visible`, `hasClass` (e.g. `.html5-video-player.ad-showing`), `attrEquals`.
+- **Each role is an ordered list of fallback selectors**, not a single selector. First match wins. Entries are a selector string or `{ "selector", "when" }`.
+- **Selector format supports shadow DOM** traversal with ` >>> `, e.g. `"ytd-app >>> #movie_player video"`.
+- **`when` condition** per selector, since many sites leave ad nodes in the DOM and only hide them:
+    - `exists` or `visible`. Defaults per role (`adIndicator`, `skip`, `playButton` → `visible`; others → `exists`).
+    - Class / attribute conditions are written in the CSS itself (e.g. `#movie_player.ad-showing`), so no separate detector types.
 - **Metadata extraction order:** JSON-LD `VideoObject` → OpenGraph → `meta` / `itemprop` → role selectors.
     - On SPAs (YouTube) OpenGraph tags go stale after in-app navigation, so verify the URL matches before trusting them.
 - **Overrides:**
     - Stored per role, not per site.
-    - Each override records the bundled `configVersion` it replaced.
-    - When a release changes that role, the override is dropped (or the user is prompted) so fixes aren't shadowed forever.
+    - Each override records `baseHash`: a hash of the bundled role it replaced (`none` if the bundled config had no such role). No manual version bumping.
+    - An override applies only while the bundled role still hashes to `baseHash`. When a release changes that role, bundled wins, the override is pruned on update, and a notice is stored for the UI.
+    - Overrides with their own `domains` for a site with no bundled config are **user-defined sites**.
 
 ### Ad detection + muting
 

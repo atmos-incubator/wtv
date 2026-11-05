@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "youtube.com",
+  "name": "YouTube",
+  "domains": ["youtube.com"],
+  "roles": {
+    "video": ["#movie_player video.html5-main-video", "video.html5-main-video"],
+    "adIndicator": [
+      { "selector": "#movie_player.ad-showing", "when": "exists" },
+      { "selector": "#movie_player.ad-interrupting", "when": "exists" }
+    ],
+    "skip": [".ytp-skip-ad-button", ".ytp-ad-skip-button-modern", ".ytp-ad-skip-button"],
+    "playButton": [".ytp-play-button"],
+    "title": ["ytd-watch-metadata #title h1", "h1.ytd-watch-metadata"],
+    "description": ["ytd-watch-metadata #description-inline-expander", "#description"],
+    "keywords": ["meta[name=\"keywords\"]"],
+    "creator": ["ytd-watch-metadata ytd-channel-name a", "#owner #channel-name a"]
+  },
+  "quirks": {
+    "controlBarInset": 48
+  }
+}
