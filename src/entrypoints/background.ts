@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { startAdController } from '../lib/ads/controller';
 import { browserAreas } from '../lib/browser-storage';
 import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
 import { runMigrations, type InstallDetails } from '../lib/migrate';
@@ -44,4 +45,6 @@ export default defineBackground(() => {
   browser.permissions.onRemoved.addListener(() => {
     void queueSync();
   });
+
+  startAdController();
 });

@@ -15,7 +15,8 @@
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { matchRole, mediaWithin } from '../dom/query';
-import { isStatusRequest, type MediaStatus } from '../messages';
+import type { MediaStatus } from '../messages';
+import { scheduler } from '../schedule';
 import { BUNDLED_SITES } from '../sites/bundled';
 import { validateOverrideStore } from '../sites/overrides';
 import { profileForHost, type SiteProfile } from '../sites/registry';
@@ -28,6 +29,8 @@ import { pickPrimary, type PrimaryChoice } from './score';
 export interface MediaAgent {
   primary(): MediaHandle | null;
   onPrimaryChange(cb: (primary: MediaHandle | null) => void): () => void;
+  profile(): SiteProfile;
+  onProfileChange(cb: (profile: SiteProfile) => void): () => void;
   status(): MediaStatus;
 }
 
@@ -38,19 +41,6 @@ export interface MediaAgentOptions {
 const EVALUATE_DELAY_MS = 100;
 const SCAN_DELAY_MS = 1000;
 const DISCOVERY_EVENTS = ['play', 'playing', 'loadedmetadata'] as const;
-
-/** Run `fn` once, `delay` ms after the first call; calls while pending are absorbed. */
-function scheduler(fn: () => void, delay: number, signal: AbortSignal): () => void {
-  let pending = false;
-  return () => {
-    if (pending || signal.aborted) return;
-    pending = true;
-    setTimeout(() => {
-      pending = false;
-      if (!signal.aborted) fn();
-    }, delay);
-  };
-}
 
 function eventMedia(e: Event): HTMLMediaElement | null {
   const target = e.composedPath()[0] ?? e.target;
@@ -66,6 +56,7 @@ export function startMediaAgent(ctx: ContentScriptContext, options: MediaAgentOp
   let selectorErrors: string[] = [];
   let choice: PrimaryChoice | null = null;
   const listeners = new Set<(primary: MediaHandle | null) => void>();
+  const profileListeners = new Set<(profile: SiteProfile) => void>();
   const openRoots = new Set<ShadowRoot>();
   const overlay: DebugOverlay | null = options.debug ? createDebugOverlay() : null;
 
@@ -175,6 +166,13 @@ export function startMediaAgent(ctx: ContentScriptContext, options: MediaAgentOp
     } catch (err) {
       console.warn('[wtv] could not load site overrides, using bundled config:', err);
     }
+    for (const cb of profileListeners) {
+      try {
+        cb(profile);
+      } catch (err) {
+        console.error('[wtv] profile listener failed:', err);
+      }
+    }
     scanSoon();
   }
 
@@ -245,17 +243,9 @@ export function startMediaAgent(ctx: ContentScriptContext, options: MediaAgentOp
   };
   browser.storage.onChanged.addListener(onStorageChanged);
 
-  const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {
-    if (!isStatusRequest(msg)) return undefined;
-    sendResponse(status());
-    return undefined;
-  };
-  browser.runtime.onMessage.addListener(onMessage);
-
   ctx.onInvalidated(() => {
     mutations.disconnect();
     browser.storage.onChanged.removeListener(onStorageChanged);
-    browser.runtime.onMessage.removeListener(onMessage);
     overlay?.destroy();
   });
 
@@ -278,6 +268,11 @@ export function startMediaAgent(ctx: ContentScriptContext, options: MediaAgentOp
     onPrimaryChange(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);
+    },
+    profile: () => profile,
+    onProfileChange(cb) {
+      profileListeners.add(cb);
+      return () => profileListeners.delete(cb);
     },
     status,
   };

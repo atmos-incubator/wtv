@@ -26,6 +26,10 @@ export const KEYS = {
   siteOverrides: 'wtv.siteOverrides',
   /** StaleOverrideNotice[]: overrides pruned because a release changed that role. */
   staleOverrides: 'wtv.staleOverrides',
+  /** Settings (local). */
+  settings: 'wtv.settings',
+  /** Record<tabId, TabMuteState> (session): survives service-worker restarts mid-ad. */
+  adMute: 'wtv.adMute',
 } as const;
 
 export async function readKey<T>(area: KVArea, key: string, fallback: T): Promise<T> {

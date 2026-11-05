@@ -17,7 +17,7 @@ Each step is reviewed and committed before the next one starts.
     - WXT + TypeScript project, `dev` and `store` build modes, Vitest wired up. Version `2.0.0`.
     - Site config JSON schema (versioned), bundled configs in `src/sites/` (YouTube only to start), override layering + hash stamping.
     - `chrome.storage` wrappers, `onInstalled` schema migrations. The previous extension's data is cleared, not migrated.
-- [ ] **Step 2 — Media detection**
+- [x] **Step 2 — Media detection**
     - MAIN-world `document_start` hook on `HTMLMediaElement.prototype.play` (and `attachShadow`).
     - Primary-media heuristic with the config `video` match as a strong bonus. Works across shadow roots and `all_frames`.
     - Generic site profile for any site without a config (see Generic sites), with per-site opt-in via `optional_host_permissions`.
@@ -25,6 +25,7 @@ Each step is reviewed and committed before the next one starts.
 - [ ] **Step 3 — Ad detection + tab mute + skip**
     - `exists` / `visible` conditions, `MutationObserver` driven, debounce/grace period.
     - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
+    - Per-frame ad ports to the background, `AD` badge, `Mute ads` / `Auto-skip ads` settings in the popup.
 - [ ] **Step 4 — Overlay iframe**
     - Extension-origin iframe for blackout, quotes, slideshow, click shield.
     - Image import into IndexedDB, domain folders + keyword resolution, filename durations, bundled default cat pack.
@@ -112,7 +113,11 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 - **Mute the tab, not the element:** `chrome.tabs.update(tabId, { muted: true })`. Ads can play in other elements / iframes, and players reset `video.muted`.
 - **Only unmute what we muted:** check `tab.mutedInfo.reason === "extension"` and `extensionId` matches ours. Respect the user muting before an ad or unmuting during one.
 - **Grace period** of ~1–2s after the indicator clears before unmuting, to ride out gaps between back-to-back ads.
-- Driven by `MutationObserver` on the detector targets + media events.
+- Driven by `MutationObserver` (child lists + `class` / `hidden` attributes, not `style`, which players animate constantly) + primary media events, with `timeupdate` as a heartbeat that catches style-only visibility changes while something plays. Evaluations are capped at one per 150 ms. Only runs on sites with an `adIndicator` role.
+- **Reporting:** each frame opens a port (`wtv-ad`) to the background only while it has an ad. A port closing (ad over, navigation, unload, script invalidated) clears that frame, so a dead frame can't leave a tab muted. If the worker restarts mid-ad, frames reconnect and re-send.
+- **Background:** tab "ad showing" = any frame active (`AD` badge). "Want mute" = any active frame with `muteAds` on. Mute ownership is kept in `storage.session` to survive worker restarts; tabs we muted whose frames never come back are unmuted after a 5 s recovery grace.
+- **Ownership rules** (`src/lib/ads/mute.ts`, pure + tested): mute only an audible tab; if the user unmutes or re-mutes mid-ad, give up ownership for that ad; unmute only if still muted by *this* extension.
+- **Settings:** `muteAds` and `autoSkip` (both on by default), toggled in the popup.
 
 ### Skip button
 
@@ -274,7 +279,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 
 ### Misc
 
-- Toolbar badge state: on / ad / broken.
+- Toolbar badge state: on / ad / broken. (`AD` done in step 3.)
 - Per-site enable toggle.
 - Backup / restore of playlists + overrides as a JSON export/import.
 - Unit tests (Vitest) for the playlist parser, filename durations, timestamp parsing, and override merging.

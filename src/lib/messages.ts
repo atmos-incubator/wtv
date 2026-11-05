@@ -34,6 +34,22 @@ export interface MediaStatus {
   selectorErrors: string[];
 }
 
+export interface AdStatus {
+  /** An ad is showing right now (including the short grace period after it ends). */
+  active: boolean;
+  muteAds: boolean;
+  autoSkip: boolean;
+  /** Skip-button clicks since the page loaded. */
+  skipClicks: number;
+  selectorErrors: string[];
+}
+
+/** One frame's answer to MSG_STATUS. `ads` is null when the site has no adIndicator role. */
+export interface FrameStatus {
+  media: MediaStatus;
+  ads: AdStatus | null;
+}
+
 export function isStatusRequest(msg: unknown): msg is StatusRequest {
   return typeof msg === 'object' && msg !== null && (msg as { type?: unknown }).type === MSG_STATUS;
 }
