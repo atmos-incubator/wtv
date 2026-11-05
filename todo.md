@@ -4,58 +4,252 @@ New Plugin - wtv - Web TV - Wtv
 
 Starting over on a project I have already released because I realize I did a terrible implementation, and so I'm starting fresh here before I publish this extension to the chrome store over the previous one.
 
-The idea is to turn a browser into a tv, and every website / video is a show.  And eventually I'll publish an authoritative playlist as a "tv station" but until then I just want it to do the following:
+The idea is to turn a browser into a tv, and every website / video is a show. It's intended to just be on in the background. Eventually I'll publish an authoritative playlist as a "tv station", but for v1 the focus is exclusively on audio / video sources.
 
-- Ability to detect ads on video sites, mute the browser tab until the dom node that indicates an 'ad' is gone, then unmute when it's gone.
+---
 
-    - This will require a side-panel feature for a dom node finder / unique css selector system to extract the dom nodes that will be manipulated / watched in the UI. We'll need designated dom nodes for the video element, the ad-indicator element, and the skip element.  And ideally the title, description, keywords, creator elements to extract relevant playlist data.
+## Build Order
 
-    - Ability to automatically click on skip ad button when it appears and is clickable - also discovered / maintained as a source selector like the video element and ad-indicator.
+Each step is reviewed and committed before the next one starts.
 
-    - Save will override what is used, by saving it to local storage config, and optionally send the findings back to a local server, that can write them to a file that can be imported here into the plugin source - so that we can maintain sites and publish updates when changes to their doms prevents finding these elements, but also allow people to quickly fix their session if a fix release hasn't been published yet. This will only be run by me, not offered to other people, so consider hiding it / not publishing it in the store version.
+- [ ] **Step 0 — Update this todo** with the technical review, architecture decisions, and build order.
+- [ ] **Step 1 — Project scaffold + site config format + loader**
+    - WXT + TypeScript project, `dev` and `store` build modes, Vitest wired up.
+    - Site config JSON schema (versioned), bundled configs in `src/sites/`, override layering + version stamping.
+    - `chrome.storage` wrappers, `onInstalled` migration from the previous extension's data.
+- [ ] **Step 2 — Media detection**
+    - MAIN-world `document_start` hook on `HTMLMediaElement.prototype.play` (and `attachShadow`).
+    - Primary-media heuristic + fallback to config selectors. Works across shadow roots and `all_frames`.
+- [ ] **Step 3 — Ad detection + tab mute + skip**
+    - Typed detectors, `MutationObserver` driven, debounce/grace period.
+    - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
+- [ ] **Step 4 — Overlay iframe**
+    - Extension-origin iframe for blackout, quotes, slideshow, click shield.
+    - Image import into IndexedDB, domain folders + keyword resolution, filename durations, bundled default cat pack.
+- [ ] **Step 5 — Selector picker side panel**
+    - Element picker, candidate ranking, delayed pick, live match count, save as override.
+    - Dev-mode only: write configs straight to the repo via File System Access API.
+- [ ] **Step 6 — Maximize + TV fullscreen**
+    - Top-layer popover maximize with `::backdrop` letterbox. Window-level fullscreen.
+    - Click-to-play/pause shield, keyboard shortcuts.
+- [ ] **Step 7 — Playlists**
+    - Parser / serializer with round-trip tests. Runner in background with session state.
+    - Next / previous, end detection, blackout between entries, multi-playlist add, context menu, export.
+- [ ] **Step 8 — Hash params + seeking**
+    - Namespaced `#wtv:` hash, timestamp formats, seek-after-preroll.
+- [ ] **Step 9 — Site health checks**
+    - Playwright daily runner (outside the extension) + in-extension "selectors may be broken" badge.
 
-- Ability to jump to a specific video location using a hashtag #t=200s or #t=1:37 for accessing 200s in or at 1m 37s. 
+---
 
-- Ability to specify a generic folder of images, or a domain-specific folder, that render as a slideshow over the video when it's playing ads. I'd love if these could read that folder any time they need an option, but if we have to do a "load from this folder" workflow and import them into some cache storage that's fine too.
+## Architecture Decisions
 
-    - The filenames should allow for syntax that specifying how long the image should present in the filename itself with _d20s.png for duration 20 seconds.
+- **Framework:** [WXT](https://wxt.dev) + TypeScript. Two build modes:
+    - `dev` — includes the selector-authoring tools (write configs to repo). Only for me.
+    - `store` — dev tools stripped out, no extra permissions.
+- **No local server.** Dev tooling writes site configs directly to the repo's `src/sites/` folder from an extension page using the File System Access API (`showDirectoryPicker()`, handle persisted in IndexedDB, "Allow on every visit" permission). Must run from the side panel / options page, not the popup (popups close when the picker steals focus).
+- **Selectors live in source.** No public webservice for selector sync. Users can override broken selectors locally until a fix release ships. A selector import system can come later if popularity grows.
+- **Site configs are data, not code.** JSON per site. Optional small code hooks are allowed, but only in source (never from overrides), to stay clear of store "remote code" rules.
+- **Service worker is stateless.** MV3 workers die after ~30s idle. Playlist position, TV-mode tabs, and ad/mute state live in `chrome.storage.session`.
+- **Storage:** `chrome.storage.local` for config, overrides, playlists (not `window.localStorage`, which is per-site in content scripts and missing in the worker). IndexedDB (extension origin) for image blobs, with `unlimitedStorage`.
+- **Overlays render in an extension-origin iframe** (`web_accessible_resources`). It can read the extension's IndexedDB, is immune to site CSS, can't be read by site scripts, and doubles as the ad click shield.
+- **Event-driven, not polling.** `MutationObserver` + media events instead of `setInterval`, because Chrome heavily throttles timers in background / silent tabs.
 
-- Ability to play / pause the video quickly with a click on the video itself without triggering accidental ad clicks.
+### Publishing over the previous extension
 
-- Ability to auto detect the primary video element, but use fall-back hard-coded selectors.
+- [ ] Version number must be higher than the currently published one.
+- [ ] Diff the new manifest's permission warnings against the old one. **New warnings disable the extension for existing users until they accept.**
+- [ ] `runtime.onInstalled` with `reason: "update"` → migrate or wipe the old storage schema.
+- [ ] Scope `host_permissions` to the sites with bundled configs. Use `optional_host_permissions` + `chrome.permissions.request` when a user enables Wtv on another site. Avoids `<all_urls>` in-depth review.
 
-- Create an automated loop to check on websites daily for changes / breaks in functionality by playing a video from each site.
+---
 
-- Ability to "maximize" the video by moving it to the top of the z-index, and placing a 'letterbox' div behind it so that we can stretch the video to the largest aspect ratio it would allow.
+## Feature Specs
 
-    - With ability to fullscreen the video + letterbox divs
+### Site configs + overrides
 
-- Ability to load a playlist of videos / urls (by pasting the list), to play through and jump to the next entry when a video finishes
+- One JSON file per site: `domains`, `roles`, `detectors`, optional `quirks` (e.g. control-bar inset for the click shield), `schemaVersion`, `configVersion`.
+- **Roles:** `video`, `adIndicator`, `skip`, `playButton` (optional), `title`, `description`, `keywords`, `creator`.
+- **Each role is an ordered list of fallback selectors**, not a single selector. First match wins.
+- **Selector format supports shadow DOM** traversal, e.g. `["ytd-app", ">>>", "#movie_player"]`.
+- **Typed detectors** instead of plain "selector exists", since many sites leave ad nodes in the DOM and only hide them:
+    - `exists`, `visible`, `hasClass` (e.g. `.html5-video-player.ad-showing`), `attrEquals`.
+- **Metadata extraction order:** JSON-LD `VideoObject` → OpenGraph → `meta` / `itemprop` → role selectors.
+    - On SPAs (YouTube) OpenGraph tags go stale after in-app navigation, so verify the URL matches before trusting them.
+- **Overrides:**
+    - Stored per role, not per site.
+    - Each override records the bundled `configVersion` it replaced.
+    - When a release changes that role, the override is dropped (or the user is prompted) so fixes aren't shadowed forever.
 
-    - In playlist mode, have ability to jump back to a previous entry.
+### Ad detection + muting
 
-    - When in playlist mode - load a blackout div with the #d=title_of_video_underscore_escaped or via the title of the document until the page is loaded, resized, and ready to play.
+- Detect ads on video sites, mute the tab until the ad indicator is gone, then unmute.
+- **Mute the tab, not the element:** `chrome.tabs.update(tabId, { muted: true })`. Ads can play in other elements / iframes, and players reset `video.muted`.
+- **Only unmute what we muted:** check `tab.mutedInfo.reason === "extension"` and `extensionId` matches ours. Respect the user muting before an ad or unmuting during one.
+- **Grace period** of ~1–2s after the indicator clears before unmuting, to ride out gaps between back-to-back ads.
+- Driven by `MutationObserver` on the detector targets + media events.
 
-    - Allow for updating the playlist titles / info and being able to export that playlist back out to clipboard.
+### Skip button
 
-    - Allow saving that playlist in storage for future playing
+- Automatically click the skip button when it appears and is clickable. Discovered / maintained as a role like `video` and `adIndicator`.
+- Content-script clicks are `isTrusted: false`, and some players ignore them. The only trusted route is `chrome.debugger` (shows a warning bar), so **skip is best-effort**. Mute + overlay is the guaranteed path.
 
-    - Allow automatically adding the current url to a playlist, with the option to manage additions across multiple playlists in the workflow, not just the "current" one.
+### Media detection
 
-- Ability to show quotes / sayings on blackout divs when ads are on using a duration prefix in seconds - 20: Take a moment to breath a little
+- Auto-detect the primary media element, falling back to hard-coded config selectors.
+- **MAIN-world hook** (`"world": "MAIN"`, `document_start`) wraps `HTMLMediaElement.prototype.play` to catch every element that plays, including detached `new Audio()` players with no DOM node. Also wrap `attachShadow` to see into closed shadow roots.
+- **Heuristic:** playing, visible, largest area, in viewport, meaningful duration. Exclude muted hover previews (e.g. YouTube home page).
+- Content scripts run with `all_frames: true` for embedded players.
 
-    - These should just be line entries on the playlist, with a special keyword to denote when the ads in this list are to be selected from:
-         [ads] 
-            20: Take a moment to breath
-            10: Dismiss your worries
-            5: Relax
+### Selector picker (side panel)
 
-        In this case, each of these will display for as long as the number prefix allows and until the ad is over.
+- `chrome.sidePanel` UI to pick DOM nodes and generate unique CSS selectors for each role.
+- Generate **several ranked candidates** per pick (base on [`@medv/finder`](https://github.com/antonmedv/finder)):
+    - Prefer: `id`, `data-*`, `itemprop`.
+    - Then: stable class names.
+    - Avoid: `nth-child` chains, hashed classes like `css-1x9f2`.
+    - Avoid text / `aria-label` selectors. They're localized and break for non-English users.
+- **Delayed pick** ("pick in 5s" / "pick when it next appears") because ad indicators are transient.
+- Live match count + highlight all matches. Warn when a single-element role matches more than one node.
+- **Save** writes the override to `chrome.storage.local`.
+- **Dev mode only:** "Write to repo" saves the config JSON straight into `src/sites/` via File System Access API. Not present in the store build.
 
-    - For images we would do this and let the image define a duration or default to 5s:
-        [ads]
-            [img <keyword>]
+### Overlay iframe (blackout, quotes, slideshow)
 
-    - This way a playlist can do different things for each entry.  The [ads] keyword should be processed if it exists after the url that was just loaded and before another url entry.
+- Show a slideshow of images, or quotes, over the video while ads play.
+- **Images:**
+    - "Load from folder" workflow: pick a folder, import into IndexedDB, keep the handle for a "Refresh" button.
+    - **Filename duration:** `_d(\d+)(s|m)?` immediately before the extension, e.g. `grumpy_d20s.png`. Default 5s.
+    - Formats: PNG, JPG, WebP, GIF, WebM (WebM plays muted and loops for its duration).
 
-- Eventually I will add the ability to lightbox posts and comments, and auto-scroll long-form content as entry items in playlists, but for now I plan on focusing exclusively on audio / video sources.
+#### Image folder layout
+
+    images/                 ← picked root
+      relax.png             ← top-level files
+      cats/                 ← top-level keyword folder
+      youtube.com/          ← domain folder (name contains a dot)
+        grumpy_cats_d10s.png
+        cats/               ← domain keyword folder (max depth)
+          ...               ← anything deeper is ignored at import
+
+- **Domain folders** are any top-level folder whose name contains a dot. They are scopes, not keywords.
+    - Matches the current hostname exactly or as a suffix (`youtube.com/` matches `www.youtube.com` and `m.youtube.com`). Most specific folder wins.
+- **Keyword folders** are one level deep only: `images/<keyword>/` or `images/<domain>/<keyword>/`. Files nested deeper are skipped at import (with a count shown in the import summary).
+- **Keyword filename match:** case-insensitive substring of the filename, ignoring the extension and `_dNNs` suffix (`cats` matches `grumpy_cats_d10s.png`).
+
+#### `[img ...]` resolution
+
+`[img cats]` on `www.youtube.com`, first non-empty step wins:
+
+1. `youtube.com/cats/` folder → all files in it.
+2. `youtube.com/` files (top level of the domain folder) with `cats` in the filename.
+3. `cats/` top-level folder → all files in it.
+4. Top-level files with `cats` in the filename.
+5. Nothing matched → bundled cat pack.
+
+Steps 1–2 are skipped when there's no domain folder for the current site.
+
+`[img]` with no keyword (and the default slideshow when no playlist `[ads]` block applies):
+
+1. Files at the top level of the domain folder.
+2. Top-level files.
+3. Bundled cat pack.
+
+- Single syntax for folders and filename keywords: folder match first, filename match as fallback. A separate syntax can be added later if there's a real need to force a filename match when a same-named folder exists.
+    - Ship a small bundled **CC0 cat image pack** so it works out of the box.
+- **Quotes:** duration-prefixed lines from the playlist `[ads]` block (see Playlists).
+- **Rotation:** cycle in order (or shuffle) while the ad continues, loop when exhausted, cut immediately when the ad ends.
+
+### Click to play / pause
+
+- Play / pause by clicking the video itself without triggering accidental ad clicks.
+- Click shield lives in the overlay iframe:
+    - Normal playback: covers the video but leaves the site's control bar uncovered (per-site `quirks.controlBarInset`).
+    - During ads / maximized: covers everything.
+- Prefer clicking the site's `playButton` role over calling `video.play()` directly, which can desync the site's player UI.
+- Keyboard shortcuts via `chrome.commands` (play/pause, next, previous, maximize, mute toggle).
+
+### Maximize + fullscreen
+
+- "Maximize" the video above everything else with a letterbox behind it, stretched to the largest size its aspect ratio allows.
+- **Use the top layer, not z-index.** z-index can't escape ancestor stacking contexts (`transform`, `filter`, `contain`, `will-change`) or `overflow: hidden`, and re-parenting a `<video>` pauses it and breaks site players.
+    - `video.popover = "manual"; video.showPopover()`
+    - Injected styles: `position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain` (with `!important`, sites set inline sizes).
+    - `::backdrop { background: #000 }` is the letterbox.
+    - Prototype on YouTube first.
+- **TV fullscreen:** `chrome.windows.update(windowId, { state: "fullscreen" })`. No user gesture required and it **survives navigation**, unlike `requestFullscreen()`, which would exit on every playlist entry.
+
+### Playlists
+
+- Load a playlist of URLs (by pasting), play through, and jump to the next entry when a video finishes.
+- Jump back to a previous entry.
+- Blackout overlay with the entry title (or document title) until the page is loaded, resized, and ready to play.
+- Edit playlist titles / info and export the playlist back out to the clipboard.
+- Save playlists in storage for future playing.
+- Add the current URL to a playlist, managing additions across multiple playlists, not just the "current" one. Popup + `chrome.contextMenus` "Add to playlist ▸" submenu.
+- **Runner** lives in the background; state in `chrome.storage.session`.
+- **End detection:** `ended` event, near-duration `timeupdate`, and "tab navigated to a URL that isn't the current entry" (YouTube autoplay / end screens can pre-empt `ended`).
+- **Autoplay policy** may block unmuted playback on rarely-visited sites → show a "click to start" prompt on the blackout as a fallback.
+
+#### Playlist format
+
+- Write the grammar down before coding, and build the parser + serializer with **round-trip tests** (parse → export reproduces the input, including comments and ordering).
+- Format:
+
+    ```
+    [ads]
+        20: Take a moment to breathe
+        [img cats]
+
+    https://www.youtube.com/watch?v=abc | Some Title | t=1:37
+    [ads]
+        20: Take a moment to breathe
+        10: Dismiss your worries
+        5: Relax
+
+    https://vimeo.com/123 | Another Title
+    [ads]
+        [img]
+        [img cats 10]
+    ```
+
+- `[ads]` before the first URL is the **playlist-wide default**. An `[ads]` block after a URL (and before the next URL) **overrides** it for that entry.
+- `N: text` — quote displayed for N seconds (only the first `N:` is a prefix; colons later in the text are fine).
+- `[img]` — images for the current site (see `[img ...]` resolution under Overlay iframe).
+- `[img <keyword>]` — images matching that keyword, using filename durations or 5s default. `[img <keyword> N]` forces N seconds.
+- `url | title | t=…` — optional title and start time per entry.
+- Indentation is **not** significant. An `[ads]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
+
+### Hash params + seeking
+
+- Jump to a specific video location with a timestamp hash.
+- **Namespaced** to avoid colliding with sites' own hash routing / `t` params: `#wtv:t=97&d=Title`.
+- **Timestamp formats:** `200`, `200s`, `1:37`, `1:02:03`, `1h2m3s`.
+- Title uses `encodeURIComponent`, not underscore escaping (titles with real underscores would be lost).
+- The background playlist state is the source of truth. The hash is the synchronous fast-path that lets the `document_start` content script show the blackout before first paint.
+- **Seek only after `loadedmetadata` and after any pre-roll ad clears.** YouTube plays ads in the same `<video>`, so seeking during the ad seeks the ad.
+
+### Site health checks
+
+- Automated daily check of each site for changes / breaks by playing a video from each.
+- **Runs outside the extension** (dev only): Playwright with its bundled Chromium (Google Chrome dropped `--load-extension` around v137).
+    - Headful, on a home connection (headless / datacenter IPs trigger bot walls).
+    - For each site: load a known URL, confirm media plays, resolve every role, record pass/fail.
+    - Ads aren't guaranteed, so record `adIndicator` as seen / not seen rather than pass / fail.
+    - On failure: save the page HTML + screenshot so selectors can be fixed offline.
+- **In-extension:** track when a role stops resolving during normal use and show a "selectors may be broken here" badge. Local only, no telemetry.
+
+### Misc
+
+- Toolbar badge state: on / ad / broken.
+- Per-site enable toggle.
+- Backup / restore of playlists + overrides as a JSON export/import.
+- Unit tests (Vitest) for the playlist parser, filename durations, timestamp parsing, and override merging.
+
+---
+
+## Later
+
+- Publish an authoritative playlist as a "tv station".
+- Lightbox posts and comments, and auto-scroll long-form content, as playlist entries.
+- Selector import system, if popularity grows.
