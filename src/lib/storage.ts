@@ -26,8 +26,6 @@ export const KEYS = {
   siteOverrides: 'wtv.siteOverrides',
   /** StaleOverrideNotice[]: overrides pruned because a release changed that role. */
   staleOverrides: 'wtv.staleOverrides',
-  /** LegacyBackup: the previous extension's data, kept when upgrading. */
-  legacyBackup: 'wtv.legacyBackup',
 } as const;
 
 export async function readKey<T>(area: KVArea, key: string, fallback: T): Promise<T> {

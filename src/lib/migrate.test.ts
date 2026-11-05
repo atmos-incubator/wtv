@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runMigrations, type LegacyBackup, type Migration } from './migrate';
+import { runMigrations, type Migration } from './migrate';
 import { KEYS } from './storage';
 import { createMemoryArea } from './testing/memory-area';
 
@@ -14,34 +14,29 @@ describe('runMigrations', () => {
     expect(local.dump()).toEqual({ [KEYS.schemaVersion]: 1 });
   });
 
-  it('backs up and clears the previous extension data', async () => {
+  it('clears the previous extension data', async () => {
     const local = createMemoryArea({ playlists: ['a', 'b'], settings: { volume: 3 } });
     const sync = createMemoryArea({ prefs: { theme: 'dark' } });
-    const report = await runMigrations({ local, sync }, update, { now: 42 });
+    const report = await runMigrations({ local, sync }, update);
 
     expect(report).toEqual({
-      action: 'legacy-backup',
+      action: 'legacy-cleared',
       to: 1,
+      fromVersion: '1.4.2',
       localKeys: ['playlists', 'settings'],
       syncKeys: ['prefs'],
     });
-    const after = local.dump();
-    expect(Object.keys(after).sort()).toEqual([KEYS.legacyBackup, KEYS.schemaVersion].sort());
-    expect(after[KEYS.legacyBackup]).toEqual<LegacyBackup>({
-      fromVersion: '1.4.2',
-      savedAt: 42,
-      local: { playlists: ['a', 'b'], settings: { volume: 3 } },
-      sync: { prefs: { theme: 'dark' } },
-    });
+    expect(local.dump()).toEqual({ [KEYS.schemaVersion]: 1 });
     expect(sync.dump()).toEqual({});
   });
 
   it('is idempotent', async () => {
     const local = createMemoryArea({ old: 1 });
     const sync = createMemoryArea();
-    await runMigrations({ local, sync }, update, { now: 1 });
+    await runMigrations({ local, sync }, update);
+    await local.set({ [KEYS.siteOverrides]: { kept: true } });
     const snapshot = local.dump();
-    const report = await runMigrations({ local, sync }, update, { now: 2 });
+    const report = await runMigrations({ local, sync }, update);
     expect(report).toEqual({ action: 'current', to: 1 });
     expect(local.dump()).toEqual(snapshot);
   });
@@ -74,18 +69,5 @@ describe('runMigrations', () => {
     const report = await runMigrations({ local, sync }, update);
     expect(report).toEqual({ action: 'downgrade', from: 9, to: 1 });
     expect(local.dump()).toEqual(before);
-  });
-
-  it('keeps the old data if the backup write fails', async () => {
-    const local = createMemoryArea({ playlists: ['a'] });
-    const failing = {
-      ...local,
-      set: async () => {
-        throw new Error('QUOTA_BYTES quota exceeded');
-      },
-    };
-    const sync = createMemoryArea();
-    await expect(runMigrations({ local: failing, sync }, update)).rejects.toThrow(/quota/);
-    expect(local.dump()).toEqual({ playlists: ['a'] });
   });
 });

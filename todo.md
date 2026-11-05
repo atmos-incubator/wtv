@@ -12,14 +12,15 @@ The idea is to turn a browser into a tv, and every website / video is a show. It
 
 Each step is reviewed and committed before the next one starts.
 
-- [ ] **Step 0 — Update this todo** with the technical review, architecture decisions, and build order.
+- [x] **Step 0 — Update this todo** with the technical review, architecture decisions, and build order.
 - [ ] **Step 1 — Project scaffold + site config format + loader**
-    - WXT + TypeScript project, `dev` and `store` build modes, Vitest wired up.
-    - Site config JSON schema (versioned), bundled configs in `src/sites/`, override layering + hash stamping.
-    - `chrome.storage` wrappers, `onInstalled` migration from the previous extension's data.
+    - WXT + TypeScript project, `dev` and `store` build modes, Vitest wired up. Version `2.0.0`.
+    - Site config JSON schema (versioned), bundled configs in `src/sites/` (YouTube only to start), override layering + hash stamping.
+    - `chrome.storage` wrappers, `onInstalled` schema migrations. The previous extension's data is cleared, not migrated.
 - [ ] **Step 2 — Media detection**
     - MAIN-world `document_start` hook on `HTMLMediaElement.prototype.play` (and `attachShadow`).
     - Primary-media heuristic + fallback to config selectors. Works across shadow roots and `all_frames`.
+    - Generic site profile for any site without a config (see Generic sites), with per-site opt-in via `optional_host_permissions`.
 - [ ] **Step 3 — Ad detection + tab mute + skip**
     - `exists` / `visible` conditions, `MutationObserver` driven, debounce/grace period.
     - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
@@ -59,7 +60,7 @@ Each step is reviewed and committed before the next one starts.
 
 - [ ] Version number must be higher than the currently published one.
 - [ ] Diff the new manifest's permission warnings against the old one. **New warnings disable the extension for existing users until they accept.**
-- [ ] `runtime.onInstalled` with `reason: "update"` → migrate or wipe the old storage schema.
+- [ ] `runtime.onInstalled` with `reason: "update"` → wipe the old extension's storage (nothing worth keeping).
 - [ ] Scope `host_permissions` to the sites with bundled configs. Use `optional_host_permissions` + `chrome.permissions.request` when a user enables Wtv on another site. Avoids `<all_urls>` in-depth review.
 
 ---
@@ -83,6 +84,25 @@ Each step is reviewed and committed before the next one starts.
     - Each override records `baseHash`: a hash of the bundled role it replaced (`none` if the bundled config had no such role). No manual version bumping.
     - An override applies only while the bundled role still hashes to `baseHash`. When a release changes that role, bundled wins, the override is pruned on update, and a notice is stored for the UI.
     - Overrides with their own `domains` for a site with no bundled config are **user-defined sites**.
+
+### Generic sites
+
+Sites will ultimately be completely dynamic. YouTube is the only bundled config to start. Resolution order for a page:
+
+1. Bundled config (with any user overrides).
+2. User-defined site (built with the picker).
+3. **Generic profile:** no selectors, everything heuristic.
+
+- The generic profile covers what doesn't need site knowledge:
+    - Media detection (play() hook + largest-playing heuristic).
+    - Metadata (JSON-LD → OpenGraph → `document.title`).
+    - Maximize, click-to-play, playlists, hash seeking.
+- **No ad detection in the generic profile** (no reliable universal signal). Picking an `adIndicator` with the picker turns the site into a user-defined site.
+    - Worth investigating later: Google IMA SDK iframes (`imasdk.googleapis.com`) are a cross-site ad signal on many players; media `src` / duration swaps mid-playback.
+- **Permissions:** bundled sites get `host_permissions`. Any other site is opt-in:
+    - `optional_host_permissions: ["*://*/*"]` (no install warning), requested per site from the popup via `chrome.permissions.request`.
+    - Granted origins get content scripts via `chrome.scripting.registerContentScripts`.
+    - `activeTab` for a one-off "use Wtv on this tab" without a persistent grant.
 
 ### Ad detection + muting
 
