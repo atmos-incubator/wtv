@@ -34,8 +34,12 @@ export default defineConfig({
     return {
       name: dev ? 'Wtv (dev)' : 'Wtv',
       description: 'Web TV: the internet as a TV station. Mutes ads and shows something nicer instead.',
-      permissions: ['storage'],
+      permissions: ['storage', 'scripting', 'activeTab'],
+      // Bundled sites: always on. Content scripts are registered at runtime for these plus
+      // any optional origin the user grants (see src/lib/injection.ts).
       host_permissions: hostPermissionPatterns(bundledSitesForBuild()),
+      // Any other site is opt-in from the popup. No install-time warning.
+      optional_host_permissions: ['*://*/*'],
     };
   },
 });

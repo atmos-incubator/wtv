@@ -13,14 +13,15 @@ The idea is to turn a browser into a tv, and every website / video is a show. It
 Each step is reviewed and committed before the next one starts.
 
 - [x] **Step 0 — Update this todo** with the technical review, architecture decisions, and build order.
-- [ ] **Step 1 — Project scaffold + site config format + loader**
+- [x] **Step 1 — Project scaffold + site config format + loader**
     - WXT + TypeScript project, `dev` and `store` build modes, Vitest wired up. Version `2.0.0`.
     - Site config JSON schema (versioned), bundled configs in `src/sites/` (YouTube only to start), override layering + hash stamping.
     - `chrome.storage` wrappers, `onInstalled` schema migrations. The previous extension's data is cleared, not migrated.
 - [ ] **Step 2 — Media detection**
     - MAIN-world `document_start` hook on `HTMLMediaElement.prototype.play` (and `attachShadow`).
-    - Primary-media heuristic + fallback to config selectors. Works across shadow roots and `all_frames`.
+    - Primary-media heuristic with the config `video` match as a strong bonus. Works across shadow roots and `all_frames`.
     - Generic site profile for any site without a config (see Generic sites), with per-site opt-in via `optional_host_permissions`.
+    - Runtime content-script registration, popup (enable / disable / just this tab / media status), dev outline of the primary.
 - [ ] **Step 3 — Ad detection + tab mute + skip**
     - `exists` / `visible` conditions, `MutationObserver` driven, debounce/grace period.
     - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
@@ -102,8 +103,8 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
     - Worth investigating later: Google IMA SDK iframes (`imasdk.googleapis.com`) are a cross-site ad signal on many players; media `src` / duration swaps mid-playback.
 - **Permissions:** bundled sites get `host_permissions`. Any other site is opt-in:
     - `optional_host_permissions: ["*://*/*"]` (no install warning), requested per site from the popup via `chrome.permissions.request`.
-    - Granted origins get content scripts via `chrome.scripting.registerContentScripts`.
-    - `activeTab` for a one-off "use Wtv on this tab" without a persistent grant.
+    - **All content scripts are registered at runtime** (`chrome.scripting.registerContentScripts`) for exactly the origins Wtv holds: bundled `host_permissions` plus granted optional origins. Bundled and opt-in sites share one code path. Re-synced on install / startup / `permissions.onAdded|onRemoved`; already-open matching tabs are injected on grant.
+    - Popup: **Enable on this site** (exact-host grant), **Just this tab** (`activeTab`, top frame only, no persistent grant), **Disable on this site** (optional origins only; bundled sites are managed from Chrome's site-access menu). It also shows what the agent detected.
 
 ### Ad detection + muting
 
@@ -122,8 +123,16 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 
 - Auto-detect the primary media element, falling back to hard-coded config selectors.
 - **MAIN-world hook** (`"world": "MAIN"`, `document_start`) wraps `HTMLMediaElement.prototype.play` to catch every element that plays, including detached `new Audio()` players with no DOM node. Also wrap `attachShadow` to see into closed shadow roots.
-- **Heuristic:** playing, visible, largest area, in viewport, meaningful duration. Exclude muted hover previews (e.g. YouTube home page).
-- Content scripts run with `all_frames: true` for embedded players.
+    - Wrappers are Proxies, so `play.toString()` still reports native code.
+    - Media the isolated world can reach is announced on the element. Media it can't reach (detached, or in a closed shadow root) is **bridged**: the hook posts its state and accepts play / pause / seek / mute commands over DOM events (JSON details, validated on both sides since the page can see and forge them).
+- **Discovery** (isolated agent): hook events, capture-phase media events on the document and each open shadow root, and a scan of `video, audio` plus the config `video` role. Re-scans at most once a second, only when elements are added. No polling.
+- **Heuristic** (`src/lib/media/score.ts`, pure + tested):
+    - Viable = has a source and is either on screen at ≥ 200×112 or playing audibly (audio-only players have no geometry).
+    - Score: playing, audible, share of viewport, long or live duration; penalties for short clips and muted loops (GIF-style videos, hover previews).
+    - **The config `video` match is a large bonus, not an override.** A matched-but-hidden player (YouTube's watch player while on the home page) isn't viable. If the config has a `video` role and nothing matched, status reports `configVideoMissing` (early "selectors may be broken" signal).
+    - The current primary gets a stickiness bonus so near-ties don't flicker.
+- Content scripts run with `all_frames: true` for embedded players. Each frame picks its own primary. (Cross-origin embeds need permission for the embed's origin too.)
+- **Dev builds** outline the primary with a labelled dashed box and log changes to the console.
 
 ### Selector picker (side panel)
 

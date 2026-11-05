@@ -25,3 +25,23 @@ export function resolveForHost(
   if (!match) return undefined;
   return resolveSite(match.id, byId.get(match.id), overrides[match.id]);
 }
+
+/**
+ * How a page is handled:
+ *   - bundled: a shipped site config (plus any user overrides).
+ *   - user:    a site the user defined with the picker.
+ *   - generic: no config; heuristics only.
+ */
+export type SiteProfile =
+  | { kind: 'bundled' | 'user'; site: ResolvedSite }
+  | { kind: 'generic'; site: null };
+
+export function profileForHost(
+  host: string,
+  bundledSites: readonly SiteConfig[],
+  overrides: OverrideStore,
+): SiteProfile {
+  const site = resolveForHost(host, bundledSites, overrides);
+  if (!site) return { kind: 'generic', site: null };
+  return { kind: site.userDefined ? 'user' : 'bundled', site };
+}

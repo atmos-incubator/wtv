@@ -9,7 +9,7 @@ import {
   withoutRoleOverride,
   type OverrideStore,
 } from './overrides';
-import { resolveForHost } from './registry';
+import { profileForHost, resolveForHost } from './registry';
 import type { SiteConfig } from './schema';
 
 const bundled: SiteConfig = {
@@ -195,5 +195,18 @@ describe('resolveForHost', () => {
 
   it('returns undefined for unknown hosts', () => {
     expect(resolveForHost('twitch.tv', [bundled], store)).toBeUndefined();
+  });
+});
+
+describe('profileForHost', () => {
+  const store: OverrideStore = withRoleOverride({}, undefined, 'vimeo.com', 'video', fix, {
+    domains: ['vimeo.com'],
+  });
+
+  it('classifies bundled, user-defined and generic hosts', () => {
+    expect(profileForHost('www.example.com', [bundled], store).kind).toBe('bundled');
+    expect(profileForHost('vimeo.com', [bundled], store).kind).toBe('user');
+    const generic = profileForHost('twitch.tv', [bundled], store);
+    expect(generic).toEqual({ kind: 'generic', site: null });
   });
 });
