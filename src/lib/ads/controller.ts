@@ -11,13 +11,12 @@
  * once a short grace period passes.
  */
 import { browser } from 'wxt/browser';
+import { setTabBadge } from '../badge';
 import { KEYS } from '../storage';
 import { attributeMute, decideMute, IDLE, isOurMute, type MutedInfo, type TabMuteState } from './mute';
 import { AD_PORT, parseAdPortMessage, type AdPortMessage } from './protocol';
 
 const RECOVERY_GRACE_MS = 5000;
-const BADGE_TEXT = 'AD';
-const BADGE_COLOR = '#d93025';
 
 type MuteStore = Record<string, TabMuteState>;
 type UserMuteStore = Record<string, true>;
@@ -86,7 +85,7 @@ async function reconcile(tabId: number): Promise<void> {
     console.info(`[wtv] tab ${tabId}: ${action}d for ad`);
   }
   await saveTabState(tabId, state);
-  await browser.action.setBadgeText({ tabId, text: showing ? BADGE_TEXT : '' }).catch(() => undefined);
+  setTabBadge(tabId, { ad: showing });
 }
 
 function enqueue(tabId: number, task: () => Promise<void>, what: string): Promise<void> {
@@ -145,7 +144,6 @@ async function recoverAfterRestart(): Promise<void> {
 
 /** Call synchronously at service-worker startup. */
 export function startAdController(): void {
-  void browser.action.setBadgeBackgroundColor({ color: BADGE_COLOR }).catch(() => undefined);
 
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== AD_PORT) return;

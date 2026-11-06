@@ -39,7 +39,7 @@ Each step is reviewed and committed before the next one starts.
 - [x] **Step 7 — Playlists**
     - Parser / serializer with round-trip tests. Runner in background with session state.
     - Next / previous, end detection, blackout between entries, multi-playlist add, context menu, export.
-- [ ] **Step 8 — Hash params + seeking**
+- [x] **Step 8 — Hash params + seeking**
     - Namespaced `#wtv:` hash, timestamp formats, seek-after-preroll.
 - [ ] **Step 9 — Site health checks**
     - Playwright daily runner (outside the extension) + in-extension "selectors may be broken" badge.
@@ -311,16 +311,24 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 ### Site health checks
 
 - Automated daily check of each site for changes / breaks by playing a video from each.
-- **Runs outside the extension** (dev only): Playwright with its bundled Chromium (Google Chrome dropped `--load-extension` around v137).
-    - Headful, on a home connection (headless / datacenter IPs trigger bot walls).
-    - For each site: load a known URL, confirm media plays, resolve every role, record pass/fail.
-    - Ads aren't guaranteed, so record `adIndicator` as seen / not seen rather than pass / fail.
-    - On failure: save the page HTML + screenshot so selectors can be fixed offline.
-- **In-extension:** track when a role stops resolving during normal use and show a "selectors may be broken here" badge. Local only, no telemetry.
+- **Runs outside the extension** (dev only, `scripts/health/`, see its README): `npm run health`. Playwright 1.64.1 with its bundled Chromium (Google Chrome dropped `--load-extension` around v137).
+    - Headful, on a home connection (headless / datacenter IPs trigger bot walls). Persistent profile in `.health/profile` (gitignored); `npm run health:setup` opens every target to accept consent / sign in once.
+    - Loads the **built extension** and asks it, via its service worker, for the same media status (`wtv/status`) and role report (`wtv/pick/roles`) the popup and side panel use. It exercises the real selector engine and media detection rather than a copy.
+    - For each site (`src/sites/*.json`; URLs in `scripts/health/targets.json`, a test checks every bundled site has one): load the URL, wait for ad-free playback (pre-roll ads extend the wait), then judge every configured role (`scripts/health/protocol.ts`, pure + tested):
+        - ✅ pass, ⚠️ fallback (selector #1 broke, a fallback matched: an early warning), ❌ fail. Present-but-hidden controls pass.
+        - `video` passes only if its selectors picked the playing video.
+        - Ads aren't guaranteed, so `adIndicator` / `skip` are 👁 seen / · not seen, never failures.
+    - Results in `.health/results/<timestamp>/` (`report.json`, `summary.md`) + `.health/results/latest.md`. On failure: the page HTML + screenshot, so selectors can be fixed offline. Exit code 1 on any failure.
+    - Daily: a macOS LaunchAgent (sample plist in the README), since a headful browser needs the logged-in session.
+- **In-extension** (`src/lib/health/`, local only, no telemetry):
+    - Once per page, after the primary video has played 10 s with no ad, each frame checks the site's **player roles** (`video`, `playButton`, `progressBar`): does a selector find anything at all (controls fade while playing), and did the video role pick the playing video. Metadata roles aren't judged (they vary by page type, and nothing uses them yet); ad roles can't be (no ad isn't evidence).
+    - Only on what looks like the show (long, not looping, audible or config-matched), not hover previews.
+    - The background keeps per-site streaks in `wtv.siteHealth`. A role failing on **2 pages in a row** with no success between is "broken": orange **!** badge on that tab and a warning in the popup's Media row pointing at **Fix selectors…**. Streaks reset when that site's overrides change, and on every install / update.
+- **Badge** (`src/lib/badge.ts`, one owner per tab): **AD** (red) wins over **!** (orange); tooltip says which.
 
 ### Misc
 
-- Toolbar badge state: on / ad / broken. (`AD` done in step 3.)
+- Toolbar badge state: on / ad / broken. (`AD` and `!` done; an "on" state isn't, since a badge on every page would be noise. Revisit with an icon variant instead.)
 - Per-site enable toggle.
 - Backup / restore of playlists + overrides as a JSON export/import.
 - Unit tests (Vitest) for the playlist parser, filename durations, timestamp parsing, and override merging.

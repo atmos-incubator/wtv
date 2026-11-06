@@ -3,6 +3,7 @@ import { startAdWatcher } from '../lib/ads/watcher';
 import { DEV_TOOLS } from '../lib/env';
 import { startMediaAgent } from '../lib/media/agent';
 import { MSG_PREVIEW_OVERLAY, isStatusRequest, type FrameStatus } from '../lib/messages';
+import { startHealthMonitor } from '../lib/health/monitor';
 import { startOverlay } from '../lib/overlay/controller';
 import { startPickerService } from '../lib/picker/service';
 import { startPlaylistClient } from '../lib/playlist/client';
@@ -25,6 +26,7 @@ export default defineContentScript({
   main(ctx) {
     const agent = startMediaAgent(ctx, { debug: DEV_TOOLS });
     const ads = startAdWatcher(ctx, agent, { debug: DEV_TOOLS });
+    startHealthMonitor(ctx, agent, ads);
     const view = startViewService(ctx, agent);
     const playlist = startPlaylistClient(ctx, agent, ads);
     const overlay = startOverlay(ctx, agent, ads, view, playlist);

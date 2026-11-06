@@ -13,6 +13,8 @@ import { KEYS, readKey, writeKey } from '../../lib/storage';
 import { VIEW_COMMAND, VIEW_STATE, type ViewOp, type ViewState } from '../../lib/view/messages';
 import { PL_COMMAND, PL_STATE, type RunnerSummary, type StepOp } from '../../lib/playlist/messages';
 import { addToPlaylist, listPlaylists, type StoredPlaylist } from '../../lib/playlist/store';
+import { FAIL_STREAK, brokenRoles, parseHealthStore, type HealthStore } from '../../lib/health/health';
+import { ROLE_LABELS } from '../../lib/picker/roles';
 
 const app = document.getElementById('app') as HTMLElement;
 const local = browserAreas().local;
@@ -309,7 +311,7 @@ async function render(): Promise<void> {
   const host = new URL(tab.url).hostname;
   const pattern = originPatternForHost(host);
 
-  const [overrides, granted, status, view, shortcuts, runner, playlists] = await Promise.all([
+  const [overrides, granted, status, view, shortcuts, runner, playlists, health] = await Promise.all([
     loadOverrideStore(local),
     browser.permissions.contains({ origins: [pattern] }),
     frameStatus(tabId),
@@ -317,6 +319,7 @@ async function render(): Promise<void> {
     shortcutSummary(),
     runnerState(tabId),
     listPlaylists(local),
+    readKey<unknown>(local, KEYS.siteHealth, {}).then((raw): HealthStore => parseHealthStore(raw)),
   ]);
   const profile = profileForHost(host, BUNDLED_SITES, overrides);
 
@@ -382,13 +385,24 @@ async function render(): Promise<void> {
       .catch((err: unknown) => console.error('[wtv] could not open side panel:', err));
   });
   const selectorsRow = status ? [el('div', { className: 'actions' }, selectors)] : [];
+  const broken = profile.site ? brokenRoles(health[profile.site.config.id]) : [];
+  const healthNotes =
+    broken.length > 0
+      ? [
+          note(
+            `${broken.map((r) => ROLE_LABELS[r]).join(', ')}: not found on the last ${FAIL_STREAK}+ videos here. ` +
+              'The site may have changed; Fix selectors… can repair it.',
+            'warn',
+          ),
+        ]
+      : [];
 
   app.replaceChildren(
     el('h1', { text: host }),
     el('div', { text: support }),
     ...(actions.childElementCount > 0 ? [actions] : []),
     ...notes,
-    row('Media', ...describeMedia(status?.media ?? null, granted), ...selectorsRow),
+    row('Media', ...describeMedia(status?.media ?? null, granted), ...healthNotes, ...selectorsRow),
     ...(status && view ? [viewRow(tabId, view, shortcuts)] : []),
     playlistRow({ id: tabId, url: tab.url, title: tab.title }, runner, playlists),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted)))] : []),

@@ -4,5 +4,7 @@ node_modules/
 stats.html
 *.zip
 .DS_Store
+# Site health check: browser profile and results (scripts/health/)
+.health/
 
 docs/

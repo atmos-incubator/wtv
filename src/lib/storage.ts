@@ -32,6 +32,8 @@ export const KEYS = {
   adMute: 'wtv.adMute',
   /** Record<tabId, true> (session): tabs muted with Wtv's own mute command, so ad logic leaves them muted. */
   userMute: 'wtv.userMute',
+  /** HealthStore (local): per-site player-role check streaks (src/lib/health/health.ts). */
+  siteHealth: 'wtv.siteHealth',
   /** PlaylistStore (local): saved playlists, as text. */
   playlists: 'wtv.playlists',
   /** Record<tabId, RunnerState> (session): playlists playing, one per tab. */

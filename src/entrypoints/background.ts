@@ -5,6 +5,8 @@ import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
 import { runMigrations, type InstallDetails } from '../lib/migrate';
 import { BUNDLED_SITES } from '../lib/sites/bundled';
 import { pruneStoredOverrides } from '../lib/sites/override-store';
+import { startBadges } from '../lib/badge';
+import { resetSiteHealth, startHealthController } from '../lib/health/controller';
 import { startPlaylistMenus, rebuildPlaylistMenus } from '../lib/playlist/menus';
 import { startPlaylistRunner } from '../lib/playlist/runner';
 import { startViewController } from '../lib/view/controller';
@@ -13,6 +15,9 @@ async function handleInstalled(details: InstallDetails): Promise<void> {
   const areas = browserAreas();
   const report = await runMigrations(areas, details);
   console.info('[wtv] storage migration:', report);
+
+  // Bundled selectors may have changed: earlier "may be broken" verdicts don't apply.
+  await resetSiteHealth();
 
   const removed = await pruneStoredOverrides(areas.local, BUNDLED_SITES);
   if (removed.length > 0) console.info('[wtv] superseded selector overrides removed:', removed);
@@ -51,7 +56,9 @@ export default defineBackground(() => {
     void queueSync();
   });
 
+  startBadges();
   startAdController();
+  startHealthController();
   startViewController();
   startPlaylistRunner();
   startPlaylistMenus();
