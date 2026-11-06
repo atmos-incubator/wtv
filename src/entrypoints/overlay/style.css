@@ -109,6 +109,37 @@ body {
   --bg: transparent;
 }
 
+#prompt {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18%;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+#prompt button {
+  padding: 10px 18px;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--fg);
+  font: 600 15px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+#prompt button.big {
+  background: var(--fg);
+  color: #000;
+  border-color: var(--fg);
+}
+
+#prompt button:hover,
+#prompt button:focus-visible {
+  filter: brightness(1.15);
+}
+
 /* Click-to-seek strip just above the site's progress bar (shield, normal playback). */
 #seek-band {
   position: absolute;

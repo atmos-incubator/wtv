@@ -35,7 +35,8 @@ export default defineConfig({
       name: dev ? 'Wtv (dev)' : 'Wtv',
       description: 'Web TV: the internet as a TV station. Mutes ads and shows something nicer instead.',
       // unlimitedStorage: the ad-picture library lives in IndexedDB. No install warning.
-      permissions: ['storage', 'unlimitedStorage', 'scripting', 'activeTab'],
+      // contextMenus: "Add to Wtv playlist". No install warning.
+      permissions: ['storage', 'unlimitedStorage', 'scripting', 'activeTab', 'contextMenus'],
       // Bundled sites: always on. Content scripts are registered at runtime for these plus
       // any optional origin the user grants (see src/lib/injection.ts).
       host_permissions: hostPermissionPatterns(bundledSitesForBuild()),
@@ -45,9 +46,9 @@ export default defineConfig({
       // styles and the cat pictures load from the extension origin, so only the page
       // itself must be web-accessible.
       web_accessible_resources: [{ resources: ['overlay.html'], matches: ['*://*/*'] }],
-      // Chrome allows at most four suggested shortcuts. Step 7 adds "next" with the fourth;
-      // the rest can be bound at chrome://extensions/shortcuts. Keep names in sync with
-      // COMMANDS in src/lib/view/controller.ts.
+      // Chrome allows at most four suggested shortcuts; the rest can be bound at
+      // chrome://extensions/shortcuts. Keep names in sync with COMMANDS in
+      // src/lib/view/controller.ts and PLAYLIST_COMMANDS in src/lib/playlist/runner.ts.
       commands: {
         'play-pause': {
           suggested_key: { default: 'Alt+Shift+P' },
@@ -63,6 +64,13 @@ export default defineConfig({
         },
         mute: {
           description: 'Mute / unmute the tab',
+        },
+        next: {
+          suggested_key: { default: 'Alt+Shift+N' },
+          description: 'Playlist: next entry',
+        },
+        previous: {
+          description: 'Playlist: previous entry',
         },
       },
     };

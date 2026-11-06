@@ -5,6 +5,8 @@ import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
 import { runMigrations, type InstallDetails } from '../lib/migrate';
 import { BUNDLED_SITES } from '../lib/sites/bundled';
 import { pruneStoredOverrides } from '../lib/sites/override-store';
+import { startPlaylistMenus, rebuildPlaylistMenus } from '../lib/playlist/menus';
+import { startPlaylistRunner } from '../lib/playlist/runner';
 import { startViewController } from '../lib/view/controller';
 
 async function handleInstalled(details: InstallDetails): Promise<void> {
@@ -33,10 +35,12 @@ export default defineBackground(() => {
       console.error('[wtv] onInstalled handling failed:', err);
     });
     void queueSync();
+    rebuildPlaylistMenus();
   });
 
   browser.runtime.onStartup.addListener(() => {
     void queueSync();
+    rebuildPlaylistMenus();
   });
 
   browser.permissions.onAdded.addListener((permissions) => {
@@ -49,4 +53,6 @@ export default defineBackground(() => {
 
   startAdController();
   startViewController();
+  startPlaylistRunner();
+  startPlaylistMenus();
 });

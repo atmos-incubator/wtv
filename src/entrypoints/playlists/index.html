@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wtv playlists</title>
+  </head>
+  <body>
+    <div class="layout">
+      <nav class="sidebar" aria-label="Playlists">
+        <h1>Playlists</h1>
+        <button id="new" type="button" class="primary wide">New playlist</button>
+        <ul id="list" class="list"></ul>
+        <p id="empty" class="note" hidden>No playlists yet. Make one, or right-click any page → Add to Wtv playlist.</p>
+      </nav>
+
+      <main id="editor" hidden>
+        <div class="title-row">
+          <label class="name">
+            <span class="label">Name</span>
+            <input id="name" autocomplete="off" maxlength="80" placeholder="Playlist name" />
+          </label>
+          <span id="dirty" class="dirty" hidden>Unsaved changes</span>
+        </div>
+
+        <div class="actions">
+          <button id="play" type="button" class="primary">▶ Play</button>
+          <label class="check"><input id="tv" type="checkbox" /> in TV mode</label>
+          <span class="spacer"></span>
+          <button id="save" type="button">Save</button>
+          <button id="copy" type="button">Copy text</button>
+          <button id="delete" type="button" class="danger">Delete</button>
+        </div>
+        <p id="status" class="status" aria-live="polite"></p>
+
+        <div class="columns">
+          <section aria-labelledby="text-heading">
+            <h2 id="text-heading">Text</h2>
+            <textarea id="text" spellcheck="false" rows="20" aria-describedby="problems"></textarea>
+            <ul id="problems" class="problems" aria-live="polite"></ul>
+            <details class="help">
+              <summary>Format</summary>
+              <pre class="code">[ads]                      ← before the first URL: every entry
+  20: Take a moment to breathe   (quote, 20 seconds)
+  [img cats]                     (pictures matching "cats")
+
+https://www.youtube.com/watch?v=abc | Some Title | t=1:37
+[ads]                      ← after a URL: only that entry
+  [img]                          (this site's pictures)
+  [img cats 10]                  (10 seconds each)
+
+# comments start with # or //</pre>
+              <p class="note">
+                Each line is a URL (with an optional <code>| title</code> and <code>| t=1:37</code> start time), an
+                <code>[ads]</code> block, a quote (<code>N: text</code>), a picture item (<code>[img keyword N]</code>), or a
+                comment. Indentation is up to you. Start times: <code>97</code>, <code>1:37</code>, <code>1h2m3s</code>.
+              </p>
+            </details>
+          </section>
+
+          <section aria-labelledby="entries-heading">
+            <h2 id="entries-heading">Entries</h2>
+            <ol id="entries" class="entries"></ol>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

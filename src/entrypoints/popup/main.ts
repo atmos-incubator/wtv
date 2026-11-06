@@ -11,6 +11,8 @@ import { loadOverrideStore } from '../../lib/sites/override-store';
 import { profileForHost } from '../../lib/sites/registry';
 import { KEYS, readKey, writeKey } from '../../lib/storage';
 import { VIEW_COMMAND, VIEW_STATE, type ViewOp, type ViewState } from '../../lib/view/messages';
+import { PL_COMMAND, PL_STATE, type RunnerSummary, type StepOp } from '../../lib/playlist/messages';
+import { addToPlaylist, listPlaylists, type StoredPlaylist } from '../../lib/playlist/store';
 
 const app = document.getElementById('app') as HTMLElement;
 const local = browserAreas().local;
@@ -82,6 +84,8 @@ const COMMAND_LABELS: Record<string, string> = {
   maximize: 'maximize',
   'tv-mode': 'TV mode',
   mute: 'mute',
+  next: 'next',
+  previous: 'previous',
 };
 
 /** "⌥⇧P play/pause · …" for the commands that have a key bound. */
@@ -121,6 +125,108 @@ function viewRow(tabId: number, state: ViewState, shortcuts: string): HTMLElemen
   if (!state.canMaximize && !state.maximized) notes.push(note('No video on screen to maximize.'));
   notes.push(note(shortcuts ? `${shortcuts} · Esc restores` : 'Esc restores. Set keyboard shortcuts with Shortcuts….'));
   return row('View', actions, ...notes);
+}
+
+const LAST_PLAYLIST = 'wtv.popup.lastPlaylist';
+const NEW_PLAYLIST = '__new__';
+
+async function runnerState(tabId: number): Promise<RunnerSummary | null> {
+  try {
+    const r = (await browser.runtime.sendMessage({ type: PL_STATE, tabId })) as RunnerSummary | null;
+    return r && typeof r.name === 'string' ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+function openPlaylists(id?: string): void {
+  const url = browser.runtime.getURL('/playlists.html') + (id ? `?id=${encodeURIComponent(id)}` : '');
+  void browser.tabs.create({ url }).then(() => window.close());
+}
+
+function playlistsButton(id?: string): HTMLButtonElement {
+  const b = el('button', { text: 'Playlists…' });
+  b.type = 'button';
+  b.addEventListener('click', () => openPlaylists(id));
+  return b;
+}
+
+function playlistRow(
+  tab: { id: number; url?: string; title?: string },
+  runner: RunnerSummary | null,
+  playlists: StoredPlaylist[],
+): HTMLElement {
+  const nodes: Node[] = [];
+
+  if (runner) {
+    nodes.push(el('div', { text: `${runner.name} · ${runner.index + 1} / ${runner.total}` }));
+    nodes.push(note(runner.title ?? runner.url));
+    const controls = el('div', { className: 'actions' });
+    const step = (text: string, op: StepOp, primary = false) => {
+      controls.append(
+        button(
+          text,
+          async () => {
+            await browser.runtime.sendMessage({ type: PL_COMMAND, op, tabId: tab.id });
+          },
+          primary,
+        ),
+      );
+    };
+    if (runner.detached) {
+      nodes.push(note('You left the playlist in this tab.', 'warn'));
+      step('Resume', 'resume', true);
+    } else {
+      if (runner.index > 0) step('⏮ Previous', 'previous');
+      step(runner.index + 1 < runner.total ? 'Next ⏭' : 'Finish', 'next', true);
+    }
+    step('Stop', 'stop');
+    nodes.push(controls);
+  }
+
+  if (isWebUrl(tab.url)) {
+    const select = el('select');
+    let last: string | null = null;
+    try {
+      last = localStorage.getItem(LAST_PLAYLIST);
+    } catch {
+      // Storage blocked; no default.
+    }
+    for (const p of playlists) {
+      const o = el('option', { text: p.name });
+      o.value = p.id;
+      o.selected = p.id === last;
+      select.append(o);
+    }
+    const fresh = el('option', { text: 'New playlist' });
+    fresh.value = NEW_PLAYLIST;
+    select.append(fresh);
+
+    const result = note('');
+    const add = el('button', { text: 'Add this page' });
+    add.type = 'button';
+    add.addEventListener('click', () => {
+      add.disabled = true;
+      const id = select.value === NEW_PLAYLIST ? null : select.value;
+      addToPlaylist(local, id, tab.url!, tab.title?.trim() || null)
+        .then((p) => {
+          try {
+            localStorage.setItem(LAST_PLAYLIST, p.id);
+          } catch {
+            // Fine.
+          }
+          result.textContent = `Added to “${p.name}”.`;
+        })
+        .catch((err: unknown) => {
+          result.textContent = `Couldn’t add: ${err instanceof Error ? err.message : String(err)}`;
+        })
+        .finally(() => (add.disabled = false));
+    });
+    nodes.push(el('div', { className: 'actions' }, select, add, playlistsButton(runner?.playlistId)), result);
+  } else {
+    nodes.push(el('div', { className: 'actions' }, playlistsButton(runner?.playlistId)));
+  }
+  return row('Playlist', ...nodes);
 }
 
 async function frameStatus(tabId: number): Promise<FrameStatus | null> {
@@ -191,19 +297,26 @@ async function render(): Promise<void> {
   );
 
   if (!tab?.id || !isWebUrl(tab.url)) {
-    app.replaceChildren(el('h1', { text: 'Wtv' }), note('Wtv only runs on web pages.'), settingsRow);
+    app.replaceChildren(
+      el('h1', { text: 'Wtv' }),
+      note('Wtv only runs on web pages.'),
+      row('Playlist', el('div', { className: 'actions' }, playlistsButton())),
+      settingsRow,
+    );
     return;
   }
   const tabId = tab.id;
   const host = new URL(tab.url).hostname;
   const pattern = originPatternForHost(host);
 
-  const [overrides, granted, status, view, shortcuts] = await Promise.all([
+  const [overrides, granted, status, view, shortcuts, runner, playlists] = await Promise.all([
     loadOverrideStore(local),
     browser.permissions.contains({ origins: [pattern] }),
     frameStatus(tabId),
     viewState(tabId),
     shortcutSummary(),
+    runnerState(tabId),
+    listPlaylists(local),
   ]);
   const profile = profileForHost(host, BUNDLED_SITES, overrides);
 
@@ -277,6 +390,7 @@ async function render(): Promise<void> {
     ...notes,
     row('Media', ...describeMedia(status?.media ?? null, granted), ...selectorsRow),
     ...(status && view ? [viewRow(tabId, view, shortcuts)] : []),
+    playlistRow({ id: tabId, url: tab.url, title: tab.title }, runner, playlists),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted)))] : []),
     settingsRow,
     ...devRow,

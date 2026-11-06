@@ -17,8 +17,12 @@ const url = (u: string, durationMs: number | null = null): ResolvedImage => ({
 describe('parseOverlayCommand', () => {
   it('parses hide and blackout', () => {
     expect(parseOverlayCommand({ type: 'hide' })).toEqual({ type: 'hide' });
-    expect(parseOverlayCommand({ type: 'blackout', title: '  Show  ' })).toEqual({ type: 'blackout', title: 'Show' });
-    expect(parseOverlayCommand({ type: 'blackout' })).toEqual({ type: 'blackout', title: null });
+    expect(parseOverlayCommand({ type: 'blackout', title: '  Show  ' })).toEqual({
+      type: 'blackout',
+      title: 'Show',
+      prompt: false,
+    });
+    expect(parseOverlayCommand({ type: 'blackout', prompt: true })).toEqual({ type: 'blackout', title: null, prompt: true });
   });
 
   it('parses an ad program and drops invalid items', () => {
@@ -80,7 +84,7 @@ describe('parseOverlayEvent', () => {
   const key = { type: 'key', key: 'k', code: 'KeyK', shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false };
 
   it('accepts dismiss, and clicks with coordinates', () => {
-    expect(parseOverlayEvent({ type: 'dismiss' })).toEqual({ type: 'dismiss' });
+    for (const type of ['dismiss', 'start', 'next']) expect(parseOverlayEvent({ type })).toEqual({ type });
     for (const type of ['click', 'dblclick']) {
       expect(parseOverlayEvent({ type, x: 0.2, y: 0.9 })).toEqual({ type, x: 0.2, y: 0.9 });
       expect(parseOverlayEvent({ type })).toBeNull();

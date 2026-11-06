@@ -33,7 +33,7 @@ Each step is reviewed and committed before the next one starts.
 - [x] **Step 5 — Selector picker side panel**
     - Element picker, candidate ranking, delayed pick, live match count, save as override.
     - Dev-mode only: write configs straight to the repo via File System Access API.
-- [ ] **Step 6 — Maximize + TV fullscreen**
+- [x] **Step 6 — Maximize + TV fullscreen**
     - Top-layer popover maximize with `::backdrop` letterbox. Window-level fullscreen.
     - Click-to-play/pause shield, keyboard shortcuts.
 - [ ] **Step 7 — Playlists**
@@ -226,7 +226,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
     - **Click to seek:** in normal playback, a click in the 24 px strip just above the site's progress bar jumps to that point. x maps onto the `progressBar` role's rect (YouTube: `.ytp-progress-bar`), else the video's width. Live streams seek within their seekable window. Pointer cursor + faint highlight over the strip. Pointer movement → synthetic `mousemove` on the video so the site still shows its controls. Clicks hand keyboard focus back to the page (`window.focus()`) so the site's own shortcuts keep working; keys pressed while the shield has focus are forwarded (Esc restores, others are re-dispatched to the page).
     - Transparent only because the overlay root switches to `color-scheme: normal` in shield mode: Chrome paints an opaque backdrop behind an iframe whose color scheme differs from its `<iframe>` element's.
 - Play / pause prefers clicking the site's `playButton` role over calling `video.play()` directly (which can desync the site's player UI); falls back to the element if the click changed nothing after 400 ms (`src/lib/view/playback.ts`).
-- **Keyboard shortcuts** (`chrome.commands`, rebind at `chrome://extensions/shortcuts`): play / pause `Alt+Shift+P`, maximize `Alt+Shift+M`, TV mode `Alt+Shift+F`, mute (no default). Chrome allows four suggested keys; step 7's "next" gets the last one, "previous" none.
+- **Keyboard shortcuts** (`chrome.commands`, rebind at `chrome://extensions/shortcuts`): play / pause `Alt+Shift+P`, maximize `Alt+Shift+M`, TV mode `Alt+Shift+F`, playlist next `Alt+Shift+N`; mute and playlist previous unbound (Chrome allows four suggested keys).
 - **Mute command** toggles the tab mute. A mute made this way is the user's (`attributeMute`, tested): an ad ending won't unmute it, and unmuting mid-ad gives up ad ownership.
 
 ### Maximize + fullscreen
@@ -244,19 +244,23 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 
 ### Playlists
 
-- Load a playlist of URLs (by pasting), play through, and jump to the next entry when a video finishes.
-- Jump back to a previous entry.
-- Blackout overlay with the entry title (or document title) until the page is loaded, resized, and ready to play.
-- Edit playlist titles / info and export the playlist back out to the clipboard.
-- Save playlists in storage for future playing.
-- Add the current URL to a playlist, managing additions across multiple playlists, not just the "current" one. Popup + `chrome.contextMenus` "Add to playlist ▸" submenu.
-- **Runner** lives in the background; state in `chrome.storage.session`.
-- **End detection:** `ended` event, near-duration `timeupdate`, and "tab navigated to a URL that isn't the current entry" (YouTube autoplay / end screens can pre-empt `ended`).
-- **Autoplay policy** may block unmuted playback on rarely-visited sites → show a "click to start" prompt on the blackout as a fallback.
+- Load a playlist of URLs (by pasting), play through, and jump to the next entry when a video finishes. Jump back to a previous entry.
+- **Playlists page** (`playlists.html`, from the popup's **Playlists…**): list + **New**; editor with name, the playlist **text** (the source of truth, so comments and layout survive), live problems ("Line 4: …"), and an entries preview (title, host, start time, which ads program applies, ▶ play from here). **Save** (also Cmd/Ctrl+S), **Copy text** (export to clipboard), **Delete**, **▶ Play** with an "in TV mode" option. Edits happen in the text; structured edits (`withEntryTitle`, `appendEntry`) exist for code paths and re-render only the touched line.
+- **Storage:** `wtv.playlists` in `chrome.storage.local`: `{ id, name, text, createdAt, updatedAt }` per playlist (`src/lib/playlist/store.ts`, tested). The name is metadata, not part of the text.
+- **Adding pages** to any playlist, not just the running one: popup **Add this page** (playlist picker, remembers the last one, or "New playlist"), and the context menu **Add to Wtv playlist ▸** (each playlist + "New playlist"; a link adds its target, anywhere else adds the page with the tab title). The menu is rebuilt whenever playlists change.
+- **Play** opens a new tab. First it requests host access for every entry's site in one prompt (Wtv only runs where it has access, and it needs to be there to see a video end). Declined sites still play, but need **Next** by hand.
+- **Runner** (`src/lib/playlist/runner.ts`) lives in the background; per-tab state in `storage.session`; all operations go through one queue. The playlist is snapshotted at start (edits apply next time).
+    - Moving to an entry: the current page blacks out with the next title (so end screens / autoplay never show), `gen` is bumped, the tab navigates.
+    - Each frame says hello at start; the runner answers with the entry (title, `t=`, ads program) if the page is that entry (`sameEntryUrl`: ignores www./m., extra query params, hash; also compared with the URL the tab actually landed on, so redirects count).
+- **Blackout** (top frame, over the whole tab): the entry title (else the page title / host) until anything plays. After 6 s with nothing playing (autoplay blocked, or a player Wtv can't see) it offers **▶ Start** (a user gesture, so `play()` is allowed) and **Next**.
+- **End detection:** `ended`, or playback within 0.25 s of the end → next entry. A frame also reports **near-end** (last 20 s, media ≥ 30 s). Navigating off the entry *after* near-end counts as the end (YouTube autoplay / end screens can pre-empt `ended`); navigating off *before* it is the user doing something else, so the runner **detaches** and the popup offers **Resume** instead of hijacking the tab. Everything is ignored while an ad is playing (YouTube ads play in the same `<video>`), and `gen` stops late events from a page being left from skipping twice.
+- **Ads program:** the entry's `[ads]` block (else the playlist default, else site pictures) drives the ad overlay on that page.
+- **Popup:** playlist name, `3 / 10` and the entry title, **⏮ Previous**, **Next ⏭** / **Finish**, **Stop**; **Resume** when detached. Shortcuts: next `Alt+Shift+N`, previous unbound.
+- `t=` is parsed and stored with each entry; seeking to it is step 8 (it has to wait out pre-roll ads).
 
 #### Playlist format
 
-- Write the grammar down before coding, and build the parser + serializer with **round-trip tests** (parse → export reproduces the input, including comments and ordering).
+- Grammar is in `src/lib/playlist/format.ts`; parser + serializer with **round-trip tests** (parse → export reproduces the input byte for byte, including comments, ordering, odd spacing and junk lines; CRLF kept).
 - Format:
 
     ```
@@ -276,11 +280,12 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
         [img cats 10]
     ```
 
-- `[ads]` before the first URL is the **playlist-wide default**. An `[ads]` block after a URL (and before the next URL) **overrides** it for that entry.
+- One construct per line: URL entry, `[ads]`, quote, `[img …]`, comment (`#` or `//`), blank. Anything else is kept as an invalid line and reported, never dropped.
+- `[ads]` before the first URL is the **playlist-wide default**. An `[ads]` block after a URL (and before the next URL) **overrides** it for that entry. Quote / img lines outside a block are reported and ignored.
 - `N: text` — quote displayed for N seconds (only the first `N:` is a prefix; colons later in the text are fine).
 - `[img]` — images for the current site (see `[img ...]` resolution under Overlay iframe).
-- `[img <keyword>]` — images matching that keyword, using filename durations or 5s default. `[img <keyword> N]` forces N seconds.
-- `url | title | t=…` — optional title and start time per entry.
+- `[img <keyword>]` — images matching that keyword (may be several words), using filename durations or 5s default. `[img <keyword> N]` forces N seconds.
+- `url | title | t=…` — optional title and options. Fields shaped `key=value` are options (unknown keys are kept and reported); the first other field is the title. Titles are written so they can't read back as options.
 - Indentation is **not** significant. An `[ads]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
 
 ### Hash params + seeking

@@ -2,17 +2,18 @@
  * Decides what the overlay iframe shows over the primary video. Highest priority first:
  *
  *   1. Selector picker running         → nothing (suspend)
- *   2. Dev preview                     → ad slideshow
- *   3. Ad playing, pictures on         → ad slideshow (also the ad click shield)
- *   4. Click shield on, and the primary video is
+ *   2. Playlist entry loading          → blackout with the title over the whole tab
+ *                                        (top frame), then Start / Next if nothing plays
+ *   3. Dev preview                     → ad slideshow
+ *   4. Ad playing, pictures on         → ad slideshow (also the ad click shield)
+ *   5. Click shield on, and the primary video is
  *        maximized                     → transparent shield over everything, idle cursor hides
  *        in an ad (pictures off)       → transparent shield over everything
  *        a show (isShow)               → transparent shield, site control bar left uncovered
- *   5. Otherwise                       → nothing
+ *   6. Otherwise                       → nothing
  *
  * The ✕ on the ad slideshow hides the overlay, shield included, for the rest of that ad.
- * The program is the default `[img]` slideshow for now; step 7 (playlists) passes the
- * entry's `[ads]` block instead.
+ * The ad program is the playlist entry's `[ads]` block, or the default `[img]` slideshow.
  *
  * Shield events: click → play / pause, except in the strip just above the site's progress
  * bar (normal playback only), where it seeks to that point of the bar (the `progressBar`
@@ -26,6 +27,7 @@ import type { AdWatcher } from '../ads/watcher';
 import { matchRole } from '../dom/query';
 import type { MediaAgent } from '../media/agent';
 import { scheduler } from '../schedule';
+import type { PlaylistClient } from '../playlist/client';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
 import { DEFAULT_AD_ITEMS, type ForwardedKey } from './program';
@@ -47,7 +49,7 @@ export interface OverlayController {
   suspend(on: boolean): void;
 }
 
-type Mode = 'ad' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
+type Mode = 'blackout' | 'blackout-prompt' | 'ad' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
 
 /** Primary media events that can change whether it counts as a show. */
 const PRIMARY_EVENTS = ['loadedmetadata', 'durationchange', 'volumechange', 'play', 'emptied'] as const;
@@ -58,6 +60,7 @@ export function startOverlay(
   agent: MediaAgent,
   ads: AdWatcher,
   view: ViewService,
+  playlist: PlaylistClient,
 ): OverlayController {
   const { signal } = ctx;
   const overlay = createOverlayHost(signal);
@@ -87,6 +90,8 @@ export function startOverlay(
 
   function nextMode(): Mode {
     if (suspended) return null;
+    const blackout = playlist.blackout();
+    if (blackout) return blackout.prompt ? 'blackout-prompt' : 'blackout';
     if (previewing) return 'preview';
     const settings = ads.settings();
     const ad = adActive();
@@ -104,13 +109,20 @@ export function startOverlay(
     if (next === mode && !force) return;
     mode = next;
     switch (next) {
+      case 'blackout':
+      case 'blackout-prompt':
+        overlay.show(
+          { type: 'blackout', title: playlist.blackout()?.title ?? null, prompt: next === 'blackout-prompt' },
+          () => 'viewport',
+        );
+        break;
       case 'ad':
       case 'preview':
         overlay.show(
           {
             type: 'ad',
             host: location.hostname,
-            items: [...DEFAULT_AD_ITEMS],
+            items: [...(playlist.ads() ?? DEFAULT_AD_ITEMS)],
             muted: next === 'ad' && ads.settings().muteAds,
           },
           coverTarget,
@@ -200,6 +212,13 @@ export function startOverlay(
         window.focus();
         sync();
         break;
+      case 'start':
+        window.focus();
+        playlist.start();
+        break;
+      case 'next':
+        playlist.next();
+        break;
       case 'click':
         window.focus();
         if (!seekAt(event.x, event.y)) view.togglePlayback();
@@ -245,6 +264,7 @@ export function startOverlay(
     watchPrimary();
     sync();
   });
+  const offPlaylist = playlist.onChange(() => sync());
   const offView = view.onChange(() => {
     sync();
     // The maximized element entered the top layer after us; get back on top of it.
@@ -257,6 +277,7 @@ export function startOverlay(
     offProfile();
     offPrimary();
     offView();
+    offPlaylist();
     primaryCleanup?.();
     if (previewTimer !== undefined) clearTimeout(previewTimer);
   });

@@ -25,6 +25,7 @@ const token = location.hash.slice(1);
 const root = document.documentElement;
 const badge = document.getElementById('badge') as HTMLElement;
 const dismiss = document.getElementById('dismiss') as HTMLButtonElement;
+const prompt = document.getElementById('prompt') as HTMLElement;
 let front = document.getElementById('layer-a') as HTMLElement;
 let back = document.getElementById('layer-b') as HTMLElement;
 
@@ -71,6 +72,7 @@ function reset(): void {
   clearLayer(back);
   badge.hidden = true;
   dismiss.hidden = true;
+  prompt.hidden = true;
   setShield(false, false);
 }
 
@@ -186,19 +188,28 @@ async function playAd(cmd: Extract<OverlayCommand, { type: 'ad' }>): Promise<voi
   await advance();
 }
 
-function showBlackout(title: string | null): void {
-  reset();
-  if (title) present(Object.assign(document.createElement('p'), { className: 'title', textContent: title }));
+let lastBlackoutTitle: string | null = null;
+
+function showBlackout(title: string | null, offerStart: boolean): void {
+  // Same title, prompt just appearing: keep the title on screen instead of re-fading it.
+  const same = title === lastBlackoutTitle && front.classList.contains('visible');
+  if (!same) {
+    reset();
+    if (title) present(Object.assign(document.createElement('p'), { className: 'title', textContent: title }));
+  }
+  lastBlackoutTitle = title;
+  prompt.hidden = !offerStart;
 }
 
 function handle(cmd: OverlayCommand | null): void {
   if (!cmd) return;
+  if (cmd.type !== 'blackout') lastBlackoutTitle = null;
   switch (cmd.type) {
     case 'ad':
       void playAd(cmd);
       break;
     case 'blackout':
-      showBlackout(cmd.title);
+      showBlackout(cmd.title, cmd.prompt);
       break;
     case 'shield':
       reset();
@@ -221,6 +232,16 @@ const clamp = (v: number) => Math.min(1, Math.max(0, v));
 const where = (e: MouseEvent) => ({
   x: clamp(e.clientX / Math.max(1, window.innerWidth)),
   y: clamp(e.clientY / Math.max(1, window.innerHeight)),
+});
+
+document.getElementById('prompt-start')!.addEventListener('click', (e) => {
+  e.stopPropagation();
+  emit({ type: 'start' });
+});
+
+document.getElementById('prompt-next')!.addEventListener('click', (e) => {
+  e.stopPropagation();
+  emit({ type: 'next' });
 });
 
 document.addEventListener('click', (e) => {

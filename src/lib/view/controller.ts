@@ -166,6 +166,12 @@ async function exitTv(tabId: number, restoreWindow = true): Promise<void> {
   await browser.windows.update(tab.windowId, { state }).catch(() => undefined);
 }
 
+/** For the playlist runner: start a playlist in TV mode. */
+export async function setTvMode(tabId: number, on: boolean): Promise<void> {
+  if (on) await enterTv(tabId);
+  else await exitTv(tabId);
+}
+
 async function toggleTv(tabId: number): Promise<void> {
   if ((await loadTv())[tabId]) await exitTv(tabId);
   else await enterTv(tabId);

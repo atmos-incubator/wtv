@@ -1,0 +1,170 @@
+import { describe, expect, it } from 'vitest';
+import {
+  appendEntry,
+  compilePlaylist,
+  parseLine,
+  parsePlaylist,
+  renderEntry,
+  serializePlaylist,
+  withEntryTitle,
+} from './format';
+import { parseTimestamp } from './time';
+
+const SAMPLE = `# Sunday night
+[ads]
+    20: Take a moment to breathe
+    [img cats]
+
+https://www.youtube.com/watch?v=abc | Some Title | t=1:37
+[ads]
+    20: Take a moment to breathe
+    10: Dismiss your worries: all of them
+    5: Relax
+
+https://vimeo.com/123 | Another Title
+  [ads]
+    [img]
+    [img grumpy cats 10]
+
+// no title, no ads block: uses the default
+https://example.com/show
+`;
+
+describe('round trip', () => {
+  it.each([
+    ['sample', SAMPLE],
+    ['empty', ''],
+    ['just a newline', '\n'],
+    ['no trailing newline', 'https://a.com/x | A'],
+    ['CRLF', 'https://a.com/x | A\r\n\r\n[ads]\r\n  5: hi\r\n'],
+    ['odd spacing and junk kept', '   https://a.com/x|A|t=5   \n\tnonsense line\n\n\n[ADS]\n[IMG  cats   3 ]\n'],
+  ])('%s', (_label, text) => {
+    expect(serializePlaylist(parsePlaylist(text))).toBe(text);
+  });
+});
+
+describe('parseLine', () => {
+  it('reads entries with title and options', () => {
+    expect(parseLine('  https://a.com/x?y=1 | My | Title |  t=1:37 ')).toMatchObject({
+      kind: 'entry',
+      url: 'https://a.com/x?y=1',
+      title: 'My | Title',
+      options: [{ key: 't', value: '1:37' }],
+    });
+    expect(parseLine('https://a.com/x | t=5')).toMatchObject({ title: null, options: [{ key: 't', value: '5' }] });
+  });
+
+  it('reads quotes; only the first colon is the prefix', () => {
+    expect(parseLine('10: Dismiss: your worries')).toMatchObject({
+      kind: 'quote',
+      durationS: 10,
+      text: 'Dismiss: your worries',
+    });
+  });
+
+  it('reads image items', () => {
+    expect(parseLine('[img]')).toMatchObject({ kind: 'img', keyword: null, durationS: null });
+    expect(parseLine('[img cats]')).toMatchObject({ keyword: 'cats', durationS: null });
+    expect(parseLine('[img grumpy cats 10]')).toMatchObject({ keyword: 'grumpy cats', durationS: 10 });
+    expect(parseLine('[img 7]')).toMatchObject({ keyword: null, durationS: 7 });
+    expect(parseLine('[img cats 0]').kind).toBe('invalid');
+  });
+
+  it('keeps junk as invalid lines', () => {
+    expect(parseLine('ftp://a.com/x').kind).toBe('invalid');
+    expect(parseLine('https://').kind).toBe('invalid');
+    expect(parseLine('hello there').kind).toBe('invalid');
+    expect(parseLine('0: never').kind).toBe('invalid');
+  });
+});
+
+describe('compilePlaylist', () => {
+  const { entries, defaultAds, problems } = compilePlaylist(parsePlaylist(SAMPLE));
+
+  it('collects entries in order', () => {
+    expect(entries.map((e) => [e.url, e.title, e.startS])).toEqual([
+      ['https://www.youtube.com/watch?v=abc', 'Some Title', 97],
+      ['https://vimeo.com/123', 'Another Title', null],
+      ['https://example.com/show', null, null],
+    ]);
+    expect(problems).toEqual([]);
+  });
+
+  it('applies the default [ads] block unless an entry has its own', () => {
+    expect(defaultAds).toEqual([
+      { kind: 'text', text: 'Take a moment to breathe', durationS: 20 },
+      { kind: 'img', keyword: 'cats', durationS: null },
+    ]);
+    expect(entries[0]!.ads).toHaveLength(3);
+    expect(entries[1]!.ads).toEqual([
+      { kind: 'img', keyword: null, durationS: null },
+      { kind: 'img', keyword: 'grumpy cats', durationS: 10 },
+    ]);
+    expect(entries[2]!.ads).toBe(defaultAds);
+  });
+
+  it('has no ads program at all without any [ads] block', () => {
+    expect(compilePlaylist(parsePlaylist('https://a.com/x')).entries[0]!.ads).toBeNull();
+  });
+
+  it('reports problems with line numbers', () => {
+    const r = compilePlaylist(parsePlaylist('5: stray\nhttps://a.com/x | t=soon | z=1\nwhat'));
+    expect(r.problems).toEqual([
+      { line: 1, message: 'outside an [ads] block (ignored)' },
+      { line: 2, message: 't=soon is not a timestamp' },
+      { line: 2, message: 'unknown option z= (kept, ignored)' },
+      { line: 3, message: expect.stringContaining('not a URL') },
+    ]);
+  });
+});
+
+describe('edits', () => {
+  it('retitles one entry and leaves every other line untouched', () => {
+    const doc = withEntryTitle(parsePlaylist(SAMPLE), 1, 'Renamed');
+    const out = serializePlaylist(doc);
+    expect(out).toBe(SAMPLE.replace('https://vimeo.com/123 | Another Title', 'https://vimeo.com/123 | Renamed'));
+  });
+
+  it('keeps indentation and options when retitling', () => {
+    const doc = withEntryTitle(parsePlaylist('  https://a.com/x | Old | t=5\n'), 0, null);
+    expect(serializePlaylist(doc)).toBe('  https://a.com/x | t=5\n');
+  });
+
+  it('never lets a title read back as an option or span lines', () => {
+    const doc = withEntryTitle(parsePlaylist('https://a.com/x'), 0, 'a=b\nc');
+    const reparsed = compilePlaylist(parsePlaylist(serializePlaylist(doc)));
+    expect(reparsed.entries[0]!.title).toBe('a = b c');
+  });
+
+  it('appends entries after a blank line', () => {
+    expect(serializePlaylist(appendEntry(parsePlaylist('https://a.com/1\n'), 'https://a.com/2', 'Two'))).toBe(
+      'https://a.com/1\n\nhttps://a.com/2 | Two\n',
+    );
+    expect(serializePlaylist(appendEntry(parsePlaylist(''), 'https://a.com/2', null))).toBe('https://a.com/2\n');
+    expect(() => appendEntry(parsePlaylist(''), 'chrome://settings', null)).toThrow();
+  });
+
+  it('renders entries', () => {
+    expect(renderEntry('https://a.com', 'T', [{ key: 't', value: '5' }], '  ')).toBe('  https://a.com | T | t=5');
+  });
+});
+
+describe('parseTimestamp', () => {
+  it.each([
+    ['200', 200],
+    ['200s', 200],
+    ['1.5', 1.5],
+    ['1:37', 97],
+    ['1:02:03', 3723],
+    ['1h2m3s', 3723],
+    ['2m', 120],
+    ['1h', 3600],
+    [' 90 ', 90],
+  ])('%s → %s', (text, seconds) => {
+    expect(parseTimestamp(text)).toBe(seconds);
+  });
+
+  it.each(['', 'soon', '1:60', '1::2', 'h', '-5', '1m2h'])('rejects %j', (text) => {
+    expect(parseTimestamp(text)).toBeNull();
+  });
+});

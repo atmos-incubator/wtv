@@ -92,6 +92,16 @@ h1 {
   gap: 8px;
 }
 
+select {
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  max-width: 150px;
+}
+
 button {
   font: inherit;
   padding: 6px 12px;

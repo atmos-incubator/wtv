@@ -12,8 +12,8 @@ export type ProgramItem =
 export type OverlayCommand =
   /** Ad running: play `items` in order, looping, until hidden. */
   | { type: 'ad'; host: string; items: ProgramItem[]; muted: boolean }
-  /** Black screen with an optional title (playlist transitions). */
-  | { type: 'blackout'; title: string | null }
+  /** Black screen with an optional title (playlist transitions). `prompt`: offer Start / Next. */
+  | { type: 'blackout'; title: string | null; prompt: boolean }
   /**
    * Transparent click shield over the video: clicks, double-clicks, pointer movement and
    * keys are reported back instead of reaching the page. `maximized` hides an idle cursor.
@@ -38,6 +38,9 @@ export interface ForwardedKey {
 export type OverlayEvent =
   /** ✕ on the ad overlay. */
   | { type: 'dismiss' }
+  /** Start / Next on the blackout prompt. */
+  | { type: 'start' }
+  | { type: 'next' }
   /** Shield clicked / double-clicked at x / y, fractions (0–1) of the overlay box. */
   | { type: 'click' | 'dblclick'; x: number; y: number }
   /** Pointer moved over the shield; x / y are fractions (0–1) of the overlay box. */
@@ -62,7 +65,7 @@ const MAX_TEXT = 500;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isPositive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
 
-function parseItem(v: unknown): ProgramItem | null {
+export function parseProgramItem(v: unknown): ProgramItem | null {
   if (!isObj(v)) return null;
   if (v.kind === 'img') {
     const keyword = typeof v.keyword === 'string' && v.keyword.trim() ? v.keyword.trim() : null;
@@ -81,7 +84,11 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
     case 'hide':
       return { type: 'hide' };
     case 'blackout':
-      return { type: 'blackout', title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null };
+      return {
+        type: 'blackout',
+        title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim().slice(0, MAX_TEXT) : null,
+        prompt: raw.prompt === true,
+      };
     case 'shield': {
       if (typeof raw.maximized !== 'boolean') return null;
       const band = typeof raw.seekBand === 'number' && Number.isFinite(raw.seekBand) ? raw.seekBand : 0;
@@ -89,7 +96,7 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
     }
     case 'ad': {
       if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.muted !== 'boolean') return null;
-      const items = raw.items.slice(0, MAX_ITEMS).map(parseItem).filter((i): i is ProgramItem => i !== null);
+      const items = raw.items.slice(0, MAX_ITEMS).map(parseProgramItem).filter((i): i is ProgramItem => i !== null);
       return { type: 'ad', host: raw.host, items: items.length > 0 ? items : [...DEFAULT_AD_ITEMS], muted: raw.muted };
     }
     default:
@@ -104,7 +111,9 @@ export function parseOverlayEvent(raw: unknown): OverlayEvent | null {
   if (!isObj(raw)) return null;
   switch (raw.type) {
     case 'dismiss':
-      return { type: 'dismiss' };
+    case 'start':
+    case 'next':
+      return { type: raw.type };
     case 'click':
     case 'dblclick':
     case 'activity':
