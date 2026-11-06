@@ -3,13 +3,15 @@
  *
  * At start, asks the background whether this page is the current playlist entry. If it
  * is:
- *   - the top frame shows a blackout with the entry title until something plays. When
- *     Chrome refuses autoplay (the page hook sees play() rejected with NotAllowedError,
- *     here or in an embedded frame), or nothing has played after a long fallback wait,
- *     the blackout offers "Start" (a click there is a user gesture, so play() is
- *     allowed) and "Next", and Wtv tries play() itself a few times. Each try pulses the
- *     Start button and the status line says how it went (blocked / no video yet /
- *     didn't start), which tells "too early" apart from "refused";
+ *   - the top frame shows a blackout with the entry title until something plays.
+ *     Starting playback is Wtv's job here (it's a TV), so once the primary video has
+ *     data, the site gets a short grace period to autoplay on its own, then Wtv calls
+ *     play() itself, up to a few times. Each try pulses the status line (or the Start
+ *     button once it's showing) and says how it went.
+ *   - "Start" / "Next" appear when Chrome refuses autoplay (the page hook sees play()
+ *     rejected with NotAllowedError, here or in an embedded frame), when Wtv's own tries
+ *     fail, or after a long fallback wait with no video at all. A click on Start is a
+ *     user gesture, so play() is allowed then;
  *   - every frame reports its primary's `playing`, `near-end` and `ended` to the runner,
  *     ignoring anything that happens during an ad (YouTube plays ads in the same
  *     <video>, so an ad ending looks like the video ending);
@@ -34,8 +36,10 @@ import {
 
 /** Offer "Start" if nothing has played (and nothing was refused) by then. */
 const FALLBACK_PROMPT_MS = 15_000;
+/** Once the video has data, give the site this long to start it before Wtv does. */
+const SITE_AUTOPLAY_GRACE_MS = 2000;
 /** Gaps before each automatic start attempt. */
-const ATTEMPT_DELAYS_MS = [500, 1500, 3000];
+const ATTEMPT_DELAYS_MS = [0, 1500, 3000];
 /** Bridged media can't report its play() result; check whether it's playing after this. */
 const BRIDGED_CHECK_MS = 600;
 /** Report near-end this close to the end (YouTube's end screen starts ~20 s out). */
@@ -44,7 +48,7 @@ const NEAR_END_S = 20;
 const END_SLACK_S = 0.25;
 /** Shorter media isn't the show (and has no meaningful near-end). */
 const MIN_SHOW_S = 30;
-const WATCH_EVENTS = ['playing', 'ended', 'timeupdate'] as const;
+const WATCH_EVENTS = ['playing', 'ended', 'timeupdate', 'loadeddata', 'canplay'] as const;
 
 export interface Blackout {
   title: string | null;
@@ -56,7 +60,7 @@ export interface Blackout {
   status: string | null;
 }
 
-type Trigger = 'blocked' | 'blocked-in-frame' | 'timeout';
+type Trigger = 'blocked' | 'blocked-in-frame' | 'timeout' | 'ready';
 
 export interface PlaylistClient {
   /** The current entry's ad program; null = default. */
@@ -76,9 +80,13 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   let blackout: Blackout | null = null;
   let promptTimer: ReturnType<typeof setTimeout> | undefined;
   let attemptTimer: ReturnType<typeof setTimeout> | undefined;
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
   let attempting = false;
+  /** The blackout is for this page's entry (not the one shown while leaving a page). */
+  let awaitingStart = false;
   let primaryCleanup: (() => void) | null = null;
   const sent = new Set<MediaEvent>();
+  const adActive = () => ads.status()?.active ?? false;
   const listeners = new Set<() => void>();
 
   function notify(): void {
@@ -106,24 +114,30 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   function clearTimers(): void {
     if (promptTimer !== undefined) clearTimeout(promptTimer);
     if (attemptTimer !== undefined) clearTimeout(attemptTimer);
-    promptTimer = attemptTimer = undefined;
+    if (graceTimer !== undefined) clearTimeout(graceTimer);
+    promptTimer = attemptTimer = graceTimer = undefined;
   }
 
-  function showBlackout(title: string | null): void {
+  /** `forEntry`: this page is the entry (from hello), so Wtv should get it playing. */
+  function showBlackout(title: string | null, forEntry: boolean): void {
     if (!isTop) return;
     clearTimers();
     attempting = false;
+    awaitingStart = forEntry;
     blackout = { title, prompt: false, attempt: 0, status: null };
-    promptTimer = setTimeout(() => {
-      promptTimer = undefined;
-      trigger('timeout');
-    }, FALLBACK_PROMPT_MS);
+    if (forEntry) {
+      promptTimer = setTimeout(() => {
+        promptTimer = undefined;
+        trigger('timeout');
+      }, FALLBACK_PROMPT_MS);
+    }
     notify();
   }
 
   function lift(): void {
     clearTimers();
     attempting = false;
+    awaitingStart = false;
     if (!blackout) return;
     blackout = null;
     notify();
@@ -150,7 +164,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       attemptTimer = undefined;
       if (!blackout) return;
       const n = ATTEMPT_DELAYS_MS.length;
-      update({ attempt: blackout.attempt + 1, status: `Trying to start… (${i + 1} of ${n})` });
+      update({ attempt: blackout.attempt + 1, status: `Starting the video… (${i + 1} of ${n})` });
       void tryPlay().then((result) => {
         console.info(`[wtv] playlist start attempt ${i + 1}/${n}: ${result}`);
         if (!blackout) return; // Lifted: something played.
@@ -159,35 +173,63 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
           return;
         }
         const last = i + 1 >= n;
-        update({ status: `${REASONS[result]}. ${last ? 'Click Start.' : 'Trying again…'}` });
+        // A refusal won't change by itself: show Start / Next now.
+        update({
+          prompt: blackout.prompt || last || result === 'blocked',
+          status: `${REASONS[result]}. ${last ? 'Click Start.' : 'Trying again…'}`,
+        });
         if (!last) attempt(i + 1);
       });
     }, ATTEMPT_DELAYS_MS[i]);
   }
 
-  /** Something's in the way of playback: offer Start / Next, and try a few times ourselves. */
+  /**
+   * Time for Wtv to start playback itself. `ready`: the video has data and the site
+   * didn't start it (no buttons unless the tries fail). Anything else is a problem, so
+   * Start / Next show right away.
+   */
   function trigger(why: Trigger): void {
-    if (!blackout) return;
+    if (!blackout || !awaitingStart) return;
     if (promptTimer !== undefined) clearTimeout(promptTimer);
-    promptTimer = undefined;
+    if (graceTimer !== undefined) clearTimeout(graceTimer);
+    promptTimer = graceTimer = undefined;
     if (why === 'blocked-in-frame') {
       // We can't retry inside another frame; the user has to click its player.
       update({ prompt: true, status: 'Chrome blocked autoplay in the embedded player. Click Start, then its ▶.' });
       return;
     }
-    update({ prompt: true, status: why === 'blocked' ? 'Chrome blocked autoplay.' : null });
+    if (why === 'blocked') update({ prompt: true, status: 'Chrome blocked autoplay.' });
+    else if (why === 'timeout') update({ prompt: true });
     if (attempting) return;
     attempting = true;
     attempt(0);
   }
 
-  const adActive = () => ads.status()?.active ?? false;
+  /** The primary has data but isn't playing: start the grace period before we start it. */
+  function considerStarting(): void {
+    if (!isTop || !blackout || !awaitingStart || attempting || graceTimer !== undefined) return;
+    if (adActive()) return; // The site's ad flow decides what plays now.
+    const primary = agent.primary();
+    if (!primary) return;
+    const f = primary.features(null);
+    if (f.playing || !f.hasSource) return;
+    const el = primary.element;
+    if (el && el.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return; // Wait for loadeddata.
+    graceTimer = setTimeout(() => {
+      graceTimer = undefined;
+      if (!primary.features(null).playing) trigger('ready');
+    }, SITE_AUTOPLAY_GRACE_MS);
+  }
 
   function onMediaEvent(el: HTMLMediaElement, type: string): void {
     if (!entry) return;
     if (type === 'playing') {
       lift();
       report('playing');
+      return;
+    }
+    if (type === 'loadeddata' || type === 'canplay') {
+      considerStarting();
       return;
     }
     const d = el.duration;
@@ -211,6 +253,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     for (const type of WATCH_EVENTS) el.addEventListener(type, () => onMediaEvent(el, type), opts);
     primaryCleanup = () => controller.abort();
     if (!el.paused && !el.ended) onMediaEvent(el, 'playing');
+    else considerStarting();
   }
 
   const offPrimary = agent.onPrimaryChange(watchPrimary);
@@ -220,7 +263,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     if (!msg || !isTop) return undefined;
     if (msg.op === 'lift') lift();
     else if (msg.op === 'blocked') trigger('blocked-in-frame');
-    else if (msg.op === 'blackout') showBlackout(msg.title);
+    else if (msg.op === 'blackout') showBlackout(msg.title, false);
     return undefined;
   };
   browser.runtime.onMessage.addListener(onMessage);
@@ -248,7 +291,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     .then((raw: unknown) => {
       entry = parseEntryInfo(raw);
       if (!entry) return;
-      showBlackout(entry.title ?? (document.title || location.hostname));
+      showBlackout(entry.title ?? (document.title || location.hostname), true);
       watchPrimary();
       notify();
     })

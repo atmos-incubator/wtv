@@ -28,6 +28,7 @@ const dismiss = document.getElementById('dismiss') as HTMLButtonElement;
 const prompt = document.getElementById('prompt') as HTMLElement;
 const promptStart = document.getElementById('prompt-start') as HTMLButtonElement;
 const promptStatus = document.getElementById('prompt-status') as HTMLElement;
+const promptButtons = document.getElementById('prompt-buttons') as HTMLElement;
 let front = document.getElementById('layer-a') as HTMLElement;
 let back = document.getElementById('layer-b') as HTMLElement;
 
@@ -193,11 +194,11 @@ async function playAd(cmd: Extract<OverlayCommand, { type: 'ad' }>): Promise<voi
 let lastBlackoutTitle: string | null = null;
 let lastAttempt = 0;
 
-/** Pulse the Start button: Wtv just tried to start playback itself. */
-function pulseStart(): void {
-  promptStart.classList.remove('pulse');
-  void promptStart.offsetWidth; // Restart the animation.
-  promptStart.classList.add('pulse');
+/** Wtv just tried to start playback itself: pulse the Start button, or the status line before Start shows. */
+function pulse(target: HTMLElement): void {
+  target.classList.remove('pulse');
+  void target.offsetWidth; // Restart the animation.
+  target.classList.add('pulse');
 }
 
 function showBlackout(cmd: Extract<OverlayCommand, { type: 'blackout' }>): void {
@@ -209,9 +210,10 @@ function showBlackout(cmd: Extract<OverlayCommand, { type: 'blackout' }>): void 
     if (title) present(Object.assign(document.createElement('p'), { className: 'title', textContent: title }));
   }
   lastBlackoutTitle = title;
-  prompt.hidden = !offerStart;
+  prompt.hidden = !offerStart && !cmd.status;
+  promptButtons.hidden = !offerStart;
   promptStatus.textContent = cmd.status ?? '';
-  if (cmd.attempt > lastAttempt && offerStart) pulseStart();
+  if (cmd.attempt > lastAttempt) pulse(offerStart ? promptStart : promptStatus);
   lastAttempt = cmd.attempt;
 }
 

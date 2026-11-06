@@ -133,9 +133,24 @@ body {
   opacity: 0.75;
 }
 
-/* One pulse per automatic start attempt. */
+/* One pulse per automatic start attempt: the Start button, or the status line before it shows. */
 #prompt button.pulse {
   animation: pulse 900ms ease-out;
+}
+
+#prompt-status.pulse {
+  animation: glow 900ms ease-out;
+}
+
+@keyframes glow {
+  0% {
+    opacity: 1;
+    text-shadow: 0 0 12px rgb(255 255 255 / 0.9);
+  }
+  100% {
+    opacity: 0.75;
+    text-shadow: 0 0 0 rgb(255 255 255 / 0);
+  }
 }
 
 @keyframes pulse {
@@ -148,6 +163,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #prompt-status.pulse {
+    animation: none;
+  }
+
   #prompt button.pulse {
     animation: none;
     outline: 3px solid rgb(255 255 255 / 0.6);
