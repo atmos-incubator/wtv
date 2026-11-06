@@ -206,6 +206,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 - **Bundled pack:** four original SVG cat cartoons in `public/cats/` (drawn for Wtv, so no licensing to track).
 - **Quotes:** duration-prefixed lines from the playlist `[ads]` block (see Playlists).
 - **Rotation:** program items in order; each `[img]` item expands to its images, shuffled. Loops with a fresh shuffle when exhausted; cross-fades between slides; cut when the ad ends (after the 1.5 s grace, same as unmute). Duration: item's explicit `N` > file name `_dNs` > 5 s.
+- **Fit:** fill the frame (`cover`) when that crops less than 20% of the picture, otherwise show it whole with letterbox bars (`contain`). Re-evaluated when the overlay resizes (`src/lib/overlay/fit.ts`, pure + tested).
 - **Setting:** `adOverlay` ("Show pictures during ads", on by default).
 
 ### Click to play / pause

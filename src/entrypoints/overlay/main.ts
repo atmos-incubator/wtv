@@ -5,6 +5,7 @@
  */
 import './style.css';
 import { getImageBlob } from '../../lib/images/db';
+import { fitMode } from '../../lib/overlay/fit';
 import { bundledResolved, createImageResolver } from '../../lib/images/resolver';
 import {
   DEFAULT_AD_ITEMS,
@@ -31,6 +32,21 @@ const layerUrls = new Map<HTMLElement, string[]>();
 function emit(event: OverlayEvent): void {
   port?.postMessage(event);
 }
+
+/** Cover if that crops < 20% of the picture, else letterbox. Re-run on resize. */
+function applyFit(media: HTMLImageElement | HTMLVideoElement): void {
+  const [w, h] =
+    media instanceof HTMLVideoElement ? [media.videoWidth, media.videoHeight] : [media.naturalWidth, media.naturalHeight];
+  media.style.objectFit = fitMode(w, h, window.innerWidth, window.innerHeight);
+}
+
+function refitAll(): void {
+  for (const media of document.querySelectorAll<HTMLImageElement | HTMLVideoElement>('.layer img, .layer video')) {
+    applyFit(media);
+  }
+}
+
+window.addEventListener('resize', refitAll);
 
 function clearLayer(layer: HTMLElement): void {
   layer.classList.remove('visible');
@@ -92,6 +108,8 @@ async function renderSlide(slide: Slide, gen: number): Promise<void> {
       autoplay: true,
       playsInline: true,
     });
+    video.style.objectFit = 'contain';
+    video.addEventListener('loadedmetadata', () => applyFit(video), { once: true });
     present(video, urls);
   } else {
     const img = Object.assign(document.createElement('img'), { src: url, alt: '' });
@@ -100,6 +118,7 @@ async function renderSlide(slide: Slide, gen: number): Promise<void> {
       for (const u of urls) URL.revokeObjectURL(u);
       return;
     }
+    applyFit(img);
     present(img, urls);
   }
 }
