@@ -49,7 +49,7 @@ export interface OverlayController {
   suspend(on: boolean): void;
 }
 
-type Mode = 'blackout' | 'blackout-prompt' | 'ad' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
+type Mode = 'blackout' | 'ad' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
 
 /** Primary media events that can change whether it counts as a show. */
 const PRIMARY_EVENTS = ['loadedmetadata', 'durationchange', 'volumechange', 'play', 'emptied'] as const;
@@ -91,7 +91,7 @@ export function startOverlay(
   function nextMode(): Mode {
     if (suspended) return null;
     const blackout = playlist.blackout();
-    if (blackout) return blackout.prompt ? 'blackout-prompt' : 'blackout';
+    if (blackout) return 'blackout';
     if (previewing) return 'preview';
     const settings = ads.settings();
     const ad = adActive();
@@ -103,16 +103,27 @@ export function startOverlay(
     return f && isShow(f) ? 'shield' : null;
   }
 
+  /** Blackout content (prompt, attempts, status) changes without a mode change. */
+  let blackoutShown = '';
+
   function sync(force = false): void {
     if (!adActive()) dismissed = false;
     const next = nextMode();
-    if (next === mode && !force) return;
+    const blackout = next === 'blackout' ? playlist.blackout() : null;
+    const signature = blackout ? JSON.stringify(blackout) : '';
+    if (next === mode && signature === blackoutShown && !force) return;
     mode = next;
+    blackoutShown = signature;
     switch (next) {
       case 'blackout':
-      case 'blackout-prompt':
         overlay.show(
-          { type: 'blackout', title: playlist.blackout()?.title ?? null, prompt: next === 'blackout-prompt' },
+          {
+            type: 'blackout',
+            title: blackout?.title ?? null,
+            prompt: blackout?.prompt ?? false,
+            attempt: blackout?.attempt ?? 0,
+            status: blackout?.status ?? null,
+          },
           () => 'viewport',
         );
         break;

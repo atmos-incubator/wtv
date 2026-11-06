@@ -195,6 +195,11 @@ async function media(tabId: number, frameId: number, gen: number, event: MediaEv
       // The top frame lifts its own blackout; a player in a child frame needs us to.
       if (frameId !== 0) await toTop(tabId, { type: PL_APPLY, op: 'lift' });
       return;
+    case 'blocked':
+      // An embedded player was refused autoplay: the top frame's blackout should offer
+      // Start right away rather than waiting.
+      if (frameId !== 0) await toTop(tabId, { type: PL_APPLY, op: 'blocked' });
+      return;
     case 'near-end':
       if (!state.nearEnd) await put(tabId, { ...state, nearEnd: true });
       return;

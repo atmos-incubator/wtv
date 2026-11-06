@@ -15,6 +15,7 @@
  * No extension APIs exist in the MAIN world; this file must stay DOM-only.
  */
 import {
+  EVT_BLOCKED,
   EVT_BRIDGE,
   EVT_COMMAND,
   EVT_FOUND,
@@ -52,6 +53,8 @@ export function installMediaHook(win: Window & typeof globalThis = window): void
   const MediaProto = win.HTMLMediaElement.prototype;
   const nativePlay = MediaProto.play;
   const nativeAttachShadow = win.Element.prototype.attachShadow;
+  // Captured before page scripts run, so a page patching Promise can't interfere.
+  const nativeThen = win.Promise.prototype.then;
 
   /** Every element seen, reachable or not, so EVT_HELLO can re-announce. */
   const seen = new Set<WeakRef<HTMLMediaElement>>();
@@ -157,6 +160,14 @@ export function installMediaHook(win: Window & typeof globalThis = window): void
     announce(el);
   }
 
+  /** Chrome's autoplay policy said no. Tell the isolated world (playlist blackout). */
+  function onPlayRejected(el: unknown, err: unknown): void {
+    if ((err as { name?: unknown } | null)?.name !== 'NotAllowedError') return;
+    const event = new CustomEvent(EVT_BLOCKED, { bubbles: true, composed: true });
+    if (el instanceof win.HTMLMediaElement && isReachable(el)) el.dispatchEvent(event);
+    else doc.dispatchEvent(event);
+  }
+
   MediaProto.play = new Proxy(nativePlay, {
     apply(target, thisArg: unknown, args: []) {
       try {
@@ -164,7 +175,17 @@ export function installMediaHook(win: Window & typeof globalThis = window): void
       } catch {
         // Never break the page's play() call.
       }
-      return Reflect.apply(target, thisArg, args);
+      const result: unknown = Reflect.apply(target, thisArg, args);
+      try {
+        // Observe only: a separate branch, so the page's own handlers (or its unhandled
+        // rejection) see exactly what they would have without us.
+        if (result instanceof win.Promise) {
+          Reflect.apply(nativeThen, result, [undefined, (err: unknown) => onPlayRejected(thisArg, err)]);
+        }
+      } catch {
+        // Ignore.
+      }
+      return result;
     },
   });
 

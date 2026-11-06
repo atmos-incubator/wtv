@@ -12,6 +12,9 @@
  *                           (detached `new Audio()`, or inside a closed shadow root).
  *   EVT_COMMAND ISO → MAIN  on `document`: control a bridged media element.
  *   EVT_HELLO   ISO → MAIN  on `document`: isolated agent started; re-announce everything.
+ *   EVT_BLOCKED MAIN → ISO  a page's play() was rejected by the autoplay policy
+ *                           (NotAllowedError). On the element when reachable, else on
+ *                           `document`. No detail.
  */
 
 export const EVT_FOUND = 'wtv:media-found';
@@ -19,6 +22,7 @@ export const EVT_SHADOW = 'wtv:shadow-root';
 export const EVT_BRIDGE = 'wtv:media-bridge';
 export const EVT_COMMAND = 'wtv:media-command';
 export const EVT_HELLO = 'wtv:media-hello';
+export const EVT_BLOCKED = 'wtv:media-blocked';
 
 export interface BridgedMediaState {
   id: number;

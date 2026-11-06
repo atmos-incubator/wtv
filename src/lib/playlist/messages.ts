@@ -3,10 +3,10 @@
  *
  *   content → background (runtime.sendMessage)
  *     PL_HELLO                       → EntryInfo | null   "is this page a playlist entry?" (every frame, at start)
- *     PL_MEDIA  { gen, event }                             playing / near-end / ended, from frames that got an EntryInfo
+ *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked, from frames that got an EntryInfo
  *
  *   background → content, top frame only (tabs.sendMessage, frameId 0)
- *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' }
+ *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
  *
  *   playlists page | popup → background
  *     PL_COMMAND { op: 'start', playlistId, index, tv }    plays in a new tab
@@ -24,7 +24,7 @@ export const PL_APPLY = 'wtv/playlist/apply';
 export const PL_COMMAND = 'wtv/playlist/command';
 export const PL_STATE = 'wtv/playlist/state';
 
-export const MEDIA_EVENTS = ['playing', 'near-end', 'ended'] as const;
+export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked'] as const;
 export type MediaEvent = (typeof MEDIA_EVENTS)[number];
 
 export const STEP_OPS = ['next', 'previous', 'stop', 'resume'] as const;
@@ -60,7 +60,9 @@ export type PageRequest =
   | { type: typeof PL_COMMAND; op: StepOp; tabId: number | null }
   | { type: typeof PL_STATE; tabId: number | null };
 
-export type PlaylistApply = { type: typeof PL_APPLY; op: 'blackout'; title: string | null } | { type: typeof PL_APPLY; op: 'lift' };
+export type PlaylistApply =
+  | { type: typeof PL_APPLY; op: 'blackout'; title: string | null }
+  | { type: typeof PL_APPLY; op: 'lift' | 'blocked' };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
@@ -93,7 +95,7 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
 
 export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
   if (!isObj(raw) || raw.type !== PL_APPLY) return null;
-  if (raw.op === 'lift') return { type: PL_APPLY, op: 'lift' };
+  if (raw.op === 'lift' || raw.op === 'blocked') return { type: PL_APPLY, op: raw.op };
   if (raw.op === 'blackout') {
     return { type: PL_APPLY, op: 'blackout', title: typeof raw.title === 'string' ? raw.title : null };
   }

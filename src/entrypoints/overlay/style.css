@@ -113,10 +113,46 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 18%;
-  display: flex;
-  justify-content: center;
+  bottom: 14%;
+  display: grid;
+  justify-items: center;
   gap: 12px;
+}
+
+.prompt-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+#prompt-status {
+  margin: 0;
+  min-height: 1.4em;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+/* One pulse per automatic start attempt. */
+#prompt button.pulse {
+  animation: pulse 900ms ease-out;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(255 255 255 / 0.75);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgb(255 255 255 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #prompt button.pulse {
+    animation: none;
+    outline: 3px solid rgb(255 255 255 / 0.6);
+    outline-offset: 3px;
+  }
 }
 
 #prompt button {

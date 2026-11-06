@@ -21,8 +21,17 @@ describe('parseOverlayCommand', () => {
       type: 'blackout',
       title: 'Show',
       prompt: false,
+      attempt: 0,
+      status: null,
     });
-    expect(parseOverlayCommand({ type: 'blackout', prompt: true })).toEqual({ type: 'blackout', title: null, prompt: true });
+    expect(parseOverlayCommand({ type: 'blackout', prompt: true, attempt: 2, status: ' Blocked ' })).toEqual({
+      type: 'blackout',
+      title: null,
+      prompt: true,
+      attempt: 2,
+      status: 'Blocked',
+    });
+    expect(parseOverlayCommand({ type: 'blackout', attempt: -1 })).toMatchObject({ attempt: 0 });
   });
 
   it('parses an ad program and drops invalid items', () => {

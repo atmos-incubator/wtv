@@ -13,6 +13,12 @@ import type { CandidateFeatures } from './score';
 
 export type HandleKind = 'direct' | 'bridged';
 
+/**
+ * Outcome of play(). `blocked`: Chrome's autoplay policy refused (NotAllowedError).
+ * `unknown`: a bridged element, whose promise stays in the page's world.
+ */
+export type PlayResult = 'playing' | 'blocked' | 'failed' | 'unknown';
+
 export interface MediaHandle {
   readonly key: string;
   readonly kind: HandleKind;
@@ -21,7 +27,7 @@ export interface MediaHandle {
   features(configMatch: HTMLMediaElement | null): CandidateFeatures;
   /** Viewport rect, when there's something on screen to point at. */
   rect(): DOMRect | null;
-  play(): void;
+  play(): Promise<PlayResult>;
   pause(): void;
   seek(seconds: number): void;
   setMuted(muted: boolean): void;
@@ -72,8 +78,13 @@ class DirectHandle implements MediaHandle {
     return this.element.isConnected ? this.element.getBoundingClientRect() : null;
   }
 
-  play(): void {
-    void this.element.play().catch(() => undefined);
+  async play(): Promise<PlayResult> {
+    try {
+      await this.element.play();
+      return 'playing';
+    } catch (err) {
+      return (err as { name?: unknown } | null)?.name === 'NotAllowedError' ? 'blocked' : 'failed';
+    }
   }
   pause(): void {
     this.element.pause();
@@ -117,8 +128,9 @@ class BridgedHandle implements MediaHandle {
   private send(cmd: BridgeCommand): void {
     document.dispatchEvent(new CustomEvent(EVT_COMMAND, { detail: JSON.stringify(cmd) }));
   }
-  play(): void {
+  play(): Promise<PlayResult> {
     this.send({ id: this.state.id, cmd: 'play' });
+    return Promise.resolve('unknown');
   }
   pause(): void {
     this.send({ id: this.state.id, cmd: 'pause' });

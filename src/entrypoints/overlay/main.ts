@@ -26,6 +26,8 @@ const root = document.documentElement;
 const badge = document.getElementById('badge') as HTMLElement;
 const dismiss = document.getElementById('dismiss') as HTMLButtonElement;
 const prompt = document.getElementById('prompt') as HTMLElement;
+const promptStart = document.getElementById('prompt-start') as HTMLButtonElement;
+const promptStatus = document.getElementById('prompt-status') as HTMLElement;
 let front = document.getElementById('layer-a') as HTMLElement;
 let back = document.getElementById('layer-b') as HTMLElement;
 
@@ -189,8 +191,17 @@ async function playAd(cmd: Extract<OverlayCommand, { type: 'ad' }>): Promise<voi
 }
 
 let lastBlackoutTitle: string | null = null;
+let lastAttempt = 0;
 
-function showBlackout(title: string | null, offerStart: boolean): void {
+/** Pulse the Start button: Wtv just tried to start playback itself. */
+function pulseStart(): void {
+  promptStart.classList.remove('pulse');
+  void promptStart.offsetWidth; // Restart the animation.
+  promptStart.classList.add('pulse');
+}
+
+function showBlackout(cmd: Extract<OverlayCommand, { type: 'blackout' }>): void {
+  const { title, prompt: offerStart } = cmd;
   // Same title, prompt just appearing: keep the title on screen instead of re-fading it.
   const same = title === lastBlackoutTitle && front.classList.contains('visible');
   if (!same) {
@@ -199,17 +210,23 @@ function showBlackout(title: string | null, offerStart: boolean): void {
   }
   lastBlackoutTitle = title;
   prompt.hidden = !offerStart;
+  promptStatus.textContent = cmd.status ?? '';
+  if (cmd.attempt > lastAttempt && offerStart) pulseStart();
+  lastAttempt = cmd.attempt;
 }
 
 function handle(cmd: OverlayCommand | null): void {
   if (!cmd) return;
-  if (cmd.type !== 'blackout') lastBlackoutTitle = null;
+  if (cmd.type !== 'blackout') {
+    lastBlackoutTitle = null;
+    lastAttempt = 0;
+  }
   switch (cmd.type) {
     case 'ad':
       void playAd(cmd);
       break;
     case 'blackout':
-      showBlackout(cmd.title, cmd.prompt);
+      showBlackout(cmd);
       break;
     case 'shield':
       reset();
