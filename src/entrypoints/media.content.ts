@@ -4,6 +4,7 @@ import { DEV_TOOLS } from '../lib/env';
 import { startMediaAgent } from '../lib/media/agent';
 import { MSG_PREVIEW_OVERLAY, isStatusRequest, type FrameStatus } from '../lib/messages';
 import { startAdOverlay } from '../lib/overlay/ad-overlay';
+import { startPickerService } from '../lib/picker/service';
 import { BUNDLED_MATCHES } from '../lib/sites/bundled';
 
 const PREVIEW_MS = 12_000;
@@ -22,6 +23,7 @@ export default defineContentScript({
     const agent = startMediaAgent(ctx, { debug: DEV_TOOLS });
     const ads = startAdWatcher(ctx, agent, { debug: DEV_TOOLS });
     const overlay = startAdOverlay(ctx, agent, ads);
+    startPickerService(ctx, agent, overlay);
 
     const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {
       if (isStatusRequest(msg)) {

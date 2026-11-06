@@ -14,12 +14,15 @@ import { DEFAULT_AD_ITEMS } from './program';
 export interface AdOverlay {
   /** Dev aid: show the ad overlay for `ms` without an ad. Returns false with nothing to cover. */
   preview(ms: number): boolean;
+  /** Get out of the way (e.g. while the selector picker runs), then come back. */
+  suspend(on: boolean): void;
 }
 
 export function startAdOverlay(ctx: ContentScriptContext, agent: MediaAgent, ads: AdWatcher): AdOverlay {
   const overlay = createOverlayHost(ctx.signal);
   let dismissed = false;
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  let suspended = false;
 
   // Only cover something that's on screen. Audio-only ads just get muted.
   const target: OverlayTarget = () => agent.primary()?.rect() ?? null;
@@ -29,7 +32,7 @@ export function startAdOverlay(ctx: ContentScriptContext, agent: MediaAgent, ads
     const active = ads.status()?.active ?? false;
     const settings = ads.settings();
     if (!active) dismissed = false;
-    if (active && settings.adOverlay && !dismissed) {
+    if (active && settings.adOverlay && !dismissed && !suspended) {
       overlay.show(
         { type: 'ad', host: location.hostname, items: [...DEFAULT_AD_ITEMS], muted: settings.muteAds },
         target,
@@ -73,6 +76,14 @@ export function startAdOverlay(ctx: ContentScriptContext, agent: MediaAgent, ads
         sync();
       }, ms);
       return true;
+    },
+    suspend(on) {
+      suspended = on;
+      if (on && previewTimer !== undefined) {
+        clearTimeout(previewTimer);
+        previewTimer = undefined;
+      }
+      sync();
     },
   };
 }

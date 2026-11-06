@@ -26,7 +26,7 @@ Each step is reviewed and committed before the next one starts.
     - `exists` / `visible` conditions, `MutationObserver` driven, debounce/grace period.
     - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
     - Per-frame ad ports to the background, `AD` badge, `Mute ads` / `Auto-skip ads` settings in the popup.
-- [ ] **Step 4 — Overlay iframe**
+- [x] **Step 4 — Overlay iframe**
     - Extension-origin iframe for blackout, quotes, slideshow, click shield.
     - Image import into IndexedDB, domain folders + keyword resolution, filename durations, bundled default cat pack.
     - Options page (folder import + "Try it"), popup toggle + link. Blackout mode built but only used from step 7.
@@ -142,16 +142,21 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 
 ### Selector picker (side panel)
 
-- `chrome.sidePanel` UI to pick DOM nodes and generate unique CSS selectors for each role.
-- Generate **several ranked candidates** per pick (base on [`@medv/finder`](https://github.com/antonmedv/finder)):
-    - Prefer: `id`, `data-*`, `itemprop`.
-    - Then: stable class names.
-    - Avoid: `nth-child` chains, hashed classes like `css-1x9f2`.
+- `chrome.sidePanel` UI to pick DOM nodes and generate unique CSS selectors for each role. Opened from the popup's **Fix selectors…**. Ships in the store build (users fix their own session); only the repo writer is dev-only.
+- Per role: current selectors with live match counts and which one wins, source (built-in / yours), **Pick**, **Pick in 5 s**, **Type selector**, **Reset**.
+- Generate **several ranked candidates** per pick (own generator in `src/lib/picker/`, no dependency):
+    - Prefer: `id`, test ids (`data-testid` etc.), `itemprop`, other `data-*`, `name`.
+    - Then: stable class names (singles and pairs), then "inside a stable ancestor".
+    - Last resort: `nth-of-type` path from the nearest stable ancestor.
+    - Filtered out: hashed / generated ids and classes (`css-1x9f2`, `Button_root__a1b2c`, framework ids), state classes (`active`, `is-open`). Pure + tested.
     - Avoid text / `aria-label` selectors. They're localized and break for non-English users.
-- **Delayed pick** ("pick in 5s" / "pick when it next appears") because ad indicators are transient.
-- Live match count + highlight all matches. Warn when a single-element role matches more than one node.
-- **Save** writes the override to `chrome.storage.local`.
-- **Dev mode only:** "Write to repo" saves the config JSON straight into `src/sites/` via File System Access API. Not present in the store build.
+    - Elements in open shadow roots get host selectors joined with ` >>> `. Non-unique candidates are kept but ranked down.
+- **In-page picker:** hover highlight with tag + size, click to select (page clicks swallowed), **↑ / ↓** walk to parent and back, **P** play/pause the primary (freeze an ad), **Esc** cancel. The keys work whether the page or the side panel has focus (the panel forwards them). The ad overlay steps aside while picking. Runs in every frame; the frame you click in answers.
+- **Delayed pick** (5 s countdown) because skip buttons and ad indicators are transient.
+- **Editor:** candidate list, editable selector, condition (default / exists / visible), live test with green outlines on every match, "keep current selectors as fallbacks" (on by default: the new one goes first).
+- **Save** writes the override to `chrome.storage.local`. On a generic site this creates a user-defined site for the host (minus `www.`).
+- **Copy site config JSON** (all builds): the effective config in the `src/sites/` file format, for users to send fixes.
+- **Dev mode only:** **Write to repo…** saves `<id>.json` straight into `src/sites/` via File System Access API (folder picked once, handle remembered). Not present in the store build. Once the rebuilt bundled role matches, the local override is pruned automatically on update (hash stamping).
 
 ### Overlay iframe (blackout, quotes, slideshow)
 

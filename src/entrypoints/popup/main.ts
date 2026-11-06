@@ -194,12 +194,23 @@ async function render(): Promise<void> {
     devRow.push(row('Dev', el('div', { className: 'actions' }, preview), out));
   }
 
+  // Selector side panel. sidePanel.open() must run synchronously inside the click.
+  const selectors = el('button', { text: 'Fix selectors…' });
+  selectors.type = 'button';
+  selectors.addEventListener('click', () => {
+    browser.sidePanel
+      .open({ windowId: tab.windowId })
+      .then(() => window.close())
+      .catch((err: unknown) => console.error('[wtv] could not open side panel:', err));
+  });
+  const selectorsRow = status ? [el('div', { className: 'actions' }, selectors)] : [];
+
   app.replaceChildren(
     el('h1', { text: host }),
     el('div', { text: support }),
     ...(actions.childElementCount > 0 ? [actions] : []),
     ...notes,
-    row('Media', ...describeMedia(status?.media ?? null, granted)),
+    row('Media', ...describeMedia(status?.media ?? null, granted), ...selectorsRow),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted)))] : []),
     settingsRow,
     ...devRow,
