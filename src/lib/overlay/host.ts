@@ -9,8 +9,12 @@
  * - Created lazily (or preloaded), kept alive between shows so the next ad is instant.
  * - While visible, a rAF loop keeps it glued to the target rect. rAF doesn't run in
  *   background tabs, which is fine because nothing is painted there either.
+ * - If the target briefly has no box (the site re-laying out its player, say on first
+ *   load), it stays where it last was for HOLD_MS rather than flashing what it covers.
  */
 import { browser } from 'wxt/browser';
+import { WTV_UI_ATTR } from '../ads/probe';
+import { DEV_TOOLS } from '../env';
 import { OVERLAY_INIT, OVERLAY_PAGE, parseOverlayEvent, type OverlayCommand, type OverlayEvent } from './program';
 import type { Box } from './shield';
 
@@ -39,6 +43,13 @@ const BASE_STYLE = [
   'display: none',
 ].join(';');
 
+const HOLD_MS = 1000;
+
+/** Dev builds: a timeline of what the overlay did, to diagnose flashes. */
+function trace(...args: unknown[]): void {
+  if (DEV_TOOLS) console.debug(`[wtv] overlay +${Math.round(performance.now())}ms:`, ...args);
+}
+
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -52,6 +63,9 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
   let target: OverlayTarget | null = null;
   let raf = 0;
   let lastRect = '';
+  /** Whether the overlay is currently placed on a real box, and since when it's had none. */
+  let placed = false;
+  let lostAt = 0;
 
   function send(cmd: OverlayCommand): void {
     if (port) port.postMessage(cmd);
@@ -61,11 +75,13 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
   function ensure(): HTMLDivElement | null {
     if (host?.isConnected) return host;
     if (!document.documentElement || signal.aborted) return null;
+    if (host) trace('the page removed the overlay; recreating it (it will be blank until it loads)');
 
     const token = randomToken();
     const el = document.createElement('div');
     el.style.cssText = BASE_STYLE;
     el.popover = 'manual';
+    el.setAttribute(WTV_UI_ATTR, '');
     const root = el.attachShadow({ mode: 'closed' });
     const iframe = document.createElement('iframe');
     iframe.src = `${browser.runtime.getURL(OVERLAY_PAGE)}#${token}`;
@@ -101,10 +117,22 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
     if (t === 'viewport') rect = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
     else if (t && t.width > 0 && t.height > 0) rect = t;
     else {
+      const now = performance.now();
+      if (placed) {
+        lostAt ||= now;
+        if (now - lostAt < HOLD_MS) return;
+      }
+      if (placed) trace(`nothing to cover for ${HOLD_MS}ms; hiding`);
       host.style.visibility = 'hidden';
       lastRect = '';
+      placed = false;
+      lostAt = 0;
       return;
     }
+    if (lostAt) trace(`box back after ${Math.round(performance.now() - lostAt)}ms`);
+    else if (!placed) trace('placed', rect);
+    placed = true;
+    lostAt = 0;
     const key = `${rect.left},${rect.top},${rect.width},${rect.height}`;
     if (key === lastRect) return;
     lastRect = key;
@@ -148,9 +176,11 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
       if (!el) return;
       target = t;
       send(command);
-      // A blackout must be black from the first frame, before the iframe has painted
-      // (at document_start that can take a moment). Everything else stays see-through.
-      el.style.background = command.type === 'blackout' ? '#000' : 'transparent';
+      trace('show', command.type);
+      // Blackout and ad pictures are opaque: paint black from the first frame, so nothing
+      // shows through before the iframe has loaded or switched over (at document_start, or
+      // on the first ad, that can take a moment). The shield is see-through.
+      el.style.background = command.type === 'shield' ? 'transparent' : '#000';
       el.style.display = 'block';
       lastRect = '';
       restack();
@@ -159,7 +189,10 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
     },
     hide() {
       if (!host || !target) return;
+      trace('hide');
       target = null;
+      placed = false;
+      lostAt = 0;
       cancelAnimationFrame(raf);
       send({ type: 'hide' });
       try {

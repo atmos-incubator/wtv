@@ -10,6 +10,9 @@
       "#movie_player video.html5-main-video",
       "video.html5-main-video"
     ],
+    "player": [
+      "#movie_player"
+    ],
     "adIndicator": [
       "div.ytp-ad-badge__text--clean-player",
       {

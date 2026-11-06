@@ -2,6 +2,7 @@ import type { RoleName } from '../sites/schema';
 
 export const ROLE_LABELS: Record<RoleName, string> = {
   video: 'Video',
+  player: 'Player',
   adIndicator: 'Ad indicator',
   skip: 'Skip button',
   playButton: 'Play button',
@@ -14,6 +15,7 @@ export const ROLE_LABELS: Record<RoleName, string> = {
 
 export const ROLE_HINTS: Record<RoleName, string> = {
   video: 'The main player. Picking its container works too.',
+  player: 'The player’s outer box (video, controls, ads). The ad pictures cover it, and an unlisted Skip button is searched for inside it.',
   adIndicator: 'Something that is only there (or only visible) while an ad plays. Pick it during an ad.',
   skip: 'The “Skip ad” button. It only shows mid-ad, so use the countdown.',
   playButton: 'The player’s own play / pause button.',

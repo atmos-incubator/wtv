@@ -11,6 +11,15 @@
  *
  * Ad start is reported immediately. Ad end waits out a grace period, so back-to-back
  * ads don't flash the sound on between them.
+ *
+ * Skip: the `skip` role first. Failing that, a visible button inside the site's `player`
+ * role that looks like a Skip button (see findUnlistedSkip), then anything saying "skip"
+ * where the show is or was (the ad probe, probe.ts). Unlisted buttons are logged so they
+ * can be added to the role: sites add ad formats with their own Skip buttons faster than
+ * configs can follow.
+ *
+ * While an ad shows, the probe runs every PROBE_EVERY_MS. Its latest result is in
+ * status().probe, and dev builds log it to the console whenever it changes.
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
@@ -22,12 +31,16 @@ import { scheduler } from '../schedule';
 import { DEFAULT_SETTINGS, parseSettings, type Settings } from '../settings';
 import type { SiteProfile } from '../sites/registry';
 import { KEYS } from '../storage';
+import type { Box } from '../overlay/shield';
+import { probeAds, probeSignature, type AdProbe, type ProbeArea } from './probe';
 import { createAdReporter } from './reporter';
+import { SKIP_CANDIDATES, describeElement, looksLikeSkip } from './skip';
 
 export const AD_END_GRACE_MS = 1500;
 const EVALUATE_DELAY_MS = 150;
 const SKIP_RETRY_MS = 1000;
 const SKIP_MAX_ATTEMPTS = 3;
+const PROBE_EVERY_MS = 500;
 const PRIMARY_EVENTS = ['timeupdate', 'playing', 'loadedmetadata', 'durationchange', 'emptied'] as const;
 
 export interface AdWatcher {
@@ -67,6 +80,16 @@ export function startAdWatcher(
   let skipTarget: WeakRef<Element> | null = null;
   let skipAttempts = 0;
   let lastSkipAt = 0;
+  /** Unlisted Skip buttons already reported to the console. */
+  const reportedUnlisted = new WeakSet<Element>();
+  /** Where the primary video was (page coordinates) the last time no ad showed. */
+  let homeRect: Box | null = null;
+  let adStartedAt = 0;
+  let lastProbeAt = 0;
+  let lastProbeSig = '';
+  let probeTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastProbe: AdProbe | null = null;
+  let probeCandidates: Element[] = [];
   let observing = false;
   let primaryCleanup: (() => void) | null = null;
   const adListeners = new Set<(active: boolean) => void>();
@@ -88,7 +111,7 @@ export function startAdWatcher(
   const roles = () => agent.profile().site?.config.roles;
 
   function log(...args: unknown[]): void {
-    if (options.debug) console.debug('[wtv] ads:', ...args);
+    if (options.debug) console.debug(`[wtv] ads +${Math.round(performance.now())}ms:`, ...args);
   }
 
   function report(): void {
@@ -104,6 +127,10 @@ export function startAdWatcher(
       }
       if (!reported) {
         reported = true;
+        adStartedAt = performance.now();
+        lastProbeAt = 0;
+        lastProbeSig = '';
+        lastProbe = null;
         log('ad started');
         report();
         notify(adListeners, true);
@@ -116,6 +143,7 @@ export function startAdWatcher(
         skipTarget = null;
         skipAttempts = 0;
         seekedPast = false;
+        probeCandidates = [];
         log('ad ended');
         report();
         notify(adListeners, false);
@@ -123,13 +151,37 @@ export function startAdWatcher(
     }
   }
 
+  /** A clickable Skip-looking button inside the player box, when no skip selector matched. */
+  function findUnlistedSkip(): Element | null {
+    const matchers = roles()?.player;
+    const player = matchers ? matchRole('player', matchers).match?.element : null;
+    if (!player) return null;
+    for (const el of player.querySelectorAll(SKIP_CANDIDATES)) {
+      if (looksLikeSkip(el) && isClickable(el)) return el;
+    }
+    return null;
+  }
+
   function trySkip(): void {
     const matchers = roles()?.skip;
-    if (!rawActive || !settings.autoSkip || !matchers) return;
-    const { match, errors } = matchRole('skip', matchers);
-    selectorErrors.push(...errors);
-    const el = match?.element;
-    if (!el || !isClickable(el)) return;
+    if (!rawActive || !settings.autoSkip) return;
+    let el: Element | null = null;
+    if (matchers) {
+      const { match, errors } = matchRole('skip', matchers);
+      selectorErrors.push(...errors);
+      if (match && isClickable(match.element)) el = match.element;
+    }
+    const matchedSkip = el;
+    el ??= findUnlistedSkip() ?? probeCandidates.find((c) => c.isConnected && isClickable(c)) ?? null;
+    if (el && el !== matchedSkip && !reportedUnlisted.has(el)) {
+      reportedUnlisted.add(el);
+      console.info(
+        `[wtv] ads: clicking a Skip button that isn't in this site's skip role: ${describeElement(el)}. ` +
+          'Add a selector for it (Fix selectors… → Skip button) so it stays found.',
+        el,
+      );
+    }
+    if (!el) return;
 
     const now = Date.now();
     if (skipTarget?.deref() === el) {
@@ -154,16 +206,86 @@ export function startAdWatcher(
     if (el instanceof HTMLElement) simulateClick(el);
   }
 
-  /** Seek the ad playing in the primary video to its end. Returns true if it did. */
+  /**
+   * Seek the ad playing in the primary video to its end. Returns true if it did.
+   * Only while the primary is playing: with ads in the main video that's the ad. A
+   * paused primary under an ad is the show itself, held while the site draws a static
+   * (image) ad, and seeking that would jump to the end of the show.
+   */
   function seekPastAd(): boolean {
     const primary = agent.primary();
-    const duration = primary?.features(null).duration ?? NaN;
-    if (!primary || !Number.isFinite(duration) || duration <= 0) return false;
+    const f = primary?.features(null);
+    const duration = f?.duration ?? NaN;
+    if (!primary || !f?.playing || !Number.isFinite(duration) || duration <= 0) return false;
     seekedPast = true;
     skipSeeks++;
     log(`skip button ignored our click; seeking the ad to its end (${Math.round(duration)}s)`);
     primary.seek(duration);
     return true;
+  }
+
+  /** Remember where the show is, so the probe can look there once an ad moves it. */
+  function trackHome(): void {
+    const r = agent.primary()?.rect();
+    if (!r || r.width <= 0 || r.height <= 0) return;
+    homeRect = { left: r.left + window.scrollX, top: r.top + window.scrollY, width: r.width, height: r.height };
+  }
+
+  function probeAreas(): ProbeArea[] {
+    const areas: ProbeArea[] = [];
+    const playerMatchers = roles()?.player;
+    const player = playerMatchers ? matchRole('player', playerMatchers).match?.element : null;
+    const pr = player?.getBoundingClientRect();
+    if (pr && pr.width > 0 && pr.height > 0) areas.push({ name: 'player', rect: pr });
+    const vr = agent.primary()?.rect();
+    if (vr && vr.width > 0 && vr.height > 0) areas.push({ name: 'video', rect: vr });
+    if (homeRect) {
+      areas.push({
+        name: 'video-before-ad',
+        rect: { ...homeRect, left: homeRect.left - window.scrollX, top: homeRect.top - window.scrollY },
+      });
+    }
+    return areas;
+  }
+
+  function runProbe(): void {
+    const now = performance.now();
+    if (now - lastProbeAt < PROBE_EVERY_MS) return;
+    lastProbeAt = now;
+    // Static ads can sit with nothing playing and nothing mutating: keep looking.
+    if (probeTimer !== undefined) clearTimeout(probeTimer);
+    probeTimer = setTimeout(() => {
+      probeTimer = undefined;
+      if (rawActive) evaluateSoon();
+    }, PROBE_EVERY_MS);
+
+    const areas = probeAreas();
+    if (areas.length === 0) return;
+    const { probe, candidates } = probeAds(areas, adStartedAt);
+    lastProbe = probe;
+    probeCandidates = candidates;
+    const sig = probeSignature(probe);
+    if (sig === lastProbeSig || !options.debug) return;
+    lastProbeSig = sig;
+    logProbe(probe, candidates);
+  }
+
+  function logProbe(probe: AdProbe, candidates: Element[]): void {
+    const visibleHits = probe.skip.filter((s) => s.visible && s.areas.length > 0).length;
+    console.groupCollapsed(
+      `[wtv] ads probe +${probe.at}ms: ${visibleHits} visible "skip" in the show area, ` +
+        `${probe.skip.length} on the page, ${probe.frames.length} iframe(s)`,
+    );
+    console.log('areas', probe.areas);
+    console.log('top-most element per sample point', probe.under);
+    console.log('element stack at each centre (top first)', probe.stack);
+    if (probe.skip.length > 0) {
+      console.table(probe.skip.map(({ html: _html, areas, ...rest }) => ({ ...rest, areas: areas.join(', ') })));
+      for (const s of probe.skip) console.log(`${s.target} html:`, s.html);
+    }
+    if (probe.frames.length > 0) console.table(probe.frames);
+    if (candidates.length > 0) console.log('click candidates (live elements)', candidates);
+    console.groupEnd();
   }
 
   function evaluate(): void {
@@ -175,6 +297,8 @@ export function startAdWatcher(
     const { match, errors } = matchRole('adIndicator', matchers);
     selectorErrors = errors;
     setRaw(match !== null);
+    if (rawActive) runProbe();
+    else trackHome();
     trySkip();
   }
 
@@ -233,6 +357,7 @@ export function startAdWatcher(
     offPrimary();
     primaryCleanup?.();
     if (endTimer !== undefined) clearTimeout(endTimer);
+    if (probeTimer !== undefined) clearTimeout(probeTimer);
     browser.storage.onChanged.removeListener(onStorageChanged);
     reporter.close();
   });
@@ -262,6 +387,7 @@ export function startAdWatcher(
         autoSkip: settings.autoSkip,
         skipClicks,
         skipSeeks,
+        probe: lastProbe,
         selectorErrors: [...new Set(selectorErrors)],
       };
     },

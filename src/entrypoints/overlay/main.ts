@@ -36,6 +36,8 @@ let back = document.getElementById('layer-b') as HTMLElement;
 let port: MessagePort | null = null;
 /** Bumped on every command; stale async work checks it and bails. */
 let generation = 0;
+/** The ad program on screen, so a repeat of the same command doesn't restart it from black. */
+let adKey: string | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let shield = false;
 let lastActivity = 0;
@@ -70,6 +72,7 @@ function clearLayer(layer: HTMLElement): void {
 
 function reset(): void {
   generation++;
+  adKey = null;
   if (timer !== undefined) clearTimeout(timer);
   timer = undefined;
   clearLayer(front);
@@ -163,6 +166,7 @@ async function renderSlide(slide: Slide, gen: number): Promise<void> {
 
 async function playAd(cmd: Extract<OverlayCommand, { type: 'ad' }>): Promise<void> {
   reset();
+  adKey = JSON.stringify([cmd.host, cmd.items]);
   const gen = generation;
   badge.textContent = cmd.muted ? 'Ad · muted' : 'Ad';
   badge.hidden = false;
@@ -227,6 +231,10 @@ function handle(cmd: OverlayCommand | null): void {
   }
   switch (cmd.type) {
     case 'ad':
+      if (adKey === JSON.stringify([cmd.host, cmd.items])) {
+        badge.textContent = cmd.muted ? 'Ad · muted' : 'Ad';
+        break;
+      }
       void playAd(cmd);
       break;
     case 'blackout':

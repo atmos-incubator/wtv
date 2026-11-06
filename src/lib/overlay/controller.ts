@@ -12,6 +12,8 @@
  *        a show (isShow)               → transparent shield, site control bar left uncovered
  *   6. Otherwise                       → nothing
  *
+ * The ad slideshow covers the site's `player` role when it has one (some ads, like YouTube's
+ * static ones, move or shrink the <video> and draw outside it), else the primary video.
  * The ✕ on the ad slideshow hides the overlay, shield included, for the rest of that ad.
  * The ad program is the playlist entry's `[ads]` block, or the default `[img]` slideshow.
  *
@@ -25,6 +27,7 @@
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { AdWatcher } from '../ads/watcher';
 import { matchRole } from '../dom/query';
+import { DEV_TOOLS } from '../env';
 import type { MediaAgent } from '../media/agent';
 import { scheduler } from '../schedule';
 import type { PlaylistClient } from '../playlist/client';
@@ -78,8 +81,23 @@ export function startOverlay(
     return el instanceof HTMLVideoElement && el.isConnected ? el : null;
   };
 
+  let playerEl: WeakRef<Element> | null = null;
+  /** The site's `player` box, if configured and on screen. Re-queried only when it goes away. */
+  function playerRect(): DOMRect | null {
+    let el = playerEl?.deref();
+    if (!el?.isConnected) {
+      const matchers = agent.profile().site?.config.roles.player;
+      el = matchers ? matchRole('player', matchers).match?.element : undefined;
+      playerEl = el ? new WeakRef(el) : null;
+    }
+    const r = el?.getBoundingClientRect();
+    return r && r.width > 0 && r.height > 0 ? r : null;
+  }
+
   // Only cover something that's on screen. Audio-only ads just get muted.
-  const coverTarget: OverlayTarget = () => agent.primary()?.rect() ?? null;
+  // The player box doesn't depend on which media element is primary right now, which
+  // can briefly be none while the site swaps or resizes its video.
+  const coverTarget: OverlayTarget = () => playerRect() ?? agent.primary()?.rect() ?? null;
   const shieldTarget: OverlayTarget = () => {
     const el = primaryVideo();
     if (!el) return null;
@@ -112,6 +130,14 @@ export function startOverlay(
     const blackout = next === 'blackout' ? playlist.blackout() : null;
     const signature = blackout ? JSON.stringify(blackout) : '';
     if (next === mode && signature === blackoutShown && !force) return;
+    if (DEV_TOOLS && next !== mode) {
+      console.debug(`[wtv] overlay +${Math.round(performance.now())}ms: mode ${mode ?? 'none'} → ${next ?? 'none'}`, {
+        ad: adActive(),
+        dismissed,
+        suspended,
+        video: Boolean(primaryVideo()),
+      });
+    }
     mode = next;
     blackoutShown = signature;
     switch (next) {
@@ -269,6 +295,7 @@ export function startOverlay(
     sync();
   });
   const offProfile = agent.onProfileChange(() => {
+    playerEl = null;
     if (ads.settings().adOverlay && siteHasAds()) overlay.preload();
     syncSoon();
   });

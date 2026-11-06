@@ -15,7 +15,7 @@ import { isRecord } from '../sites/validate';
 import type { RoleName } from '../sites/schema';
 
 /** Roles whose absence on a page that's playing its video means something is wrong. */
-export const PLAYER_ROLES = ['video', 'playButton', 'progressBar'] as const satisfies readonly RoleName[];
+export const PLAYER_ROLES = ['video', 'player', 'playButton', 'progressBar'] as const satisfies readonly RoleName[];
 export type PlayerRole = (typeof PLAYER_ROLES)[number];
 
 export const FAIL_STREAK = 2;

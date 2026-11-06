@@ -9,6 +9,7 @@ export const SCHEMA_VERSION = 1;
 
 export const ROLE_NAMES = [
   'video',
+  'player',
   'adIndicator',
   'skip',
   'playButton',
@@ -35,6 +36,8 @@ export type Condition = (typeof CONDITIONS)[number];
 /** Default condition per role when a matcher doesn't specify `when`. */
 export const ROLE_DEFAULT_WHEN: Record<RoleName, Condition> = {
   video: 'exists',
+  // The box ads are drawn in. Present the whole time the page has a player.
+  player: 'exists',
   adIndicator: 'visible',
   skip: 'visible',
   playButton: 'visible',

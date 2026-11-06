@@ -1,4 +1,5 @@
 /** Extension messages (runtime / tabs messaging). */
+import type { AdProbe } from './ads/probe';
 import type { HandleKind } from './media/registry';
 import type { SiteProfile } from './sites/registry';
 
@@ -45,6 +46,8 @@ export interface AdStatus {
   skipClicks: number;
   /** Skippable ads skipped by seeking to their end, because the Skip click was ignored. */
   skipSeeks: number;
+  /** The latest ad probe (what's where the show was) during the current or last ad. */
+  probe: AdProbe | null;
   selectorErrors: string[];
 }
 

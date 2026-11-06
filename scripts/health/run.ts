@@ -13,7 +13,10 @@
  * once to accept cookie consent or sign in.
  *
  * Results go to .health/results/<timestamp>/ (report.json, summary.md, and the page HTML
- * + screenshot for each failing site) and .health/results/latest.md.
+ * + screenshot for each failing site) and .health/results/latest.md. While an ad shows,
+ * each new ad probe result (what's where the show was, see src/lib/ads/probe.ts) is saved
+ * with the page HTML as <site>-ad-<n>.json / .html, up to AD_SNAPSHOTS per site, so new
+ * ad formats can be studied after they've gone.
  * Exit code: 0 all passed, 1 a site failed, 2 the run itself couldn't start.
  *
  *   --site <id>       only this site (repeatable)
@@ -50,6 +53,8 @@ const POLL_MS = 1000;
 const SETTLE_MS = 5000;
 /** Extra time allowed once an ad has been seen (pre-rolls can be long or stacked). */
 const AD_EXTRA_MS = 120_000;
+/** Ad snapshots kept per site. */
+const AD_SNAPSHOTS = 3;
 
 /** The slice of the chrome.* API used inside the service worker. */
 interface ChromeLite {
@@ -63,7 +68,27 @@ declare const chrome: ChromeLite;
 
 interface StatusLite {
   media: { primary: { playing: boolean; source: 'config' | 'heuristic' } | null } | null;
-  ads: { active: boolean } | null;
+  ads: { active: boolean; probe?: ({ at: number } & Record<string, unknown>) | null } | null;
+}
+
+/** Saves the page and the ad probe each time the probe finds something new. */
+function adSnapshotter(page: Page, site: string, outDir: string): (probe: StatusLite['ads']) => Promise<void> {
+  const seen = new Set<string>();
+  return async (ads) => {
+    const probe = ads?.probe;
+    if (!probe || seen.size >= AD_SNAPSHOTS) return;
+    const { at: _at, ...rest } = probe;
+    const key = JSON.stringify(rest);
+    if (seen.has(key)) return;
+    seen.add(key);
+    const base = join(outDir, `${site}-ad-${seen.size}`);
+    writeFileSync(`${base}.json`, JSON.stringify(probe, null, 2));
+    await page
+      .content()
+      .then((html) => writeFileSync(`${base}.html`, html))
+      .catch(() => undefined);
+    console.info(`[health] ${site}: ad snapshot ${seen.size} saved (${base}.json)`);
+  };
 }
 
 function fail(message: string): never {
@@ -140,7 +165,15 @@ function skipSeen(roles: RoleLite[] | null | undefined): boolean {
   return roles?.some((r) => r.role === 'skip' && r.matchedIndex !== null) ?? false;
 }
 
-async function observe(ext: Extension, page: Page, site: string, target: Target, timeoutMs: number): Promise<Observation> {
+async function observe(
+  ext: Extension,
+  page: Page,
+  site: string,
+  target: Target,
+  timeoutMs: number,
+  outDir: string,
+): Promise<Observation> {
+  const snapshot = adSnapshotter(page, site, outDir);
   const obs: Observation = {
     site,
     url: target.url,
@@ -169,6 +202,7 @@ async function observe(ext: Extension, page: Page, site: string, target: Target,
         if (!obs.adSeen) console.info(`[health] ${site}: ad showing, waiting it out`);
         obs.adSeen = true;
         playingSince = null;
+        await snapshot(status.ads);
         const report = await ext.ask<{ roles: RoleLite[] }>(tabId, { type: PICK_ROLES });
         if (skipSeen(report?.roles)) obs.skipSeen = true;
         continue;
@@ -272,7 +306,7 @@ async function main(): Promise<void> {
     }
     console.info(`[health] ${site}: ${target.url}`);
     const page = await context.newPage();
-    const result = evaluateRun(await observe(ext, page, site, target, timeoutMs));
+    const result = evaluateRun(await observe(ext, page, site, target, timeoutMs, outDir));
     results.push(result);
     console.info(`[health] ${site}: ${result.ok ? 'pass' : `FAIL: ${result.problems.join('; ')}`}`);
     if (!result.ok) {
