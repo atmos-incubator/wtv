@@ -23,6 +23,7 @@ describe('parseOverlayCommand', () => {
       prompt: false,
       attempt: 0,
       status: null,
+      canNext: true,
     });
     expect(parseOverlayCommand({ type: 'blackout', prompt: true, attempt: 2, status: ' Blocked ' })).toEqual({
       type: 'blackout',
@@ -30,7 +31,9 @@ describe('parseOverlayCommand', () => {
       prompt: true,
       attempt: 2,
       status: 'Blocked',
+      canNext: true,
     });
+    expect(parseOverlayCommand({ type: 'blackout', canNext: false })).toMatchObject({ canNext: false });
     expect(parseOverlayCommand({ type: 'blackout', attempt: -1 })).toMatchObject({ attempt: 0 });
   });
 

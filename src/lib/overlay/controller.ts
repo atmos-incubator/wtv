@@ -123,6 +123,7 @@ export function startOverlay(
             prompt: blackout?.prompt ?? false,
             attempt: blackout?.attempt ?? 0,
             status: blackout?.status ?? null,
+            canNext: blackout?.canNext ?? true,
           },
           () => 'viewport',
         );

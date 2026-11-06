@@ -3,8 +3,9 @@
  * it survives service-worker restarts. Every operation runs through one queue, so
  * overlapping events (an `ended` and a navigation, say) can't both advance.
  *
- * Moving to an entry: blackout the current page, bump `gen`, navigate the tab. The new
- * page's frames say hello; the runner answers with the entry (title, ad program) if the
+ * Moving to an entry: blackout the current page, bump `gen`, navigate the tab to the
+ * entry URL plus a `#wtv:` hash (start time + title: see hash.ts). The new page's frames
+ * say hello; the runner answers with the entry (title, ad program) if the
  * page is that entry. The top frame keeps its blackout up until something plays.
  *
  * End of an entry, whichever comes first:
@@ -22,6 +23,7 @@ import { isWebUrl } from '../permissions';
 import { KEYS } from '../storage';
 import { setTvMode } from '../view/controller';
 import { compilePlaylist, parsePlaylist } from './format';
+import { withWtvHash } from './hash';
 import { sameEntryUrl } from './match';
 import {
   PL_APPLY,
@@ -112,7 +114,9 @@ async function goTo(tabId: number, state: RunnerState, index: number): Promise<v
   await put(tabId, next);
   // Go dark on the page we're leaving, so its end screen / autoplay never shows.
   await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry) });
-  await browser.tabs.update(tabId, { url: entry.url });
+  // The #wtv: hash lets the new page black out (and know its start time) before it
+  // paints, without waiting for the hello round trip.
+  await browser.tabs.update(tabId, { url: withWtvHash(entry.url, { t: entry.startS, title: entry.title }) });
 }
 
 async function start(playlistId: string, index: number, tv: boolean): Promise<void> {

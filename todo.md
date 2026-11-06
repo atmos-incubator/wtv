@@ -36,7 +36,7 @@ Each step is reviewed and committed before the next one starts.
 - [x] **Step 6 — Maximize + TV fullscreen**
     - Top-layer popover maximize with `::backdrop` letterbox. Window-level fullscreen.
     - Click-to-play/pause shield, keyboard shortcuts.
-- [ ] **Step 7 — Playlists**
+- [x] **Step 7 — Playlists**
     - Parser / serializer with round-trip tests. Runner in background with session state.
     - Next / previous, end detection, blackout between entries, multi-playlist add, context menu, export.
 - [ ] **Step 8 — Hash params + seeking**
@@ -260,7 +260,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 - **End detection:** `ended`, or playback within 0.25 s of the end → next entry. A frame also reports **near-end** (last 20 s, media ≥ 30 s). Navigating off the entry *after* near-end counts as the end (YouTube autoplay / end screens can pre-empt `ended`); navigating off *before* it is the user doing something else, so the runner **detaches** and the popup offers **Resume** instead of hijacking the tab. Everything is ignored while an ad is playing (YouTube ads play in the same `<video>`), and `gen` stops late events from a page being left from skipping twice.
 - **Ads program:** the entry's `[ads]` block (else the playlist default, else site pictures) drives the ad overlay on that page.
 - **Popup:** playlist name, `3 / 10` and the entry title, **⏮ Previous**, **Next ⏭** / **Finish**, **Stop**; **Resume** when detached. Shortcuts: next `Alt+Shift+N`, previous unbound.
-- `t=` is parsed and stored with each entry; seeking to it is step 8 (it has to wait out pre-roll ads).
+- `t=` is parsed and stored with each entry; the page seeks to it (see Hash params + seeking).
 
 #### Playlist format
 
@@ -294,12 +294,19 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 
 ### Hash params + seeking
 
-- Jump to a specific video location with a timestamp hash.
+- Jump to a specific video location with a timestamp hash (`src/lib/playlist/hash.ts`, tested).
 - **Namespaced** to avoid colliding with sites' own hash routing / `t` params: `#wtv:t=97&d=Title`.
-- **Timestamp formats:** `200`, `200s`, `1:37`, `1:02:03`, `1h2m3s`.
+- **Timestamp formats:** `200`, `200s`, `1:37`, `1:02:03`, `1h2m3s` (`parseTimestamp`, tested). Written back as seconds.
 - Title uses `encodeURIComponent`, not underscore escaping (titles with real underscores would be lost).
-- The background playlist state is the source of truth. The hash is the synchronous fast-path that lets the `document_start` content script show the blackout before first paint.
-- **Seek only after `loadedmetadata` and after any pre-roll ad clears.** YouTube plays ads in the same `<video>`, so seeking during the ad seeks the ad.
+- The background playlist state is the source of truth. The hash is the synchronous fast path that lets the `document_start` content script show the blackout before first paint:
+    - The runner navigates to `entry URL + #wtv:t=…&d=…`. Entries with a hash of their own (hash-routed sites) are left alone and fall back to the hello round trip.
+    - The top frame reads it at `document_start`, blacks out immediately (the overlay host is painted black until its iframe has loaded), then removes it with `history.replaceState`, before the page's own scripts run. One-shot: reloads and copied links are the plain page.
+    - A hash arriving later (`hashchange`) starts over. That covers the runner moving to an entry whose URL only differs by hash from the current page (same video twice, Resume), which is a same-document navigation with no reload.
+    - A `#wtv:` link outside any playlist works on its own: blackout (no Next), start, seek.
+- **Seek only after `loadedmetadata` and after any pre-roll ad clears** (`src/lib/playlist/seek.ts`, pure + tested). Never while an ad is showing.
+    - On `quirks.adsInMainVideo` sites (YouTube plays ads in the same `<video>`, and ad detection can lag the ad's first frames), also only after 750 ms of ad-free playback, so a pre-roll is never the thing seeked.
+    - Elsewhere it seeks as soon as metadata arrives, before the first frame: no visible jump.
+    - Skipped for live streams, start times past the end, or when the player is already there (the site honoured its own parameter). Once per entry; every frame seeks its own primary (embedded players get the start time from the runner's hello).
 
 ### Site health checks
 

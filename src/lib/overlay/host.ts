@@ -148,6 +148,9 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
       if (!el) return;
       target = t;
       send(command);
+      // A blackout must be black from the first frame, before the iframe has painted
+      // (at document_start that can take a moment). Everything else stays see-through.
+      el.style.background = command.type === 'blackout' ? '#000' : 'transparent';
       el.style.display = 'block';
       lastRect = '';
       restack();
