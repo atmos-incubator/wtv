@@ -10,6 +10,7 @@ import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore } from '../../lib/sites/override-store';
 import { profileForHost } from '../../lib/sites/registry';
 import { KEYS, readKey, writeKey } from '../../lib/storage';
+import { VIEW_COMMAND, VIEW_STATE, type ViewOp, type ViewState } from '../../lib/view/messages';
 
 const app = document.getElementById('app') as HTMLElement;
 const local = browserAreas().local;
@@ -62,6 +63,64 @@ function toggle(label: string, key: keyof Settings, settings: Settings): HTMLEle
     })();
   });
   return el('label', { className: 'toggle' }, input, document.createTextNode(label));
+}
+
+async function viewState(tabId: number): Promise<ViewState | null> {
+  try {
+    return ((await browser.runtime.sendMessage({ type: VIEW_STATE, tabId })) as ViewState | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function viewCommand(tabId: number, op: ViewOp): Promise<void> {
+  await browser.runtime.sendMessage({ type: VIEW_COMMAND, op, tabId });
+}
+
+const COMMAND_LABELS: Record<string, string> = {
+  'play-pause': 'play/pause',
+  maximize: 'maximize',
+  'tv-mode': 'TV mode',
+  mute: 'mute',
+};
+
+/** "⌥⇧P play/pause · …" for the commands that have a key bound. */
+async function shortcutSummary(): Promise<string> {
+  const commands = await browser.commands.getAll().catch(() => []);
+  return commands
+    .filter((c) => c.shortcut && c.name && COMMAND_LABELS[c.name])
+    .map((c) => `${c.shortcut} ${COMMAND_LABELS[c.name!]}`)
+    .join(' · ');
+}
+
+function viewRow(tabId: number, state: ViewState, shortcuts: string): HTMLElement {
+  const actions = el('div', { className: 'actions' });
+  const add = (text: string, op: ViewOp, enabled: boolean, closeAfter: boolean, primary = false) => {
+    const b = el('button', { text, className: primary ? 'primary' : '' });
+    b.type = 'button';
+    b.disabled = !enabled;
+    b.addEventListener('click', () => {
+      b.disabled = true;
+      viewCommand(tabId, op)
+        .catch((err: unknown) => console.error('[wtv] view command failed:', err))
+        .finally(() => (closeAfter ? window.close() : void render()));
+    });
+    actions.append(b);
+  };
+  add(state.maximized ? 'Restore' : 'Maximize', 'toggle-maximize', state.maximized || state.canMaximize, !state.maximized);
+  add(state.tv ? 'Exit TV mode' : 'TV mode', 'toggle-tv', state.tv || state.canMaximize, !state.tv, !state.tv);
+
+  const keys = el('button', { text: 'Shortcuts…' });
+  keys.type = 'button';
+  keys.addEventListener('click', () => {
+    void browser.tabs.create({ url: 'chrome://extensions/shortcuts' }).then(() => window.close());
+  });
+  actions.append(keys);
+
+  const notes: Node[] = [];
+  if (!state.canMaximize && !state.maximized) notes.push(note('No video on screen to maximize.'));
+  notes.push(note(shortcuts ? `${shortcuts} · Esc restores` : 'Esc restores. Set keyboard shortcuts with Shortcuts….'));
+  return row('View', actions, ...notes);
 }
 
 async function frameStatus(tabId: number): Promise<FrameStatus | null> {
@@ -124,6 +183,7 @@ async function render(): Promise<void> {
     toggle('Mute ads', 'muteAds', settings),
     toggle('Auto-skip ads', 'autoSkip', settings),
     toggle('Show pictures during ads', 'adOverlay', settings),
+    toggle('Click the video to play / pause (blocks ad clicks)', 'clickShield', settings),
     el('div', { className: 'actions' }, pictures),
   );
 
@@ -135,10 +195,12 @@ async function render(): Promise<void> {
   const host = new URL(tab.url).hostname;
   const pattern = originPatternForHost(host);
 
-  const [overrides, granted, status] = await Promise.all([
+  const [overrides, granted, status, view, shortcuts] = await Promise.all([
     loadOverrideStore(local),
     browser.permissions.contains({ origins: [pattern] }),
     frameStatus(tabId),
+    viewState(tabId),
+    shortcutSummary(),
   ]);
   const profile = profileForHost(host, BUNDLED_SITES, overrides);
 
@@ -211,6 +273,7 @@ async function render(): Promise<void> {
     ...(actions.childElementCount > 0 ? [actions] : []),
     ...notes,
     row('Media', ...describeMedia(status?.media ?? null, granted), ...selectorsRow),
+    ...(status && view ? [viewRow(tabId, view, shortcuts)] : []),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted)))] : []),
     settingsRow,
     ...devRow,

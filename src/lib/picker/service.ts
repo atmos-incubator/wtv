@@ -6,7 +6,8 @@ import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { deepQueryAll, isElementVisible } from '../dom/query';
 import type { MediaAgent } from '../media/agent';
-import type { AdOverlay } from '../overlay/ad-overlay';
+import type { OverlayController } from '../overlay/controller';
+import { togglePlayback } from '../view/playback';
 import { ROLE_DEFAULT_WHEN, ROLE_NAMES, effectiveWhen, type Condition } from '../sites/schema';
 import { describeElement, generateCandidates } from './candidates';
 import {
@@ -32,13 +33,13 @@ function notifyPanel(message: unknown): void {
   browser.runtime.sendMessage(message).catch(() => undefined);
 }
 
-export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent, adOverlay: AdOverlay): void {
+export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent, overlay: OverlayController): void {
   let picker: Picker | null = null;
 
   function end(): void {
     picker?.stop();
     picker = null;
-    adOverlay.suspend(false);
+    overlay.suspend(false);
   }
 
   function rolesReport(): RolesReport {
@@ -72,13 +73,13 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
     switch (msg.type) {
       case 'wtv/pick/start':
         end();
-        adOverlay.suspend(true);
+        overlay.suspend(true);
         picker = startPicker({
           delayMs: msg.delayMs,
           roleLabel: ROLE_LABELS[msg.role],
           onPick(el) {
             picker = null;
-            adOverlay.suspend(false);
+            overlay.suspend(false);
             const result: PickResult = {
               type: PICK_RESULT,
               role: msg.role,
@@ -91,15 +92,10 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
           },
           onCancel() {
             picker = null;
-            adOverlay.suspend(false);
+            overlay.suspend(false);
             notifyPanel({ type: PICK_CANCELLED });
           },
-          togglePlayback() {
-            const primary = agent.primary();
-            if (!primary) return;
-            if (primary.features(null).playing) primary.pause();
-            else primary.play();
-          },
+          togglePlayback: () => togglePlayback(agent),
         });
         break;
       case 'wtv/pick/cancel':

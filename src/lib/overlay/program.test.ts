@@ -59,10 +59,33 @@ describe('parseOverlayCommand', () => {
   );
 });
 
+describe('shield command', () => {
+  it('requires the maximized flag', () => {
+    expect(parseOverlayCommand({ type: 'shield', maximized: true })).toEqual({ type: 'shield', maximized: true });
+    expect(parseOverlayCommand({ type: 'shield' })).toBeNull();
+  });
+});
+
 describe('parseOverlayEvent', () => {
-  it('accepts dismiss only', () => {
-    expect(parseOverlayEvent({ type: 'dismiss' })).toEqual({ type: 'dismiss' });
+  const key = { type: 'key', key: 'k', code: 'KeyK', shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false };
+
+  it('accepts the simple events', () => {
+    for (const type of ['dismiss', 'click', 'dblclick']) expect(parseOverlayEvent({ type })).toEqual({ type });
     expect(parseOverlayEvent({ type: 'other' })).toBeNull();
+    expect(parseOverlayEvent(null)).toBeNull();
+  });
+
+  it('validates activity coordinates', () => {
+    expect(parseOverlayEvent({ type: 'activity', x: 0.5, y: 1 })).toEqual({ type: 'activity', x: 0.5, y: 1 });
+    expect(parseOverlayEvent({ type: 'activity', x: 2, y: 0 })).toBeNull();
+    expect(parseOverlayEvent({ type: 'activity', x: 0.1 })).toBeNull();
+  });
+
+  it('validates forwarded keys and drops extra fields', () => {
+    expect(parseOverlayEvent({ ...key, extra: 1 })).toEqual(key);
+    expect(parseOverlayEvent({ ...key, key: '' })).toBeNull();
+    expect(parseOverlayEvent({ ...key, key: 'x'.repeat(33) })).toBeNull();
+    expect(parseOverlayEvent({ ...key, ctrlKey: 'yes' })).toBeNull();
   });
 });
 

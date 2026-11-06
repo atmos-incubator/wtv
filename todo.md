@@ -30,7 +30,7 @@ Each step is reviewed and committed before the next one starts.
     - Extension-origin iframe for blackout, quotes, slideshow, click shield.
     - Image import into IndexedDB, domain folders + keyword resolution, filename durations, bundled default cat pack.
     - Options page (folder import + "Try it"), popup toggle + link. Blackout mode built but only used from step 7.
-- [ ] **Step 5 — Selector picker side panel**
+- [x] **Step 5 — Selector picker side panel**
     - Element picker, candidate ranking, delayed pick, live match count, save as override.
     - Dev-mode only: write configs straight to the repo via File System Access API.
 - [ ] **Step 6 — Maximize + TV fullscreen**
@@ -165,7 +165,7 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
     - Channel: `MessageChannel` handed over with a random token that's also in the iframe URL hash (unreadable by the page).
     - Glued to the primary video's rect with a rAF loop while visible. No rect (audio-only) → no overlay, just mute.
     - Covering the video is the ad click shield. A ✕ on the overlay hides it for the rest of the current ad.
-    - Commands: `ad` (program + host), `blackout` (title, for playlists), `hide`.
+    - Commands: `ad` (program + host), `blackout` (title, for playlists), `shield` (transparent click shield, see Click to play / pause), `hide`.
     - Not using `use_dynamic_url` yet: it would stop sites from detecting Wtv by probing `overlay.html`, but needs testing against `runtime.getURL`.
 - **Images:**
     - "Load from folder" workflow in the options page (File System Access needs a page that stays open; the popup closes on the picker): pick a folder, import into IndexedDB (`unlimitedStorage`), keep the handle for **Re-import**. Import replaces the library atomically. Files over 100 MB are skipped.
@@ -217,21 +217,27 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 ### Click to play / pause
 
 - Play / pause by clicking the video itself without triggering accidental ad clicks.
-- Click shield lives in the overlay iframe:
-    - Normal playback: covers the video but leaves the site's control bar uncovered (per-site `quirks.controlBarInset`).
-    - During ads / maximized: covers everything.
-- Prefer clicking the site's `playButton` role over calling `video.play()` directly, which can desync the site's player UI.
-- Keyboard shortcuts via `chrome.commands` (play/pause, next, previous, maximize, mute toggle).
+- **Click shield** = the overlay iframe in a transparent `shield` mode (`src/lib/overlay/controller.ts` decides what the overlay shows). Setting `clickShield` ("Click the video to play / pause", on by default).
+    - Normal playback: covers the video but leaves the site's control bar uncovered (`quirks.controlBarInset`, default 56 px on generic sites). Only over a **show** (`src/lib/overlay/shield.ts`, pure + tested): the config `video` match, or an audible, non-looping video ≥ 30 s / live. Hover previews and GIF-style loops stay clickable.
+    - During ads (pictures off) and while maximized: covers everything. The ad ✕ hides the shield too for the rest of that ad, so the page is reachable.
+    - Click → play / pause. Double-click → maximize / restore. Pointer movement → synthetic `mousemove` on the video so the site still shows its controls. Clicks hand keyboard focus back to the page (`window.focus()`) so the site's own shortcuts keep working; keys pressed while the shield has focus are forwarded (Esc restores, others are re-dispatched to the page).
+    - Transparent only because the overlay root switches to `color-scheme: normal` in shield mode: Chrome paints an opaque backdrop behind an iframe whose color scheme differs from its `<iframe>` element's.
+- Play / pause prefers clicking the site's `playButton` role over calling `video.play()` directly (which can desync the site's player UI); falls back to the element if the click changed nothing after 400 ms (`src/lib/view/playback.ts`).
+- **Keyboard shortcuts** (`chrome.commands`, rebind at `chrome://extensions/shortcuts`): play / pause `Alt+Shift+P`, maximize `Alt+Shift+M`, TV mode `Alt+Shift+F`, mute (no default). Chrome allows four suggested keys; step 7's "next" gets the last one, "previous" none.
+- **Mute command** toggles the tab mute. A mute made this way is the user's (`attributeMute`, tested): an ad ending won't unmute it, and unmuting mid-ad gives up ad ownership.
 
 ### Maximize + fullscreen
 
-- "Maximize" the video above everything else with a letterbox behind it, stretched to the largest size its aspect ratio allows.
-- **Use the top layer, not z-index.** z-index can't escape ancestor stacking contexts (`transform`, `filter`, `contain`, `will-change`) or `overflow: hidden`, and re-parenting a `<video>` pauses it and breaks site players.
-    - `video.popover = "manual"; video.showPopover()`
-    - Injected styles: `position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain` (with `!important`, sites set inline sizes).
+- "Maximize" the video above everything else with a letterbox behind it, stretched to the largest size its aspect ratio allows (`src/lib/view/maximize.ts`).
+- **Top layer, not z-index.** z-index can't escape ancestor stacking contexts (`transform`, `filter`, `contain`, `will-change`) or `overflow: hidden`, and re-parenting a `<video>` pauses it and breaks site players.
+    - `video.popover = "manual"; video.showPopover()`. The original `popover` attribute is put back on restore (a closed `[popover]` is `display: none`).
+    - Injected stylesheet, in the element's own root so open shadow roots work: `position: fixed; inset: 0; 100% × 100%; object-fit: contain`, all `!important`, on `[data-wtv-maximized]:not(#wtv-x#wtv-y)` for ID-level specificity. `<html>` gets `overflow: hidden` while maximized.
     - `::backdrop { background: #000 }` is the letterbox.
-    - Prototype on YouTube first.
-- **TV fullscreen:** `chrome.windows.update(windowId, { state: "fullscreen" })`. No user gesture required and it **survives navigation**, unlike `requestFullscreen()`, which would exit on every playlist entry.
+    - The overlay host re-enters the top layer after a maximize so the shield / ad pictures stay on top.
+- **Frames:** the background reads every frame's state with one `scripting.executeScript` (a `FrameCandidate` per frame id, exposed by the content script on its isolated-world global) and picks a frame (`src/lib/view/elect.ts`, pure + tested). An embedded frame maximizes its video, then asks its parent (postMessage with a background-issued token the parent verifies) to maximize the `<iframe>` element, recursively up to the top. A parent frame without Wtv running breaks the chain; the video then fills only its iframe.
+- Maximize state lives in the pages, not the background, so it can't go stale. Restore is broadcast to all frames. Esc (page or shield focus) restores; so does the maximized element disappearing. Players that swap `<video>` elements are followed.
+- **TV mode** = fullscreen window + maximized video, per tab, in `storage.session` with the window's previous state. `chrome.windows.update(windowId, { state: "fullscreen" })` needs no user gesture and **survives navigation**, unlike `requestFullscreen()`, which would exit on every playlist entry. New pages in a TV-mode tab re-maximize once a frame reports a viewable video (`VIEW_READY`). Esc, the shortcut, or the popup exit TV mode and restore the window; leaving fullscreen any other way also ends it.
+- Popup: **Maximize / Restore**, **TV mode / Exit TV mode**, the bound shortcuts, **Shortcuts…**.
 
 ### Playlists
 

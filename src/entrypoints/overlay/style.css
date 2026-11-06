@@ -104,6 +104,16 @@ body {
   opacity: 1;
 }
 
+:root.shield {
+  color-scheme: normal;
+  --bg: transparent;
+}
+
+:root.shield.max.idle,
+:root.shield.max.idle * {
+  cursor: none;
+}
+
 [hidden] {
   display: none !important;
 }

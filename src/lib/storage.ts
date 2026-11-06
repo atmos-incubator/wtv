@@ -30,6 +30,10 @@ export const KEYS = {
   settings: 'wtv.settings',
   /** Record<tabId, TabMuteState> (session): survives service-worker restarts mid-ad. */
   adMute: 'wtv.adMute',
+  /** Record<tabId, true> (session): tabs muted with Wtv's own mute command, so ad logic leaves them muted. */
+  userMute: 'wtv.userMute',
+  /** Record<tabId, TvState> (session): tabs in TV mode (fullscreen window + maximized video). */
+  tvMode: 'wtv.tvMode',
 } as const;
 
 export async function readKey<T>(area: KVArea, key: string, fallback: T): Promise<T> {

@@ -12,7 +12,7 @@
  */
 import { browser } from 'wxt/browser';
 import { KEYS } from '../storage';
-import { decideMute, IDLE, type MutedInfo, type TabMuteState } from './mute';
+import { attributeMute, decideMute, IDLE, isOurMute, type MutedInfo, type TabMuteState } from './mute';
 import { AD_PORT, parseAdPortMessage, type AdPortMessage } from './protocol';
 
 const RECOVERY_GRACE_MS = 5000;
@@ -20,6 +20,7 @@ const BADGE_TEXT = 'AD';
 const BADGE_COLOR = '#d93025';
 
 type MuteStore = Record<string, TabMuteState>;
+type UserMuteStore = Record<string, true>;
 
 /** tabId → frameId → latest state from that frame. */
 const frames = new Map<number, Map<number, AdPortMessage>>();
@@ -39,6 +40,19 @@ async function saveTabState(tabId: number, state: TabMuteState | null): Promise<
   await browser.storage.session.set({ [KEYS.adMute]: store });
 }
 
+async function loadUserMutes(): Promise<UserMuteStore> {
+  const raw = await browser.storage.session.get(KEYS.userMute);
+  const store = raw[KEYS.userMute];
+  return typeof store === 'object' && store !== null ? (store as UserMuteStore) : {};
+}
+
+async function setUserMute(tabId: number, on: boolean): Promise<void> {
+  const store = await loadUserMutes();
+  if (on) store[tabId] = true;
+  else delete store[tabId];
+  await browser.storage.session.set({ [KEYS.userMute]: store });
+}
+
 async function reconcile(tabId: number): Promise<void> {
   const states = [...(frames.get(tabId)?.values() ?? [])];
   const showing = states.some((s) => s.active);
@@ -52,8 +66,18 @@ async function reconcile(tabId: number): Promise<void> {
     // Tab is gone.
     frames.delete(tabId);
     await saveTabState(tabId, null);
+    await setUserMute(tabId, false);
     return;
   }
+
+  // A mute from Wtv's own mute command is the user's. Once the tab is no longer muted
+  // by us (they unmuted, from Chrome's tab strip or anywhere else), forget it.
+  let userMuted = Boolean((await loadUserMutes())[tabId]);
+  if (userMuted && !isOurMute(mutedInfo, browser.runtime.id)) {
+    userMuted = false;
+    await setUserMute(tabId, false);
+  }
+  mutedInfo = attributeMute(mutedInfo, userMuted, browser.runtime.id);
 
   const prev = (await loadStore())[tabId] ?? IDLE;
   const { action, state } = decideMute(prev, wantMute, mutedInfo, browser.runtime.id);
@@ -65,14 +89,38 @@ async function reconcile(tabId: number): Promise<void> {
   await browser.action.setBadgeText({ tabId, text: showing ? BADGE_TEXT : '' }).catch(() => undefined);
 }
 
-function schedule(tabId: number): void {
+function enqueue(tabId: number, task: () => Promise<void>, what: string): Promise<void> {
   const next = (chains.get(tabId) ?? Promise.resolve())
-    .then(() => reconcile(tabId))
-    .catch((err: unknown) => console.error(`[wtv] ad reconcile failed for tab ${tabId}:`, err));
+    .then(task)
+    .catch((err: unknown) => console.error(`[wtv] ${what} failed for tab ${tabId}:`, err));
   chains.set(tabId, next);
   void next.finally(() => {
     if (chains.get(tabId) === next) chains.delete(tabId);
   });
+  return next;
+}
+
+function schedule(tabId: number): void {
+  void enqueue(tabId, () => reconcile(tabId), 'ad reconcile');
+}
+
+/**
+ * Wtv's mute command (keyboard shortcut). Serialized with ad reconciles. Unmuting during
+ * an ad counts as the user taking over (decideMute gives up ownership); muting is
+ * remembered as theirs, so an ad ending won't unmute it.
+ */
+export function toggleTabMute(tabId: number): Promise<void> {
+  return enqueue(
+    tabId,
+    async () => {
+      const tab = await browser.tabs.get(tabId);
+      const muted = !(tab.mutedInfo?.muted ?? false);
+      await setUserMute(tabId, muted);
+      await browser.tabs.update(tabId, { muted });
+      if (frames.has(tabId)) await reconcile(tabId);
+    },
+    'mute toggle',
+  );
 }
 
 function setFrame(tabId: number, frameId: number, state: AdPortMessage | null): void {
@@ -117,6 +165,7 @@ export function startAdController(): void {
   browser.tabs.onRemoved.addListener((tabId) => {
     frames.delete(tabId);
     void saveTabState(tabId, null).catch(() => undefined);
+    void setUserMute(tabId, false).catch(() => undefined);
   });
 
   setTimeout(() => {

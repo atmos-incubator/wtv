@@ -14,10 +14,35 @@ export type OverlayCommand =
   | { type: 'ad'; host: string; items: ProgramItem[]; muted: boolean }
   /** Black screen with an optional title (playlist transitions). */
   | { type: 'blackout'; title: string | null }
+  /**
+   * Transparent click shield over the video: clicks, double-clicks, pointer movement and
+   * keys are reported back instead of reaching the page. `maximized` hides an idle cursor.
+   */
+  | { type: 'shield'; maximized: boolean }
   | { type: 'hide' };
 
+/** A key pressed while the overlay iframe had focus, handed back to the page. */
+export interface ForwardedKey {
+  type: 'key';
+  key: string;
+  code: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  repeat: boolean;
+}
+
 /** Overlay → content script. */
-export type OverlayEvent = { type: 'dismiss' };
+export type OverlayEvent =
+  /** ✕ on the ad overlay. */
+  | { type: 'dismiss' }
+  /** Shield clicked / double-clicked. */
+  | { type: 'click' }
+  | { type: 'dblclick' }
+  /** Pointer moved over the shield; x / y are fractions (0–1) of the overlay box. */
+  | { type: 'activity'; x: number; y: number }
+  | ForwardedKey;
 
 /**
  * Handshake: the content script posts `{ type: OVERLAY_INIT, token }` with a MessagePort
@@ -57,6 +82,8 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
       return { type: 'hide' };
     case 'blackout':
       return { type: 'blackout', title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null };
+    case 'shield':
+      return typeof raw.maximized === 'boolean' ? { type: 'shield', maximized: raw.maximized } : null;
     case 'ad': {
       if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.muted !== 'boolean') return null;
       const items = raw.items.slice(0, MAX_ITEMS).map(parseItem).filter((i): i is ProgramItem => i !== null);
@@ -67,8 +94,37 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
   }
 }
 
+const isFraction = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+const KEY_FLAGS = ['shiftKey', 'ctrlKey', 'altKey', 'metaKey', 'repeat'] as const;
+
 export function parseOverlayEvent(raw: unknown): OverlayEvent | null {
-  return isObj(raw) && raw.type === 'dismiss' ? { type: 'dismiss' } : null;
+  if (!isObj(raw)) return null;
+  switch (raw.type) {
+    case 'dismiss':
+    case 'click':
+    case 'dblclick':
+      return { type: raw.type };
+    case 'activity':
+      return isFraction(raw.x) && isFraction(raw.y) ? { type: 'activity', x: raw.x, y: raw.y } : null;
+    case 'key': {
+      const { key, code } = raw;
+      if (typeof key !== 'string' || key.length === 0 || key.length > 32) return null;
+      if (typeof code !== 'string' || code.length > 32) return null;
+      if (!KEY_FLAGS.every((f) => typeof raw[f] === 'boolean')) return null;
+      return {
+        type: 'key',
+        key,
+        code,
+        shiftKey: raw.shiftKey as boolean,
+        ctrlKey: raw.ctrlKey as boolean,
+        altKey: raw.altKey as boolean,
+        metaKey: raw.metaKey as boolean,
+        repeat: raw.repeat as boolean,
+      };
+    }
+    default:
+      return null;
+  }
 }
 
 // --- slides ------------------------------------------------------------------------

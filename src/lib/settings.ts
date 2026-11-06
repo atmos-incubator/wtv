@@ -7,12 +7,18 @@ export interface Settings {
   autoSkip: boolean;
   /** Cover the video with pictures / quotes while an ad plays. */
   adOverlay: boolean;
+  /**
+   * Click shield: clicks on the video play / pause it instead of reaching the page (no
+   * accidental ad clicks). Double-click maximizes. The site's control bar stays usable.
+   */
+  clickShield: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   muteAds: true,
   autoSkip: true,
   adOverlay: true,
+  clickShield: true,
 });
 
 /** Valid stored fields win; anything missing or malformed falls back to the default. */

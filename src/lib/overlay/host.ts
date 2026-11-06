@@ -12,14 +12,17 @@
  */
 import { browser } from 'wxt/browser';
 import { OVERLAY_INIT, OVERLAY_PAGE, parseOverlayEvent, type OverlayCommand, type OverlayEvent } from './program';
+import type { Box } from './shield';
 
-export type OverlayTarget = () => DOMRect | 'viewport' | null;
+export type OverlayTarget = () => Box | 'viewport' | null;
 
 export interface OverlayHost {
   /** Create the iframe now so the first show is instant. */
   preload(): void;
   show(command: Exclude<OverlayCommand, { type: 'hide' }>, target: OverlayTarget): void;
   hide(): void;
+  /** Re-enter the top layer, above anything that entered it after us (fullscreen, maximize). */
+  restack(): void;
   onEvent(cb: (event: OverlayEvent) => void): () => void;
 }
 
@@ -94,7 +97,7 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
   function place(): void {
     if (!host || !target) return;
     const t = target();
-    let rect: { left: number; top: number; width: number; height: number };
+    let rect: Box;
     if (t === 'viewport') rect = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
     else if (t && t.width > 0 && t.height > 0) rect = t;
     else {
@@ -163,6 +166,7 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
       }
       host.style.display = 'none';
     },
+    restack,
     onEvent(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);

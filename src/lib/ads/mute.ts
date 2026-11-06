@@ -56,3 +56,12 @@ export function decideMute(
   if (prev.mutedByUs && ours) return { action: 'unmute', state: { ...IDLE } };
   return { action: 'none', state: { ...IDLE } };
 }
+
+/**
+ * Muting through Wtv's own mute command (keyboard shortcut) also shows up as "muted by
+ * this extension". That mute belongs to the user: report it as such, so the ad logic
+ * neither claims it at the next ad nor undoes it when an ad ends.
+ */
+export function attributeMute(info: MutedInfo, userMuted: boolean, extensionId: string): MutedInfo {
+  return userMuted && isOurMute(info, extensionId) ? { muted: true, reason: 'user' } : info;
+}

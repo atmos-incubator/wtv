@@ -3,14 +3,16 @@ import { startAdWatcher } from '../lib/ads/watcher';
 import { DEV_TOOLS } from '../lib/env';
 import { startMediaAgent } from '../lib/media/agent';
 import { MSG_PREVIEW_OVERLAY, isStatusRequest, type FrameStatus } from '../lib/messages';
-import { startAdOverlay } from '../lib/overlay/ad-overlay';
+import { startOverlay } from '../lib/overlay/controller';
 import { startPickerService } from '../lib/picker/service';
 import { BUNDLED_MATCHES } from '../lib/sites/bundled';
+import { startViewService } from '../lib/view/service';
 
 const PREVIEW_MS = 12_000;
 
 /**
- * ISOLATED-world media agent + ad watcher + ad overlay. Registered at runtime alongside
+ * ISOLATED-world media agent + ad watcher + view (maximize, play/pause) + overlay (ad
+ * pictures, click shield) + selector picker. Registered at runtime alongside
  * media-hook. See media-hook.content.ts for why `matches` is set.
  */
 export default defineContentScript({
@@ -22,7 +24,8 @@ export default defineContentScript({
   main(ctx) {
     const agent = startMediaAgent(ctx, { debug: DEV_TOOLS });
     const ads = startAdWatcher(ctx, agent, { debug: DEV_TOOLS });
-    const overlay = startAdOverlay(ctx, agent, ads);
+    const view = startViewService(ctx, agent);
+    const overlay = startOverlay(ctx, agent, ads, view);
     startPickerService(ctx, agent, overlay);
 
     const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {

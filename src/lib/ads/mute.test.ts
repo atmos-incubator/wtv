@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { IDLE, decideMute, type MutedInfo, type TabMuteState } from './mute';
+import { IDLE, attributeMute, decideMute, type MutedInfo, type TabMuteState } from './mute';
 
 const ME = 'wtv-extension-id';
 const audible: MutedInfo = { muted: false };
@@ -52,5 +52,22 @@ describe('decideMute', () => {
   it('does nothing when idle', () => {
     expect(decideMute(IDLE, false, audible, ME)).toEqual({ action: 'none', state: IDLE });
     expect(decideMute(IDLE, false, mutedByMe, ME)).toEqual({ action: 'none', state: IDLE });
+  });
+});
+
+describe('attributeMute', () => {
+  it('treats our mute as the user\'s when they muted with the Wtv command', () => {
+    const info = attributeMute(mutedByMe, true, ME);
+    expect(info).toEqual(mutedByUser);
+    // So an ad ending afterwards leaves it muted...
+    expect(decideMute(IDLE, false, info, ME).action).toBe('none');
+    // ...and an ad starting doesn't claim it.
+    expect(decideMute(IDLE, true, info, ME).state).toEqual(notOwned);
+  });
+
+  it('leaves other mutes alone', () => {
+    expect(attributeMute(mutedByMe, false, ME)).toBe(mutedByMe);
+    expect(attributeMute(audible, true, ME)).toBe(audible);
+    expect(attributeMute(mutedByOther, true, ME)).toBe(mutedByOther);
   });
 });

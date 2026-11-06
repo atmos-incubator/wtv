@@ -1,7 +1,8 @@
 /**
  * Overlay page: an extension page framed into sites by the content script (see
- * lib/overlay/host.ts). Plays the ad slideshow / quotes, or shows a blackout title.
- * Runs in the extension origin, so it reads the image library from IndexedDB.
+ * lib/overlay/host.ts). Plays the ad slideshow / quotes, shows a blackout title, or is a
+ * transparent click shield. Runs in the extension origin, so it reads the image library
+ * from IndexedDB.
  */
 import './style.css';
 import { getImageBlob } from '../../lib/images/db';
@@ -17,7 +18,11 @@ import {
   type Slide,
 } from '../../lib/overlay/program';
 
+const ACTIVITY_THROTTLE_MS = 150;
+const IDLE_CURSOR_MS = 2500;
+
 const token = location.hash.slice(1);
+const root = document.documentElement;
 const badge = document.getElementById('badge') as HTMLElement;
 const dismiss = document.getElementById('dismiss') as HTMLButtonElement;
 let front = document.getElementById('layer-a') as HTMLElement;
@@ -27,6 +32,9 @@ let port: MessagePort | null = null;
 /** Bumped on every command; stale async work checks it and bails. */
 let generation = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+let shield = false;
+let lastActivity = 0;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
 const layerUrls = new Map<HTMLElement, string[]>();
 
 function emit(event: OverlayEvent): void {
@@ -63,6 +71,29 @@ function reset(): void {
   clearLayer(back);
   badge.hidden = true;
   dismiss.hidden = true;
+  setShield(false, false);
+}
+
+/**
+ * Shield mode is transparent. That needs the root's color-scheme to match the <iframe>
+ * element's (`normal`): when they differ, Chrome paints an opaque backdrop behind the frame.
+ */
+function setShield(on: boolean, maximized: boolean): void {
+  shield = on;
+  root.classList.toggle('shield', on);
+  root.classList.toggle('max', on && maximized);
+  root.classList.remove('idle');
+  if (idleTimer !== undefined) clearTimeout(idleTimer);
+  idleTimer = undefined;
+}
+
+/** Maximized: hide the cursor while the pointer rests, like a TV. */
+function wake(): void {
+  root.classList.remove('idle');
+  if (idleTimer !== undefined) clearTimeout(idleTimer);
+  idleTimer = root.classList.contains('max')
+    ? setTimeout(() => root.classList.add('idle'), IDLE_CURSOR_MS)
+    : undefined;
 }
 
 /** Render into the back layer, then cross-fade it to the front. */
@@ -168,15 +199,65 @@ function handle(cmd: OverlayCommand | null): void {
     case 'blackout':
       showBlackout(cmd.title);
       break;
+    case 'shield':
+      reset();
+      setShield(true, cmd.maximized);
+      wake();
+      break;
     case 'hide':
       reset();
       break;
   }
 }
 
-dismiss.addEventListener('click', () => {
+dismiss.addEventListener('click', (e) => {
+  e.stopPropagation();
   reset();
   emit({ type: 'dismiss' });
+});
+
+document.addEventListener('click', () => {
+  if (shield) emit({ type: 'click' });
+});
+
+document.addEventListener('dblclick', () => {
+  if (shield) emit({ type: 'dblclick' });
+});
+
+document.addEventListener(
+  'mousemove',
+  (e) => {
+    if (!shield) return;
+    wake();
+    const now = Date.now();
+    if (now - lastActivity < ACTIVITY_THROTTLE_MS) return;
+    lastActivity = now;
+    const clamp = (v: number) => Math.min(1, Math.max(0, v));
+    emit({
+      type: 'activity',
+      x: clamp(e.clientX / Math.max(1, window.innerWidth)),
+      y: clamp(e.clientY / Math.max(1, window.innerHeight)),
+    });
+  },
+  { passive: true },
+);
+
+// Focus lands in this frame after a click; hand keys back to the page.
+document.addEventListener('keydown', (e) => {
+  if (e.key.length === 0 || e.key.length > 32) return;
+  // Plain keys only: Space / arrows would otherwise scroll the page behind us. Browser
+  // shortcuts (Cmd/Ctrl/Alt + key) keep their default.
+  if (!e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
+  emit({
+    type: 'key',
+    key: e.key,
+    code: e.code,
+    shiftKey: e.shiftKey,
+    ctrlKey: e.ctrlKey,
+    altKey: e.altKey,
+    metaKey: e.metaKey,
+    repeat: e.repeat,
+  });
 });
 
 window.addEventListener('message', (e: MessageEvent<unknown>) => {

@@ -45,6 +45,26 @@ export default defineConfig({
       // styles and the cat pictures load from the extension origin, so only the page
       // itself must be web-accessible.
       web_accessible_resources: [{ resources: ['overlay.html'], matches: ['*://*/*'] }],
+      // Chrome allows at most four suggested shortcuts. Step 7 adds "next" with the fourth;
+      // the rest can be bound at chrome://extensions/shortcuts. Keep names in sync with
+      // COMMANDS in src/lib/view/controller.ts.
+      commands: {
+        'play-pause': {
+          suggested_key: { default: 'Alt+Shift+P' },
+          description: 'Play / pause the video',
+        },
+        maximize: {
+          suggested_key: { default: 'Alt+Shift+M' },
+          description: 'Maximize / restore the video',
+        },
+        'tv-mode': {
+          suggested_key: { default: 'Alt+Shift+F' },
+          description: 'TV mode: maximized video in a fullscreen window',
+        },
+        mute: {
+          description: 'Mute / unmute the tab',
+        },
+      },
     };
   },
 });

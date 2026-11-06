@@ -12,6 +12,7 @@ describe('parseSettings', () => {
       muteAds: false,
       autoSkip: true,
       adOverlay: true,
+      clickShield: true,
     });
   });
 

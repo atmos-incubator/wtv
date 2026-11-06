@@ -24,10 +24,12 @@ import { KEYS } from '../storage';
 import { createDebugOverlay, type DebugOverlay } from './debug-overlay';
 import { EVT_BRIDGE, EVT_FOUND, EVT_HELLO, EVT_SHADOW, parseBridgeMessage } from './protocol';
 import { MediaRegistry, type MediaHandle } from './registry';
-import { pickPrimary, type PrimaryChoice } from './score';
+import { pickPrimary, type CandidateFeatures, type PrimaryChoice } from './score';
 
 export interface MediaAgent {
   primary(): MediaHandle | null;
+  /** The primary's current features, including whether the site config matched it. */
+  primaryFeatures(): CandidateFeatures | null;
   onPrimaryChange(cb: (primary: MediaHandle | null) => void): () => void;
   profile(): SiteProfile;
   onProfileChange(cb: (profile: SiteProfile) => void): () => void;
@@ -265,6 +267,10 @@ export function startMediaAgent(ctx: ContentScriptContext, options: MediaAgentOp
 
   return {
     primary: () => (choice ? (registry.get(choice.key) ?? null) : null),
+    primaryFeatures() {
+      const primary = choice ? registry.get(choice.key) : undefined;
+      return primary ? primary.features(configVideo) : null;
+    },
     onPrimaryChange(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);

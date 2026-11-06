@@ -5,6 +5,7 @@ import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
 import { runMigrations, type InstallDetails } from '../lib/migrate';
 import { BUNDLED_SITES } from '../lib/sites/bundled';
 import { pruneStoredOverrides } from '../lib/sites/override-store';
+import { startViewController } from '../lib/view/controller';
 
 async function handleInstalled(details: InstallDetails): Promise<void> {
   const areas = browserAreas();
@@ -47,4 +48,5 @@ export default defineBackground(() => {
   });
 
   startAdController();
+  startViewController();
 });
