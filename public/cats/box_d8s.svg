@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#9ad1d4"/>
+  <rect y="720" width="1600" height="180" fill="#7fb7ba"/>
+  <text x="800" y="150" text-anchor="middle" font-family="system-ui, sans-serif" font-size="80" font-weight="800" fill="#123c3e">If I fits, I sits.</text>
+  <!-- head poking out of the box -->
+  <circle cx="800" cy="470" r="150" fill="#ffffff"/>
+  <path d="M680 380 L 670 250 L 770 335 Z" fill="#ffffff"/>
+  <path d="M920 380 L 930 250 L 830 335 Z" fill="#ffffff"/>
+  <path d="M692 360 L 688 285 L 748 335 Z" fill="#f4b6c2"/>
+  <path d="M908 360 L 912 285 L 852 335 Z" fill="#f4b6c2"/>
+  <ellipse cx="860" cy="410" rx="70" ry="60" fill="#2e2e33"/>
+  <ellipse cx="740" cy="470" rx="22" ry="30" fill="#2e2e33"/>
+  <ellipse cx="860" cy="470" rx="22" ry="30" fill="#7ad37a"/>
+  <circle cx="866" cy="460" r="7" fill="#fff"/>
+  <circle cx="746" cy="460" r="7" fill="#fff"/>
+  <path d="M790 515 l 10 12 l 10 -12 z" fill="#f4b6c2"/>
+  <path d="M800 527 q -14 18 -30 8 M800 527 q 14 18 30 8" fill="none" stroke="#2e2e33" stroke-width="6" stroke-linecap="round"/>
+  <path d="M700 520 h -90 M704 540 h -84 M900 520 h 90 M896 540 h 84" stroke="#9aa" stroke-width="4" stroke-linecap="round"/>
+  <!-- box -->
+  <path d="M520 560 L 1080 560 L 1050 800 L 550 800 Z" fill="#c98b4b"/>
+  <path d="M520 560 L 440 470 L 640 470 L 680 560 Z" fill="#dda15e"/>
+  <path d="M1080 560 L 1160 470 L 960 470 L 920 560 Z" fill="#dda15e"/>
+  <rect x="520" y="555" width="560" height="22" fill="#a86f35"/>
+  <text x="800" y="710" text-anchor="middle" font-family="system-ui, sans-serif" font-size="44" font-weight="800" fill="#7a4b1d" letter-spacing="6">FRAGILE</text>
+</svg>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="manifest.open_in_tab" content="true" />
+    <title>Wtv settings</title>
+  </head>
+  <body>
+    <main>
+      <h1>Wtv</h1>
+
+      <section aria-labelledby="pictures-heading">
+        <h2 id="pictures-heading">Ad pictures</h2>
+        <p class="note">
+          Pick a folder of images to show while ads play. Without one, Wtv uses its built-in cats.
+          Name files like <code>grumpy_d10s.png</code> to show them for 10 seconds (default 5s).
+        </p>
+        <pre class="tree">images/                  every site
+  relax.png
+  cats/                  [img cats]
+  youtube.com/           only on YouTube, checked first
+    grumpy_cats_d10s.png
+    birds/               [img birds] on YouTube</pre>
+
+        <div id="library-status" class="status" aria-live="polite"></div>
+        <div class="actions">
+          <button id="choose" type="button" class="primary">Choose folder…</button>
+          <button id="refresh" type="button" hidden>Re-import folder</button>
+          <button id="clear" type="button" hidden>Use built-in cats</button>
+        </div>
+        <ul id="groups" class="groups"></ul>
+      </section>
+
+      <section aria-labelledby="test-heading">
+        <h2 id="test-heading">Try it</h2>
+        <p class="note">See which pictures a site and keyword would show.</p>
+        <form id="test" class="test">
+          <label>Site <input id="test-host" placeholder="www.youtube.com" autocomplete="off" required /></label>
+          <label>Keyword <input id="test-keyword" placeholder="(none)" autocomplete="off" /></label>
+          <button type="submit">Test</button>
+        </form>
+        <ul id="test-result" class="result" aria-live="polite"></ul>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#ffd166"/>
+  <g fill="#ffc23d">
+    <circle cx="160" cy="140" r="90"/><circle cx="1440" cy="220" r="120"/><circle cx="1260" cy="80" r="50"/>
+    <circle cx="300" cy="420" r="40"/><circle cx="1500" cy="520" r="60"/>
+  </g>
+  <text x="800" y="200" text-anchor="middle" font-family="system-ui, sans-serif" font-size="72" font-weight="800" fill="#5a3b00">Is it over yet?</text>
+  <!-- wall -->
+  <rect y="690" width="1600" height="210" fill="#7a4e2a"/>
+  <rect y="690" width="1600" height="24" fill="#5e3a1d"/>
+  <!-- head peeking over the wall -->
+  <path d="M560 700 C 560 470, 1040 470, 1040 700 Z" fill="#4a4a52"/>
+  <path d="M600 560 L 590 380 L 720 500 Z" fill="#4a4a52"/>
+  <path d="M1000 560 L 1010 380 L 880 500 Z" fill="#4a4a52"/>
+  <path d="M615 530 L 612 430 L 690 500 Z" fill="#f2a7b8"/>
+  <path d="M985 530 L 988 430 L 910 500 Z" fill="#f2a7b8"/>
+  <!-- eyes -->
+  <ellipse cx="700" cy="610" rx="62" ry="70" fill="#f7f3d0"/>
+  <ellipse cx="900" cy="610" rx="62" ry="70" fill="#f7f3d0"/>
+  <ellipse cx="712" cy="625" rx="30" ry="46" fill="#1b1b1f"/>
+  <ellipse cx="912" cy="625" rx="30" ry="46" fill="#1b1b1f"/>
+  <circle cx="724" cy="600" r="11" fill="#fff"/>
+  <circle cx="924" cy="600" r="11" fill="#fff"/>
+  <path d="M790 668 l 10 12 l 10 -12 z" fill="#f2a7b8"/>
+  <!-- paws on the wall -->
+  <ellipse cx="610" cy="702" rx="70" ry="34" fill="#5b5b64"/>
+  <ellipse cx="990" cy="702" rx="70" ry="34" fill="#5b5b64"/>
+  <path d="M580 700 v 18 M610 700 v 20 M640 700 v 18 M960 700 v 18 M990 700 v 20 M1020 700 v 18" stroke="#3a3a40" stroke-width="6" stroke-linecap="round"/>
+</svg>

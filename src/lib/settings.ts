@@ -5,11 +5,14 @@ export interface Settings {
   muteAds: boolean;
   /** Click the site's skip button when it becomes clickable. */
   autoSkip: boolean;
+  /** Cover the video with pictures / quotes while an ad plays. */
+  adOverlay: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   muteAds: true,
   autoSkip: true,
+  adOverlay: true,
 });
 
 /** Valid stored fields win; anything missing or malformed falls back to the default. */

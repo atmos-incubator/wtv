@@ -31,6 +31,11 @@ const PRIMARY_EVENTS = ['timeupdate', 'playing', 'loadedmetadata', 'durationchan
 
 export interface AdWatcher {
   status(): AdStatus | null;
+  settings(): Settings;
+  /** Fires when the reported ad state flips (start immediately, end after the grace). */
+  onAdChange(cb: (active: boolean) => void): () => void;
+  /** Fires after settings load or change. */
+  onSettingsChange(cb: (settings: Settings) => void): () => void;
 }
 
 function isClickable(el: Element): boolean {
@@ -60,6 +65,18 @@ export function startAdWatcher(
   let lastSkipAt = 0;
   let observing = false;
   let primaryCleanup: (() => void) | null = null;
+  const adListeners = new Set<(active: boolean) => void>();
+  const settingsListeners = new Set<(settings: Settings) => void>();
+
+  function notify<T>(set: Set<(v: T) => void>, value: T): void {
+    for (const cb of set) {
+      try {
+        cb(value);
+      } catch (err) {
+        console.error('[wtv] ads listener failed:', err);
+      }
+    }
+  }
 
   const evaluateSoon = scheduler(evaluate, EVALUATE_DELAY_MS, signal);
   const mutations = new MutationObserver(evaluateSoon);
@@ -85,6 +102,7 @@ export function startAdWatcher(
         reported = true;
         log('ad started');
         report();
+        notify(adListeners, true);
       }
     } else if (reported && endTimer === undefined) {
       endTimer = setTimeout(() => {
@@ -95,6 +113,7 @@ export function startAdWatcher(
         skipAttempts = 0;
         log('ad ended');
         report();
+        notify(adListeners, false);
       }, AD_END_GRACE_MS);
     }
   }
@@ -170,6 +189,7 @@ export function startAdWatcher(
       settings = { ...DEFAULT_SETTINGS };
     }
     report();
+    notify(settingsListeners, settings);
     evaluateSoon();
   }
 
@@ -196,6 +216,7 @@ export function startAdWatcher(
   window.addEventListener(
     'pagehide',
     () => {
+      if (reported) notify(adListeners, false);
       reported = false;
       reporter.close();
     },
@@ -216,6 +237,15 @@ export function startAdWatcher(
         skipClicks,
         selectorErrors: [...new Set(selectorErrors)],
       };
+    },
+    settings: () => settings,
+    onAdChange(cb) {
+      adListeners.add(cb);
+      return () => adListeners.delete(cb);
+    },
+    onSettingsChange(cb) {
+      settingsListeners.add(cb);
+      return () => settingsListeners.delete(cb);
     },
   };
 }

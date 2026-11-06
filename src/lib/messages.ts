@@ -3,6 +3,8 @@ import type { HandleKind } from './media/registry';
 import type { SiteProfile } from './sites/registry';
 
 export const MSG_STATUS = 'wtv/status';
+/** Dev builds only: show the ad overlay for a few seconds without an ad. */
+export const MSG_PREVIEW_OVERLAY = 'wtv/dev-preview-overlay';
 
 export interface StatusRequest {
   type: typeof MSG_STATUS;

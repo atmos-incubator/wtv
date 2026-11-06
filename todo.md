@@ -22,13 +22,14 @@ Each step is reviewed and committed before the next one starts.
     - Primary-media heuristic with the config `video` match as a strong bonus. Works across shadow roots and `all_frames`.
     - Generic site profile for any site without a config (see Generic sites), with per-site opt-in via `optional_host_permissions`.
     - Runtime content-script registration, popup (enable / disable / just this tab / media status), dev outline of the primary.
-- [ ] **Step 3 — Ad detection + tab mute + skip**
+- [x] **Step 3 — Ad detection + tab mute + skip**
     - `exists` / `visible` conditions, `MutationObserver` driven, debounce/grace period.
     - Tab-level mute with `mutedInfo` ownership tracking. Best-effort skip click.
     - Per-frame ad ports to the background, `AD` badge, `Mute ads` / `Auto-skip ads` settings in the popup.
 - [ ] **Step 4 — Overlay iframe**
     - Extension-origin iframe for blackout, quotes, slideshow, click shield.
     - Image import into IndexedDB, domain folders + keyword resolution, filename durations, bundled default cat pack.
+    - Options page (folder import + "Try it"), popup toggle + link. Blackout mode built but only used from step 7.
 - [ ] **Step 5 — Selector picker side panel**
     - Element picker, candidate ranking, delayed pick, live match count, save as override.
     - Dev-mode only: write configs straight to the repo via File System Access API.
@@ -155,8 +156,16 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 ### Overlay iframe (blackout, quotes, slideshow)
 
 - Show a slideshow of images, or quotes, over the video while ads play.
+- **Frame:** `overlay.html` (extension page, the only web-accessible resource) in an iframe inside a **closed shadow root** on a `popover="manual"` host. The page can't read or restyle it; the popover puts it in the top layer (above fullscreen players, re-stacked on `fullscreenchange`). Kept alive between ads so the next one covers instantly; preloaded on sites with ad selectors.
+    - Channel: `MessageChannel` handed over with a random token that's also in the iframe URL hash (unreadable by the page).
+    - Glued to the primary video's rect with a rAF loop while visible. No rect (audio-only) → no overlay, just mute.
+    - Covering the video is the ad click shield. A ✕ on the overlay hides it for the rest of the current ad.
+    - Commands: `ad` (program + host), `blackout` (title, for playlists), `hide`.
+    - Not using `use_dynamic_url` yet: it would stop sites from detecting Wtv by probing `overlay.html`, but needs testing against `runtime.getURL`.
 - **Images:**
-    - "Load from folder" workflow: pick a folder, import into IndexedDB, keep the handle for a "Refresh" button.
+    - "Load from folder" workflow in the options page (File System Access needs a page that stays open; the popup closes on the picker): pick a folder, import into IndexedDB (`unlimitedStorage`), keep the handle for **Re-import**. Import replaces the library atomically. Files over 100 MB are skipped.
+    - The options page has a **Try it** box: site + keyword → which files would show.
+    - The overlay reads IndexedDB directly (same extension origin). If Chrome ever partitions that storage for framed extension pages, it falls back to the bundled cats.
     - **Filename duration:** `_d(\d+)(s|m)?` immediately before the extension, e.g. `grumpy_d20s.png`. Default 5s.
     - Formats: PNG, JPG, WebP, GIF, WebM (WebM plays muted and loops for its duration).
 
@@ -194,9 +203,10 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 3. Bundled cat pack.
 
 - Single syntax for folders and filename keywords: folder match first, filename match as fallback. A separate syntax can be added later if there's a real need to force a filename match when a same-named folder exists.
-    - Ship a small bundled **CC0 cat image pack** so it works out of the box.
+- **Bundled pack:** four original SVG cat cartoons in `public/cats/` (drawn for Wtv, so no licensing to track).
 - **Quotes:** duration-prefixed lines from the playlist `[ads]` block (see Playlists).
-- **Rotation:** cycle in order (or shuffle) while the ad continues, loop when exhausted, cut immediately when the ad ends.
+- **Rotation:** program items in order; each `[img]` item expands to its images, shuffled. Loops with a fresh shuffle when exhausted; cross-fades between slides; cut when the ad ends (after the 1.5 s grace, same as unmute). Duration: item's explicit `N` > file name `_dNs` > 5 s.
+- **Setting:** `adOverlay` ("Show pictures during ads", on by default).
 
 ### Click to play / pause
 

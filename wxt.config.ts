@@ -34,12 +34,17 @@ export default defineConfig({
     return {
       name: dev ? 'Wtv (dev)' : 'Wtv',
       description: 'Web TV: the internet as a TV station. Mutes ads and shows something nicer instead.',
-      permissions: ['storage', 'scripting', 'activeTab'],
+      // unlimitedStorage: the ad-picture library lives in IndexedDB. No install warning.
+      permissions: ['storage', 'unlimitedStorage', 'scripting', 'activeTab'],
       // Bundled sites: always on. Content scripts are registered at runtime for these plus
       // any optional origin the user grants (see src/lib/injection.ts).
       host_permissions: hostPermissionPatterns(bundledSitesForBuild()),
       // Any other site is opt-in from the popup. No install-time warning.
       optional_host_permissions: ['*://*/*'],
+      // The overlay page is framed into sites by the content script. Its own scripts,
+      // styles and the cat pictures load from the extension origin, so only the page
+      // itself must be web-accessible.
+      web_accessible_resources: [{ resources: ['overlay.html'], matches: ['*://*/*'] }],
     };
   },
 });

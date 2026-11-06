@@ -11,6 +11,7 @@ describe('parseSettings', () => {
     expect(parseSettings({ muteAds: false, autoSkip: 'yes', extra: 1 })).toEqual({
       muteAds: false,
       autoSkip: true,
+      adOverlay: true,
     });
   });
 

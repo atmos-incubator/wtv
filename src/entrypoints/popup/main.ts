@@ -2,7 +2,8 @@ import './style.css';
 import { browser } from 'wxt/browser';
 import { browserAreas } from '../../lib/browser-storage';
 import { injectIntoTab } from '../../lib/injection';
-import { MSG_STATUS, type AdStatus, type FrameStatus, type MediaStatus } from '../../lib/messages';
+import { DEV_TOOLS } from '../../lib/env';
+import { MSG_PREVIEW_OVERLAY, MSG_STATUS, type AdStatus, type FrameStatus, type MediaStatus } from '../../lib/messages';
 import { isWebUrl, originPatternForHost } from '../../lib/permissions';
 import { parseSettings, type Settings } from '../../lib/settings';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
@@ -115,10 +116,15 @@ function describeAds(ads: AdStatus | null, tabMuted: boolean): Node[] {
 async function render(): Promise<void> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   const settings = await loadSettings();
+  const pictures = el('button', { text: 'Ad pictures…' });
+  pictures.type = 'button';
+  pictures.addEventListener('click', () => void browser.runtime.openOptionsPage());
   const settingsRow = row(
     'Settings',
     toggle('Mute ads', 'muteAds', settings),
     toggle('Auto-skip ads', 'autoSkip', settings),
+    toggle('Show pictures during ads', 'adOverlay', settings),
+    el('div', { className: 'actions' }, pictures),
   );
 
   if (!tab?.id || !isWebUrl(tab.url)) {
@@ -173,6 +179,21 @@ async function render(): Promise<void> {
     );
   }
 
+  const devRow: Node[] = [];
+  if (DEV_TOOLS && status) {
+    const out = note('');
+    const preview = el('button', { text: 'Preview ad overlay' });
+    preview.type = 'button';
+    preview.addEventListener('click', () => {
+      void (async () => {
+        const shown = (await browser.tabs.sendMessage(tabId, { type: MSG_PREVIEW_OVERLAY }, { frameId: 0 })) as boolean;
+        if (shown) window.close();
+        else out.textContent = 'Nothing on screen to cover (no visible primary video).';
+      })();
+    });
+    devRow.push(row('Dev', el('div', { className: 'actions' }, preview), out));
+  }
+
   app.replaceChildren(
     el('h1', { text: host }),
     el('div', { text: support }),
@@ -181,6 +202,7 @@ async function render(): Promise<void> {
     row('Media', ...describeMedia(status?.media ?? null, granted)),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted)))] : []),
     settingsRow,
+    ...devRow,
   );
 }
 
