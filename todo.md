@@ -73,9 +73,9 @@ Each step is reviewed and committed before the next one starts.
 
 ### Site configs + overrides
 
-- One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (e.g. control-bar inset for the click shield). The folder holds only data, so the dev repo writer can be pointed at it.
+- One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (`controlBarInset` for the click shield; `adsInMainVideo` when ads play in the main `<video>`, as on YouTube). The folder holds only data, so the dev repo writer can be pointed at it.
 - Validated at build time (`wxt.config.ts` fails the build) and in tests. Bundled `host_permissions` are generated from `domains`.
-- **Roles:** `video`, `adIndicator`, `skip`, `playButton` (optional), `title`, `description`, `keywords`, `creator`.
+- **Roles:** `video`, `adIndicator`, `skip`, `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`.
 - **Each role is an ordered list of fallback selectors**, not a single selector. First match wins. Entries are a selector string or `{ "selector", "when" }`.
 - **Selector format supports shadow DOM** traversal with ` >>> `, e.g. `"ytd-app >>> #movie_player video"`.
 - **`when` condition** per selector, since many sites leave ad nodes in the DOM and only hide them:
@@ -124,6 +124,8 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 
 - Automatically click the skip button when it appears and is clickable. Discovered / maintained as a role like `video` and `adIndicator`.
 - Content-script clicks are `isTrusted: false`, and some players ignore them. The only trusted route is `chrome.debugger` (shows a warning bar), so **skip is best-effort**. Mute + overlay is the guaranteed path.
+- The click is a full pointer + mouse down / up / click sequence at the button's centre (`src/lib/dom/click.ts`), not a bare `element.click()`.
+- If the Skip button is still there 1 s after the click and the site has `quirks.adsInMainVideo` (YouTube, which ignores untrusted clicks), the ad is seeked to its end instead. Only once per Skip button, and only once Skip is showing, so only skippable ads are skipped. The popup counts both.
 
 ### Media detection
 
@@ -220,7 +222,8 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 - **Click shield** = the overlay iframe in a transparent `shield` mode (`src/lib/overlay/controller.ts` decides what the overlay shows). Setting `clickShield` ("Click the video to play / pause", on by default).
     - Normal playback: covers the video but leaves the site's control bar uncovered (`quirks.controlBarInset`, default 56 px on generic sites). Only over a **show** (`src/lib/overlay/shield.ts`, pure + tested): the config `video` match, or an audible, non-looping video ≥ 30 s / live. Hover previews and GIF-style loops stay clickable.
     - During ads (pictures off) and while maximized: covers everything. The ad ✕ hides the shield too for the rest of that ad, so the page is reachable.
-    - Click → play / pause. Double-click → maximize / restore. Pointer movement → synthetic `mousemove` on the video so the site still shows its controls. Clicks hand keyboard focus back to the page (`window.focus()`) so the site's own shortcuts keep working; keys pressed while the shield has focus are forwarded (Esc restores, others are re-dispatched to the page).
+    - Click → play / pause. Double-click → maximize / restore.
+    - **Click to seek:** in normal playback, a click in the 24 px strip just above the site's progress bar jumps to that point. x maps onto the `progressBar` role's rect (YouTube: `.ytp-progress-bar`), else the video's width. Live streams seek within their seekable window. Pointer cursor + faint highlight over the strip. Pointer movement → synthetic `mousemove` on the video so the site still shows its controls. Clicks hand keyboard focus back to the page (`window.focus()`) so the site's own shortcuts keep working; keys pressed while the shield has focus are forwarded (Esc restores, others are re-dispatched to the page).
     - Transparent only because the overlay root switches to `color-scheme: normal` in shield mode: Chrome paints an opaque backdrop behind an iframe whose color scheme differs from its `<iframe>` element's.
 - Play / pause prefers clicking the site's `playButton` role over calling `video.play()` directly (which can desync the site's player UI); falls back to the element if the click changed nothing after 400 ms (`src/lib/view/playback.ts`).
 - **Keyboard shortcuts** (`chrome.commands`, rebind at `chrome://extensions/shortcuts`): play / pause `Alt+Shift+P`, maximize `Alt+Shift+M`, TV mode `Alt+Shift+F`, mute (no default). Chrome allows four suggested keys; step 7's "next" gets the last one, "previous" none.

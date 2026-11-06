@@ -14,19 +14,31 @@
  * The program is the default `[img]` slideshow for now; step 7 (playlists) passes the
  * entry's `[ads]` block instead.
  *
- * Shield events: click → play / pause, double-click → maximize / restore, pointer
+ * Shield events: click → play / pause, except in the strip just above the site's progress
+ * bar (normal playback only), where it seeks to that point of the bar (the `progressBar`
+ * role's geometry, else the video's width). Double-click → maximize / restore, pointer
  * movement → a synthetic mousemove on the video so the site shows its controls, keys →
  * Esc restores, anything else is re-dispatched to the page. Clicks also hand keyboard
  * focus back to the page, so its own shortcuts keep working.
  */
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { AdWatcher } from '../ads/watcher';
+import { matchRole } from '../dom/query';
 import type { MediaAgent } from '../media/agent';
 import { scheduler } from '../schedule';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
 import { DEFAULT_AD_ITEMS, type ForwardedKey } from './program';
-import { DEFAULT_CONTROL_INSET, isShow, shieldRect } from './shield';
+import {
+  DEFAULT_CONTROL_INSET,
+  SEEK_BAND_PX,
+  inSeekBand,
+  isShow,
+  seekFraction,
+  seekTime,
+  shieldRect,
+  type Box,
+} from './shield';
 
 export interface OverlayController {
   /** Dev aid: show the ad overlay for `ms` without an ad. Returns false with nothing to cover. */
@@ -107,13 +119,39 @@ export function startOverlay(
       case 'shield':
       case 'shield-full':
       case 'shield-max':
-        overlay.show({ type: 'shield', maximized: next === 'shield-max' }, shieldTarget);
+        overlay.show(
+          { type: 'shield', maximized: next === 'shield-max', seekBand: next === 'shield' ? SEEK_BAND_PX : 0 },
+          shieldTarget,
+        );
         break;
       default:
         overlay.hide();
     }
   }
   const syncSoon = scheduler(() => sync(), SYNC_DELAY_MS, signal);
+
+  function progressBarRect(): Box | null {
+    const matchers = agent.profile().site?.config.roles.progressBar;
+    const bar = matchers ? matchRole('progressBar', matchers).match?.element : null;
+    const r = bar?.getBoundingClientRect();
+    return r && r.width > 0 ? r : null;
+  }
+
+  /** A click in the seek band: jump there. Returns false if it wasn't one. */
+  function seekAt(x: number, y: number): boolean {
+    if (mode !== 'shield') return false;
+    const box = shieldTarget();
+    const el = primaryVideo();
+    const primary = agent.primary();
+    if (!box || box === 'viewport' || !el || !primary || !inSeekBand(y, box.height, SEEK_BAND_PX)) return false;
+    const bar = progressBarRect() ?? el.getBoundingClientRect();
+    const ranges = el.seekable;
+    const seekable = ranges.length > 0 ? { start: ranges.start(0), end: ranges.end(ranges.length - 1) } : null;
+    const t = seekTime(seekFraction(box.left + x * box.width, bar), el.duration, seekable);
+    if (t === null) return false;
+    primary.seek(t);
+    return true;
+  }
 
   /** Let the site see the pointer move so it shows its controls. */
   function nudge(x: number, y: number): void {
@@ -164,11 +202,15 @@ export function startOverlay(
         break;
       case 'click':
         window.focus();
-        view.togglePlayback();
+        if (!seekAt(event.x, event.y)) view.togglePlayback();
         break;
-      case 'dblclick':
+      case 'dblclick': {
+        // Two quick seeks in the band shouldn't also maximize.
+        const box = mode === 'shield' ? shieldTarget() : null;
+        if (box && box !== 'viewport' && inSeekBand(event.y, box.height, SEEK_BAND_PX)) break;
         view.toggleMaximize();
         break;
+      }
       case 'activity':
         nudge(event.x, event.y);
         break;

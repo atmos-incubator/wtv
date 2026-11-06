@@ -14,6 +14,7 @@
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
+import { simulateClick } from '../dom/click';
 import { isElementVisible, matchRole } from '../dom/query';
 import type { MediaAgent } from '../media/agent';
 import type { AdStatus } from '../messages';
@@ -60,6 +61,9 @@ export function startAdWatcher(
   let endTimer: ReturnType<typeof setTimeout> | undefined;
   let selectorErrors: string[] = [];
   let skipClicks = 0;
+  let skipSeeks = 0;
+  /** This ad was already seeked to its end (once per Skip button). */
+  let seekedPast = false;
   let skipTarget: WeakRef<Element> | null = null;
   let skipAttempts = 0;
   let lastSkipAt = 0;
@@ -111,6 +115,7 @@ export function startAdWatcher(
         reported = false;
         skipTarget = null;
         skipAttempts = 0;
+        seekedPast = false;
         log('ad ended');
         report();
         notify(adListeners, false);
@@ -128,16 +133,37 @@ export function startAdWatcher(
 
     const now = Date.now();
     if (skipTarget?.deref() === el) {
-      if (skipAttempts >= SKIP_MAX_ATTEMPTS || now - lastSkipAt < SKIP_RETRY_MS) return;
+      if (now - lastSkipAt < SKIP_RETRY_MS) return;
+      // We clicked and the button is still here: the site ignores synthetic clicks
+      // (YouTube checks isTrusted). Where ads play in the main video, a skippable ad can
+      // be skipped by seeking it to its end instead.
+      if (!seekedPast && agent.profile().site?.config.quirks?.adsInMainVideo && seekPastAd()) {
+        lastSkipAt = now;
+        return;
+      }
+      if (skipAttempts >= SKIP_MAX_ATTEMPTS) return;
     } else {
       skipTarget = new WeakRef(el);
       skipAttempts = 0;
+      seekedPast = false;
     }
     skipAttempts++;
     lastSkipAt = now;
     skipClicks++;
     log(`clicking skip (attempt ${skipAttempts})`, el);
-    (el as HTMLElement).click();
+    if (el instanceof HTMLElement) simulateClick(el);
+  }
+
+  /** Seek the ad playing in the primary video to its end. Returns true if it did. */
+  function seekPastAd(): boolean {
+    const primary = agent.primary();
+    const duration = primary?.features(null).duration ?? NaN;
+    if (!primary || !Number.isFinite(duration) || duration <= 0) return false;
+    seekedPast = true;
+    skipSeeks++;
+    log(`skip button ignored our click; seeking the ad to its end (${Math.round(duration)}s)`);
+    primary.seek(duration);
+    return true;
   }
 
   function evaluate(): void {
@@ -235,6 +261,7 @@ export function startAdWatcher(
         muteAds: settings.muteAds,
         autoSkip: settings.autoSkip,
         skipClicks,
+        skipSeeks,
         selectorErrors: [...new Set(selectorErrors)],
       };
     },

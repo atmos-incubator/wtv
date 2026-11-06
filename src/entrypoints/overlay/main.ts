@@ -78,8 +78,9 @@ function reset(): void {
  * Shield mode is transparent. That needs the root's color-scheme to match the <iframe>
  * element's (`normal`): when they differ, Chrome paints an opaque backdrop behind the frame.
  */
-function setShield(on: boolean, maximized: boolean): void {
+function setShield(on: boolean, maximized: boolean, seekBand = 0): void {
   shield = on;
+  root.style.setProperty('--seek-band', `${on ? seekBand : 0}px`);
   root.classList.toggle('shield', on);
   root.classList.toggle('max', on && maximized);
   root.classList.remove('idle');
@@ -201,7 +202,7 @@ function handle(cmd: OverlayCommand | null): void {
       break;
     case 'shield':
       reset();
-      setShield(true, cmd.maximized);
+      setShield(true, cmd.maximized, cmd.seekBand);
       wake();
       break;
     case 'hide':
@@ -216,12 +217,18 @@ dismiss.addEventListener('click', (e) => {
   emit({ type: 'dismiss' });
 });
 
-document.addEventListener('click', () => {
-  if (shield) emit({ type: 'click' });
+const clamp = (v: number) => Math.min(1, Math.max(0, v));
+const where = (e: MouseEvent) => ({
+  x: clamp(e.clientX / Math.max(1, window.innerWidth)),
+  y: clamp(e.clientY / Math.max(1, window.innerHeight)),
 });
 
-document.addEventListener('dblclick', () => {
-  if (shield) emit({ type: 'dblclick' });
+document.addEventListener('click', (e) => {
+  if (shield) emit({ type: 'click', ...where(e) });
+});
+
+document.addEventListener('dblclick', (e) => {
+  if (shield) emit({ type: 'dblclick', ...where(e) });
 });
 
 document.addEventListener(
@@ -232,12 +239,7 @@ document.addEventListener(
     const now = Date.now();
     if (now - lastActivity < ACTIVITY_THROTTLE_MS) return;
     lastActivity = now;
-    const clamp = (v: number) => Math.min(1, Math.max(0, v));
-    emit({
-      type: 'activity',
-      x: clamp(e.clientX / Math.max(1, window.innerWidth)),
-      y: clamp(e.clientY / Math.max(1, window.innerHeight)),
-    });
+    emit({ type: 'activity', ...where(e) });
   },
   { passive: true },
 );

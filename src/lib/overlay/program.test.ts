@@ -61,7 +61,17 @@ describe('parseOverlayCommand', () => {
 
 describe('shield command', () => {
   it('requires the maximized flag', () => {
-    expect(parseOverlayCommand({ type: 'shield', maximized: true })).toEqual({ type: 'shield', maximized: true });
+    expect(parseOverlayCommand({ type: 'shield', maximized: true, seekBand: 24 })).toEqual({
+      type: 'shield',
+      maximized: true,
+      seekBand: 24,
+    });
+    expect(parseOverlayCommand({ type: 'shield', maximized: false })).toEqual({
+      type: 'shield',
+      maximized: false,
+      seekBand: 0,
+    });
+    expect(parseOverlayCommand({ type: 'shield', maximized: false, seekBand: 9999 })).toMatchObject({ seekBand: 200 });
     expect(parseOverlayCommand({ type: 'shield' })).toBeNull();
   });
 });
@@ -69,8 +79,12 @@ describe('shield command', () => {
 describe('parseOverlayEvent', () => {
   const key = { type: 'key', key: 'k', code: 'KeyK', shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false };
 
-  it('accepts the simple events', () => {
-    for (const type of ['dismiss', 'click', 'dblclick']) expect(parseOverlayEvent({ type })).toEqual({ type });
+  it('accepts dismiss, and clicks with coordinates', () => {
+    expect(parseOverlayEvent({ type: 'dismiss' })).toEqual({ type: 'dismiss' });
+    for (const type of ['click', 'dblclick']) {
+      expect(parseOverlayEvent({ type, x: 0.2, y: 0.9 })).toEqual({ type, x: 0.2, y: 0.9 });
+      expect(parseOverlayEvent({ type })).toBeNull();
+    }
     expect(parseOverlayEvent({ type: 'other' })).toBeNull();
     expect(parseOverlayEvent(null)).toBeNull();
   });

@@ -43,6 +43,8 @@ export interface AdStatus {
   autoSkip: boolean;
   /** Skip-button clicks since the page loaded. */
   skipClicks: number;
+  /** Skippable ads skipped by seeking to their end, because the Skip click was ignored. */
+  skipSeeks: number;
   selectorErrors: string[];
 }
 

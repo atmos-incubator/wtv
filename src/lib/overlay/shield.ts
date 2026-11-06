@@ -39,3 +39,34 @@ export function isShow(f: CandidateFeatures): boolean {
   if (!f.audible || f.loop) return false;
   return f.duration === Infinity || f.duration >= MIN_SHOW_SECONDS;
 }
+
+/**
+ * Strip at the bottom of the (normal-playback) shield, just above the site's progress
+ * bar: a click there seeks instead of toggling playback.
+ */
+export const SEEK_BAND_PX = 24;
+
+/** A click at fraction `y` (0 top … 1 bottom) of a shield `heightPx` tall lands in the band. */
+export function inSeekBand(y: number, heightPx: number, bandPx: number): boolean {
+  return bandPx > 0 && heightPx > 0 && (1 - y) * heightPx <= bandPx + 1e-6;
+}
+
+/** Where along a bar `clientX` falls, clamped to 0–1. */
+export function seekFraction(clientX: number, bar: Pick<Box, 'left' | 'width'>): number {
+  if (bar.width <= 0) return 0;
+  return Math.min(1, Math.max(0, (clientX - bar.left) / bar.width));
+}
+
+/**
+ * Seconds to seek to. Finite media maps onto its duration; live streams onto their
+ * seekable window (DVR). Null when there's nothing to seek within.
+ */
+export function seekTime(
+  fraction: number,
+  duration: number,
+  seekable: { start: number; end: number } | null,
+): number | null {
+  if (Number.isFinite(duration) && duration > 0) return fraction * duration;
+  if (seekable && seekable.end > seekable.start) return seekable.start + fraction * (seekable.end - seekable.start);
+  return null;
+}

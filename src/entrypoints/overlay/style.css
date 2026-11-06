@@ -109,6 +109,20 @@ body {
   --bg: transparent;
 }
 
+/* Click-to-seek strip just above the site's progress bar (shield, normal playback). */
+#seek-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--seek-band, 0px);
+  cursor: pointer;
+}
+
+#seek-band:hover {
+  background: linear-gradient(to top, rgb(255 255 255 / 0.12), transparent);
+}
+
 :root.shield.max.idle,
 :root.shield.max.idle * {
   cursor: none;

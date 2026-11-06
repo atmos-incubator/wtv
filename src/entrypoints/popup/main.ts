@@ -167,7 +167,10 @@ function describeAds(ads: AdStatus | null, tabMuted: boolean): Node[] {
   } else {
     nodes.push(note('No ad playing.'));
   }
-  if (ads.skipClicks > 0) nodes.push(note(`Skip clicked ${ads.skipClicks}× on this page.`));
+  if (ads.skipClicks > 0) {
+    const seeks = ads.skipSeeks > 0 ? `, ${ads.skipSeeks} skipped by jumping to the ad’s end` : '';
+    nodes.push(note(`Skip clicked ${ads.skipClicks}× on this page${seeks}.`));
+  }
   for (const e of ads.selectorErrors) nodes.push(note(e, 'warn'));
   return nodes;
 }

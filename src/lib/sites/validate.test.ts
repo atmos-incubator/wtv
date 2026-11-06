@@ -43,6 +43,7 @@ describe('validateSiteConfig', () => {
     ['duplicate domain', { domains: ['example.com', 'example.com'] }],
     ['missing name', { name: ' ' }],
     ['negative control bar inset', { quirks: { controlBarInset: -1 } }],
+    ['non-boolean adsInMainVideo', { quirks: { adsInMainVideo: 'yes' } }],
   ])('rejects %s', (_label, patch) => {
     const r = validateSiteConfig({ ...base, ...patch });
     expect(r.ok).toBe(false);
@@ -58,6 +59,11 @@ describe('validateSiteConfig', () => {
     const r = validateSiteConfig({ ...base, roles: { video: ['video', 'video'] } });
     expect(r.ok && r.value.roles.video).toHaveLength(1);
     expect(r.warnings.join()).toMatch(/duplicate/);
+  });
+
+  it('keeps known quirks', () => {
+    const r = validateSiteConfig({ ...base, quirks: { controlBarInset: 48, adsInMainVideo: true } });
+    expect(r.ok && r.value.quirks).toEqual({ controlBarInset: 48, adsInMainVideo: true });
   });
 
   it('warns on unknown keys without failing', () => {

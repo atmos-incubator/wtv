@@ -17,8 +17,9 @@ export type OverlayCommand =
   /**
    * Transparent click shield over the video: clicks, double-clicks, pointer movement and
    * keys are reported back instead of reaching the page. `maximized` hides an idle cursor.
+   * `seekBand`: px at the bottom where a click seeks (0 = none); shown as a pointer cursor.
    */
-  | { type: 'shield'; maximized: boolean }
+  | { type: 'shield'; maximized: boolean; seekBand: number }
   | { type: 'hide' };
 
 /** A key pressed while the overlay iframe had focus, handed back to the page. */
@@ -37,9 +38,8 @@ export interface ForwardedKey {
 export type OverlayEvent =
   /** ✕ on the ad overlay. */
   | { type: 'dismiss' }
-  /** Shield clicked / double-clicked. */
-  | { type: 'click' }
-  | { type: 'dblclick' }
+  /** Shield clicked / double-clicked at x / y, fractions (0–1) of the overlay box. */
+  | { type: 'click' | 'dblclick'; x: number; y: number }
   /** Pointer moved over the shield; x / y are fractions (0–1) of the overlay box. */
   | { type: 'activity'; x: number; y: number }
   | ForwardedKey;
@@ -82,8 +82,11 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
       return { type: 'hide' };
     case 'blackout':
       return { type: 'blackout', title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null };
-    case 'shield':
-      return typeof raw.maximized === 'boolean' ? { type: 'shield', maximized: raw.maximized } : null;
+    case 'shield': {
+      if (typeof raw.maximized !== 'boolean') return null;
+      const band = typeof raw.seekBand === 'number' && Number.isFinite(raw.seekBand) ? raw.seekBand : 0;
+      return { type: 'shield', maximized: raw.maximized, seekBand: Math.min(200, Math.max(0, band)) };
+    }
     case 'ad': {
       if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.muted !== 'boolean') return null;
       const items = raw.items.slice(0, MAX_ITEMS).map(parseItem).filter((i): i is ProgramItem => i !== null);
@@ -101,11 +104,11 @@ export function parseOverlayEvent(raw: unknown): OverlayEvent | null {
   if (!isObj(raw)) return null;
   switch (raw.type) {
     case 'dismiss':
+      return { type: 'dismiss' };
     case 'click':
     case 'dblclick':
-      return { type: raw.type };
     case 'activity':
-      return isFraction(raw.x) && isFraction(raw.y) ? { type: 'activity', x: raw.x, y: raw.y } : null;
+      return isFraction(raw.x) && isFraction(raw.y) ? { type: raw.type, x: raw.x, y: raw.y } : null;
     case 'key': {
       const { key, code } = raw;
       if (typeof key !== 'string' || key.length === 0 || key.length > 32) return null;

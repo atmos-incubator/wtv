@@ -12,6 +12,7 @@ export const ROLE_NAMES = [
   'adIndicator',
   'skip',
   'playButton',
+  'progressBar',
   'title',
   'description',
   'keywords',
@@ -37,6 +38,8 @@ export const ROLE_DEFAULT_WHEN: Record<RoleName, Condition> = {
   adIndicator: 'visible',
   skip: 'visible',
   playButton: 'visible',
+  // Players fade their controls out; the bar's geometry is still what a seek maps onto.
+  progressBar: 'exists',
   title: 'exists',
   description: 'exists',
   keywords: 'exists',
@@ -61,6 +64,12 @@ export type Roles = Partial<Record<RoleName, Matcher[]>>;
 export interface SiteQuirks {
   /** Pixels at the bottom of the video left uncovered by the click shield (site controls). */
   controlBarInset?: number;
+  /**
+   * Ads play in the main <video> element itself (YouTube), rather than a separate
+   * element or iframe. Enables skipping a skippable ad by seeking it to its end when the
+   * site ignores synthetic clicks on its Skip button.
+   */
+  adsInMainVideo?: boolean;
 }
 
 export interface SiteConfig {

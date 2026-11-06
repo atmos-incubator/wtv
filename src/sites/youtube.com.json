@@ -35,6 +35,9 @@
       "button[data-title-no-tooltip=\"Pause\"]",
       ".ytp-play-button"
     ],
+    "progressBar": [
+      ".ytp-progress-bar"
+    ],
     "title": [
       "ytd-watch-metadata #title h1",
       "h1.ytd-watch-metadata"
@@ -52,6 +55,7 @@
     ]
   },
   "quirks": {
-    "controlBarInset": 48
+    "controlBarInset": 48,
+    "adsInMainVideo": true
   }
 }
