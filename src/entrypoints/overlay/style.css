@@ -26,6 +26,30 @@ body {
 #stage {
   position: absolute;
   inset: 0;
+  transition: opacity 300ms ease;
+}
+
+/* Pictures as the show, paused. */
+:root.dim #stage {
+  opacity: 0.35;
+}
+
+#paused {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(32px, 9vw, 110px);
+  line-height: 1;
+  color: var(--fg);
+  opacity: 0.9;
+  text-shadow: 0 2px 18px rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+
+/* Pause pictures: a click anywhere resumes the show. */
+:root.clickable {
+  cursor: pointer;
 }
 
 .layer {

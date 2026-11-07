@@ -23,7 +23,8 @@
  *     <video>, so an ad ending looks like the video ending);
  *   - every frame with a primary video seeks it to the entry's start time (`t=`) once
  *     that's safe (seek.ts: after metadata, never during an ad);
- *   - the entry's `[ads]` program replaces the default for the ad overlay.
+ *   - the entry's `[ads]` program replaces the default for the ad overlay, and
+ *     `view=pictures` entries have their `[show]` program cover the media throughout.
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
@@ -34,6 +35,7 @@ import { parseWtvHash, stripWtvHash, type WtvHash } from './hash';
 import { seekDecision } from './seek';
 import type { PlayResult } from '../media/registry';
 import type { ProgramItem } from '../overlay/program';
+import type { ViewMode } from './format';
 import {
   PL_COMMAND,
   PL_HELLO,
@@ -85,6 +87,10 @@ type Trigger = 'blocked' | 'blocked-in-frame' | 'timeout' | 'ready';
 export interface PlaylistClient {
   /** The current entry's ad program; null = default. */
   ads(): ProgramItem[] | null;
+  /** How the current entry is shown (`video` outside a playlist). */
+  view(): ViewMode;
+  /** The current entry's pictures for `view: pictures`; null = the site's images. */
+  show(): ProgramItem[] | null;
   /** Top frame only. */
   blackout(): Blackout | null;
   onChange(cb: () => void): () => void;
@@ -398,6 +404,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
 
   return {
     ads: () => entry?.ads ?? null,
+    view: () => entry?.view ?? 'video',
+    show: () => entry?.show ?? null,
     blackout: () => blackout,
     onChange(cb) {
       listeners.add(cb);

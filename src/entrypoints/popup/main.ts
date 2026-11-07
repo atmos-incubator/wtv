@@ -316,6 +316,7 @@ async function render(): Promise<void> {
     toggle('Mute ads', 'muteAds', settings),
     toggle('Auto-skip ads', 'autoSkip', settings),
     toggle('Show pictures during ads', 'adOverlay', settings),
+    toggle('Show pictures while paused', 'pausePictures', settings),
     toggle('Click the video to play / pause (blocks ad clicks)', 'clickShield', settings),
     el('div', { className: 'actions' }, pictures),
   );

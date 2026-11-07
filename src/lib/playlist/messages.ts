@@ -17,6 +17,7 @@
  * being left can't skip the next entry too.
  */
 import { parseProgramItem, type ProgramItem } from '../overlay/program';
+import { isViewMode, type ViewMode } from './format';
 
 export const PL_HELLO = 'wtv/playlist/hello';
 export const PL_MEDIA = 'wtv/playlist/media';
@@ -40,6 +41,10 @@ export interface EntryInfo {
   startS: number | null;
   /** The entry's ad program; null = the site's images. */
   ads: ProgramItem[] | null;
+  /** `pictures`: a slideshow covers the media for the whole entry. */
+  view: ViewMode;
+  /** The slideshow for `view: pictures`; null = the site's images. */
+  show: ProgramItem[] | null;
 }
 
 export interface RunnerSummary {
@@ -104,7 +109,9 @@ export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
 
 export function parseEntryInfo(raw: unknown): EntryInfo | null {
   if (!isObj(raw)) return null;
-  const { gen, index, total, playlist, title, startS, ads } = raw;
+  const { gen, index, total, playlist, title, startS, ads, view, show } = raw;
+  const program = (v: unknown) =>
+    Array.isArray(v) ? v.map(parseProgramItem).filter((i): i is ProgramItem => i !== null) : null;
   if (!isIndex(gen) || !isIndex(index) || !isIndex(total) || typeof playlist !== 'string') return null;
   return {
     gen,
@@ -113,8 +120,8 @@ export function parseEntryInfo(raw: unknown): EntryInfo | null {
     playlist,
     title: typeof title === 'string' && title ? title : null,
     startS: typeof startS === 'number' && Number.isFinite(startS) && startS >= 0 ? startS : null,
-    ads: Array.isArray(ads)
-      ? ads.map(parseProgramItem).filter((i): i is ProgramItem => i !== null)
-      : null,
+    ads: program(ads),
+    view: isViewMode(view) ? view : 'video',
+    show: program(show),
   };
 }

@@ -141,7 +141,8 @@ for the whole entry. For music, radio, podcasts.
 - A new `[show]` block, same syntax as `[ads]`, picks the pictures for the show. It falls back to
   `[ads]`, then site pictures.
 - Covers the media's box, or the whole tab when the media has no box (audio-only).
-- Pauses are still visible: the pictures dim and show ⏸.
+- Pauses are still visible: the pictures dim, hold the current slide, and show ⏸. Clicks on
+  the pictures play / pause; double-click maximizes.
 
 ### Step 13 — Playlist options
 

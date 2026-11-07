@@ -22,7 +22,7 @@ import { browserAreas } from '../browser-storage';
 import { isWebUrl } from '../permissions';
 import { KEYS } from '../storage';
 import { setTvMode } from '../view/controller';
-import { compilePlaylist, parsePlaylist } from './format';
+import { compilePlaylist, parsePlaylist, type ViewMode } from './format';
 import { withWtvHash } from './hash';
 import { sameEntryUrl } from './match';
 import {
@@ -46,6 +46,9 @@ interface RunEntry {
   title: string | null;
   startS: number | null;
   ads: ProgramItem[] | null;
+  /** Missing in runs started before views existed: video. */
+  view?: ViewMode;
+  show?: ProgramItem[] | null;
 }
 
 export interface RunnerState {
@@ -132,7 +135,7 @@ async function start(playlistId: string, index: number, tv: boolean): Promise<vo
   const state: RunnerState = {
     playlistId,
     name: playlist.name,
-    entries: entries.map(({ url, title, startS, ads }) => ({ url, title, startS, ads })),
+    entries: entries.map(({ url, title, startS, ads, view, show }) => ({ url, title, startS, ads, view, show })),
     index: 0,
     gen: 0,
     phase: 'navigating',
@@ -188,6 +191,8 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
     title: entry.title,
     startS: entry.startS,
     ads: entry.ads,
+    view: entry.view ?? 'video',
+    show: entry.show ?? null,
   };
 }
 

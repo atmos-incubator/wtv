@@ -1,7 +1,7 @@
 /**
  * Overlay page: an extension page framed into sites by the content script (see
- * lib/overlay/host.ts). Plays the ad slideshow / quotes, shows a blackout title, or is a
- * transparent click shield. Runs in the extension origin, so it reads the image library
+ * lib/overlay/host.ts). Plays the ad slideshow / quotes, pictures over a paused show or
+ * as the show itself, shows a blackout title, or is a transparent click shield. Runs in the extension origin, so it reads the image library
  * from IndexedDB.
  */
 import './style.css';
@@ -15,6 +15,7 @@ import {
   parseOverlayCommand,
   type OverlayCommand,
   type OverlayEvent,
+  type ProgramItem,
   type Slide,
 } from '../../lib/overlay/program';
 
@@ -24,6 +25,7 @@ const IDLE_CURSOR_MS = 2500;
 const token = location.hash.slice(1);
 const root = document.documentElement;
 const badge = document.getElementById('badge') as HTMLElement;
+const pausedMark = document.getElementById('paused') as HTMLElement;
 const dismiss = document.getElementById('dismiss') as HTMLButtonElement;
 const pill = document.getElementById('pill') as HTMLButtonElement;
 const prompt = document.getElementById('prompt') as HTMLElement;
@@ -37,10 +39,15 @@ let back = document.getElementById('layer-b') as HTMLElement;
 let port: MessagePort | null = null;
 /** Bumped on every command; stale async work checks it and bails. */
 let generation = 0;
-/** The ad program on screen, so a repeat of the same command doesn't restart it from black. */
-let adKey: string | null = null;
+/** The program on screen, so a repeat of the same command doesn't restart it from black. */
+let programKey: string | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let shield = false;
+/** Non-ad pictures: clicks are reported (play / pause) like the shield's. */
+let interactive = false;
+/** Pictures as the show, paused: hold the current slide until it plays again. */
+let frozen = false;
+let resumeSlides: (() => void) | null = null;
 let lastActivity = 0;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 const layerUrls = new Map<HTMLElement, string[]>();
@@ -73,7 +80,12 @@ function clearLayer(layer: HTMLElement): void {
 
 function reset(): void {
   generation++;
-  adKey = null;
+  programKey = null;
+  interactive = false;
+  frozen = false;
+  resumeSlides = null;
+  pausedMark.hidden = true;
+  root.classList.remove('dim', 'clickable');
   if (timer !== undefined) clearTimeout(timer);
   timer = undefined;
   clearLayer(front);
@@ -167,22 +179,62 @@ async function renderSlide(slide: Slide, gen: number): Promise<void> {
   }
 }
 
+const adKey = (cmd: Extract<OverlayCommand, { type: 'ad' }>) => JSON.stringify(['ad', cmd.host, cmd.items]);
+const picturesKey = (cmd: Extract<OverlayCommand, { type: 'pictures' }>) =>
+  JSON.stringify(['pictures', cmd.purpose, cmd.host, cmd.items]);
+
 async function playAd(cmd: Extract<OverlayCommand, { type: 'ad' }>): Promise<void> {
   reset();
-  adKey = JSON.stringify([cmd.host, cmd.items]);
-  const gen = generation;
+  programKey = adKey(cmd);
   badge.textContent = cmd.muted ? 'Ad · muted' : 'Ad';
   badge.hidden = false;
   dismiss.hidden = false;
+  await playProgram(cmd.host, cmd.items);
+}
 
-  const resolve = await createImageResolver(cmd.host);
+/** Pause pictures say how to get back; show pictures dim and show ⏸ while paused. */
+function setPicturesState(cmd: Extract<OverlayCommand, { type: 'pictures' }>): void {
+  if (cmd.purpose === 'pause') {
+    badge.textContent = '⏸ Paused · click to resume';
+    badge.hidden = false;
+    root.classList.add('clickable');
+    return;
+  }
+  root.classList.toggle('dim', cmd.paused);
+  pausedMark.hidden = !cmd.paused;
+  frozen = cmd.paused;
+  if (!frozen && resumeSlides) {
+    const go = resumeSlides;
+    resumeSlides = null;
+    go();
+  }
+}
+
+function showPictures(cmd: Extract<OverlayCommand, { type: 'pictures' }>): void {
+  if (programKey !== picturesKey(cmd)) {
+    reset();
+    programKey = picturesKey(cmd);
+    interactive = true;
+    void playProgram(cmd.host, cmd.items);
+  }
+  setPicturesState(cmd);
+}
+
+/** Loop the program's slides until the next command. */
+async function playProgram(host: string, items: readonly ProgramItem[]): Promise<void> {
+  const gen = generation;
+  const resolve = await createImageResolver(host);
   let slides: Slide[] = [];
   let index = 0;
 
   const advance = async (): Promise<void> => {
     if (gen !== generation) return;
+    if (frozen && index > 0) {
+      resumeSlides = () => void advance();
+      return;
+    }
     if (index >= slides.length) {
-      slides = buildSlides(cmd.items, resolve);
+      slides = buildSlides(items, resolve);
       if (slides.length === 0) slides = buildSlides(DEFAULT_AD_ITEMS, bundledResolved);
       index = 0;
     }
@@ -234,11 +286,14 @@ function handle(cmd: OverlayCommand | null): void {
   }
   switch (cmd.type) {
     case 'ad':
-      if (adKey === JSON.stringify([cmd.host, cmd.items])) {
+      if (programKey === adKey(cmd)) {
         badge.textContent = cmd.muted ? 'Ad · muted' : 'Ad';
         break;
       }
       void playAd(cmd);
+      break;
+    case 'pictures':
+      showPictures(cmd);
       break;
     case 'blackout':
       showBlackout(cmd);
@@ -287,11 +342,11 @@ document.getElementById('prompt-next')!.addEventListener('click', (e) => {
 });
 
 document.addEventListener('click', (e) => {
-  if (shield) emit({ type: 'click', ...where(e) });
+  if (shield || interactive) emit({ type: 'click', ...where(e) });
 });
 
 document.addEventListener('dblclick', (e) => {
-  if (shield) emit({ type: 'dblclick', ...where(e) });
+  if (shield || interactive) emit({ type: 'dblclick', ...where(e) });
 });
 
 document.addEventListener(

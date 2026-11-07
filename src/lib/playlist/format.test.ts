@@ -110,11 +110,67 @@ describe('compilePlaylist', () => {
   it('reports problems with line numbers', () => {
     const r = compilePlaylist(parsePlaylist('5: stray\nhttps://a.com/x | t=soon | z=1\nwhat'));
     expect(r.problems).toEqual([
-      { line: 1, message: 'outside an [ads] block (ignored)' },
+      { line: 1, message: 'outside an [ads] or [show] block (ignored)' },
       { line: 2, message: 't=soon is not a timestamp' },
       { line: 2, message: 'unknown option z= (kept, ignored)' },
       { line: 3, message: expect.stringContaining('not a URL') },
     ]);
+  });
+});
+
+describe('views and [show]', () => {
+  const RADIO = `[view pictures]
+[show]
+  [img beach]
+[ads]
+  10: Fun fact
+
+https://radio.example/a | Station A
+https://www.youtube.com/watch?v=b | A video | view=video
+https://radio.example/c | Station C
+[show]
+  [img night 8]
+https://radio.example/d
+[ads]
+  5: Own ad quote
+`;
+
+  it('round-trips', () => {
+    expect(serializePlaylist(parsePlaylist(RADIO))).toBe(RADIO);
+    expect(parseLine('  [VIEW Pictures] ')).toEqual({ kind: 'view', raw: '  [VIEW Pictures] ', mode: 'pictures' });
+    expect(parseLine('[Show]')).toEqual({ kind: 'show', raw: '[Show]' });
+  });
+
+  it('applies the playlist-wide view, which an entry can override', () => {
+    const { entries, defaultView, problems } = compilePlaylist(parsePlaylist(RADIO));
+    expect(problems).toEqual([]);
+    expect(defaultView).toBe('pictures');
+    expect(entries.map((e) => e.view)).toEqual(['pictures', 'video', 'pictures', 'pictures']);
+  });
+
+  it('picks the show pictures: own [show], playlist [show], then the ads program', () => {
+    const { entries, defaultShow } = compilePlaylist(parsePlaylist(RADIO));
+    expect(defaultShow).toEqual([{ kind: 'img', keyword: 'beach', durationS: null }]);
+    expect(entries[0]!.show).toBe(defaultShow);
+    expect(entries[2]!.show).toEqual([{ kind: 'img', keyword: 'night', durationS: 8 }]);
+    // An entry's own [ads] doesn't beat the playlist's [show].
+    expect(entries[3]!.show).toBe(defaultShow);
+    expect(entries[3]!.ads).toEqual([{ kind: 'text', text: 'Own ad quote', durationS: 5 }]);
+
+    const noShow = compilePlaylist(parsePlaylist('[ads]\n  [img cats]\nhttps://a.com/1 | view=pictures\nhttps://a.com/2'));
+    expect(noShow.entries[0]!.show).toEqual([{ kind: 'img', keyword: 'cats', durationS: null }]);
+    expect(noShow.entries[1]!.view).toBe('video');
+    expect(compilePlaylist(parsePlaylist('https://a.com/1')).entries[0]!.show).toBeNull();
+  });
+
+  it('reports bad views and a [view] after the first entry', () => {
+    const r = compilePlaylist(parsePlaylist('[view radio]\nhttps://a.com/1 | view=Pictures\n[view pictures]\nhttps://a.com/2 | view=tv'));
+    expect(r.problems).toEqual([
+      { line: 1, message: '[view radio]: expected video or pictures' },
+      { line: 3, message: '[view …] goes before the first entry; use view= on an entry (ignored)' },
+      { line: 4, message: 'view=tv: expected video or pictures' },
+    ]);
+    expect(r.entries.map((e) => e.view)).toEqual(['pictures', 'video']);
   });
 });
 

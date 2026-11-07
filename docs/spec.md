@@ -130,7 +130,7 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 - **Reporting:** each frame opens a port (`wtv-ad`) to the background only while it has an ad. A port closing (ad over, navigation, unload, script invalidated) clears that frame, so a dead frame can't leave a tab muted. If the worker restarts mid-ad, frames reconnect and re-send.
 - **Background:** tab "ad showing" = any frame active (`AD` badge). "Want mute" = any active frame with `muteAds` on. Mute ownership is kept in `storage.session` to survive worker restarts; tabs we muted whose frames never come back are unmuted after a 5 s recovery grace.
 - **Ownership rules** (`src/lib/ads/mute.ts`, pure + tested): mute only an audible tab; if the user unmutes or re-mutes mid-ad, give up ownership for that ad; unmute only if still muted by *this* extension.
-- **Settings:** `muteAds` and `autoSkip` (both on by default), toggled in the popup.
+- **Settings:** `muteAds` and `autoSkip` (both on by default), toggled in the popup. (Also in the popup: `adOverlay`, `clickShield`, `pausePictures`.)
 
 ### Skip button
 
@@ -189,7 +189,10 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
     - Channel: `MessageChannel` handed over with a random token that's also in the iframe URL hash (unreadable by the page).
     - Glued with a rAF loop to the site's `player` box holding the primary video (ads like YouTube's surveys move the `<video>` out and draw in its place), else the primary video's rect. If the box disappears for a moment (re-layout), it holds its last place for 1 s. No rect (audio-only) → no overlay, just mute. Ad pictures and the blackout paint the host black from the first frame.
     - Covering the video is the ad click shield. A ✕ on the overlay hides it for the rest of the current ad; a **Show pictures** pill in the player's top-right corner (and a popup button) brings it back.
-    - Commands: `ad` (program + host), `blackout` (title, for playlists), `shield` (transparent click shield, see Click to play / pause), `hide`.
+    - Commands: `ad` (program + host), `pictures` (program + host, `purpose` `pause` or `show`, `paused`), `blackout` (title, for playlists), `shield` (transparent click shield, see Click to play / pause), `pill`, `hide`.
+    - **Pictures outside ads** (`pictures` command; clicks on them play / pause the show, double-click maximizes, keys reach the page):
+        - **On pause** (setting `pausePictures`, "Show pictures while paused", off by default): a show (`isShow`) paused by anything, after 1.5 s, not while buffering, seeking, loading, at its end or during an ad (`src/lib/overlay/pause.ts`, pure + tested). Badge "⏸ Paused · click to resume"; a click, or play from any other control, takes it away. Program: the entry's `[ads]`, the playlist default, then site pictures.
+        - **As the show** (playlist entry `view=pictures`): the media plays unseen under its `[show]` program for the whole entry. Covers the player / media box, or the whole tab for media with no box (audio). Paused: the pictures dim, hold the current slide and show ⏸. Ads still get the ad program.
     - Not using `use_dynamic_url` yet: it would stop sites from detecting Wtv by probing `overlay.html`, but needs testing against `runtime.getURL`.
 - **Images:**
     - "Load from folder" workflow in the options page (File System Access needs a page that stays open; the popup closes on the picker): pick a folder, import into IndexedDB (`unlimitedStorage`), keep the handle for **Re-import**. Import replaces the library atomically. Files over 100 MB are skipped.
@@ -281,6 +284,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
     - To skip the prompt on a dedicated TV machine: launch Chrome with `--autoplay-policy=no-user-gesture-required`.
 - **End detection:** `ended`, or playback within 0.25 s of the end → next entry. A frame also reports **near-end** (last 20 s, media ≥ 30 s). Navigating off the entry *after* near-end counts as the end (YouTube autoplay / end screens can pre-empt `ended`); navigating off *before* it is the user doing something else, so the runner **detaches** and the popup offers **Resume** instead of hijacking the tab. Everything is ignored while an ad is playing (YouTube ads play in the same `<video>`), and `gen` stops late events from a page being left from skipping twice.
 - **Ads program:** the entry's `[ads]` block (else the playlist default, else site pictures) drives the ad overlay on that page.
+- **View:** an entry's `view=pictures` (or the playlist's `[view pictures]`) covers the media with its `[show]` program the whole time (see Overlay iframe → Pictures outside ads). Runner state from before views existed reads as `video`.
 - **Popup:** playlist name, `3 / 10` and the entry title, **⏮ Previous**, **Next ⏭** / **Finish**, **Stop**; **Resume** when detached. Shortcuts: next `Alt+Shift+N`, previous unbound.
 - `t=` is parsed and stored with each entry; the page seeks to it (see Hash params + seeking).
 
@@ -306,13 +310,26 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
         [img cats 10]
     ```
 
-- One construct per line: URL entry, `[ads]`, quote, `[img …]`, comment (`#` or `//`), blank. Anything else is kept as an invalid line and reported, never dropped.
+    Pictures as the show (music, radio, podcasts):
+
+    ```
+    [view pictures]
+    [show]
+        [img beach]
+
+    https://radio.example/live | Radio
+    https://www.youtube.com/watch?v=xyz | A video after all | view=video
+    ```
+
+- One construct per line: URL entry, `[ads]`, `[show]`, `[view …]`, quote, `[img …]`, comment (`#` or `//`), blank. Anything else is kept as an invalid line and reported, never dropped.
 - `[ads]` before the first URL is the **playlist-wide default**. An `[ads]` block after a URL (and before the next URL) **overrides** it for that entry. Quote / img lines outside a block are reported and ignored.
 - `N: text` — quote displayed for N seconds (only the first `N:` is a prefix; colons later in the text are fine).
 - `[img]` — images for the current site (see `[img ...]` resolution under Overlay iframe).
 - `[img <keyword>]` — images matching that keyword (may be several words), using filename durations or 5s default. `[img <keyword> N]` forces N seconds.
 - `url | title | t=…` — optional title and options. Fields shaped `key=value` are options (unknown keys are kept and reported); the first other field is the title. Titles are written so they can't read back as options.
-- Indentation is **not** significant. An `[ads]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
+- `[show]` blocks scope like `[ads]` and pick the pictures for `view=pictures` entries: the entry's own `[show]`, else the playlist's, else the entry's ads program, else site pictures.
+- `[view pictures]` before the first URL makes every entry pictures; `view=video` / `view=pictures` on an entry overrides it. A `[view …]` after the first URL, or an unknown view, is reported and ignored.
+- Indentation is **not** significant. An `[ads]` or `[show]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
 
 ### Hash params + seeking
 

@@ -13,6 +13,7 @@ describe('parseSettings', () => {
       autoSkip: true,
       adOverlay: true,
       clickShield: true,
+      pausePictures: false,
     });
   });
 

@@ -62,12 +62,12 @@ function formatTime(s: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(sec).padStart(2, '0')}`;
 }
 
-function describeAds(ads: ProgramItem[] | null, isDefault: boolean): string {
-  if (!ads) return 'ads: site pictures';
-  const quotes = ads.filter((a) => a.kind === 'text').length;
-  const imgs = ads.length - quotes;
+function describeProgram(label: string, items: ProgramItem[] | null, isDefault: boolean): string {
+  if (!items) return `${label}: site pictures`;
+  const quotes = items.filter((a) => a.kind === 'text').length;
+  const imgs = items.length - quotes;
   const parts = [quotes && `${quotes} quote${quotes > 1 ? 's' : ''}`, imgs && `${imgs} picture set${imgs > 1 ? 's' : ''}`];
-  return `ads${isDefault ? ' (default)' : ''}: ${parts.filter(Boolean).join(', ')}`;
+  return `${label}${isDefault ? ' (default)' : ''}: ${parts.filter(Boolean).join(', ')}`;
 }
 
 function countEntries(text: string): number {
@@ -110,7 +110,12 @@ function renderPreview(): void {
         }
         const meta = [host];
         if (e.startS !== null) meta.push(`from ${formatTime(e.startS)}`);
-        meta.push(describeAds(e.ads, e.ads !== null && e.ads === compiled.defaultAds));
+        if (e.view === 'pictures') {
+          // The show's pictures fall back to the ads program; say which one it is.
+          const label = e.show !== null && e.show === e.ads ? 'shown as pictures, from its ads' : 'shown as pictures';
+          meta.push(describeProgram(label, e.show, e.show !== null && e.show === compiled.defaultShow));
+        }
+        meta.push(describeProgram('ads', e.ads, e.ads !== null && e.ads === compiled.defaultAds));
         const li = el('li');
         const play = el('button', '', '▶');
         play.type = 'button';

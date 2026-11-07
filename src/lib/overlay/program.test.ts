@@ -75,6 +75,28 @@ describe('parseOverlayCommand', () => {
   );
 });
 
+describe('pictures command', () => {
+  it('parses pause and show pictures, defaulting the program', () => {
+    expect(
+      parseOverlayCommand({ type: 'pictures', purpose: 'show', host: 'a.com', items: [{ kind: 'img', keyword: 'sea' }], paused: true }),
+    ).toEqual({
+      type: 'pictures',
+      purpose: 'show',
+      host: 'a.com',
+      items: [{ kind: 'img', keyword: 'sea', durationS: null }],
+      paused: true,
+    });
+    expect(parseOverlayCommand({ type: 'pictures', purpose: 'pause', host: 'a.com', items: [], paused: true })).toMatchObject({
+      items: [{ kind: 'img', keyword: null, durationS: null }],
+    });
+  });
+
+  it('rejects unknown purposes and missing flags', () => {
+    expect(parseOverlayCommand({ type: 'pictures', purpose: 'ad', host: 'a.com', items: [], paused: false })).toBeNull();
+    expect(parseOverlayCommand({ type: 'pictures', purpose: 'show', host: 'a.com', items: [] })).toBeNull();
+  });
+});
+
 describe('shield command', () => {
   it('requires the maximized flag', () => {
     expect(parseOverlayCommand({ type: 'shield', maximized: true, seekBand: 24 })).toEqual({

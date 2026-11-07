@@ -32,9 +32,18 @@ export type OverlayCommand =
    * `seekBand`: px at the bottom where a click seeks (0 = none); shown as a pointer cursor.
    */
   | { type: 'shield'; maximized: boolean; seekBand: number }
+  /**
+   * Pictures that aren't about an ad: `pause` while the show is paused (a click resumes
+   * it), `show` for a playlist entry shown as pictures (clicks play / pause; `paused` dims
+   * the pictures and shows ⏸). The slideshow keeps going when only `paused` changes.
+   */
+  | { type: 'pictures'; purpose: PicturesPurpose; host: string; items: ProgramItem[]; paused: boolean }
   /** A small "Show pictures" button in a corner of the player, after ✕ during an ad. */
   | { type: 'pill' }
   | { type: 'hide' };
+
+export const PICTURES_PURPOSES = ['pause', 'show'] as const;
+export type PicturesPurpose = (typeof PICTURES_PURPOSES)[number];
 
 /** A key pressed while the overlay iframe had focus, handed back to the page. */
 export interface ForwardedKey {
@@ -57,7 +66,7 @@ export type OverlayEvent =
   /** Start / Next on the blackout prompt. */
   | { type: 'start' }
   | { type: 'next' }
-  /** Shield clicked / double-clicked at x / y, fractions (0–1) of the overlay box. */
+  /** Shield or pictures clicked / double-clicked at x / y, fractions (0–1) of the overlay box. */
   | { type: 'click' | 'dblclick'; x: number; y: number }
   /** Pointer moved over the shield; x / y are fractions (0–1) of the overlay box. */
   | { type: 'activity'; x: number; y: number }
@@ -94,6 +103,12 @@ export function parseProgramItem(v: unknown): ProgramItem | null {
   return null;
 }
 
+/** Valid items, else the site's pictures. */
+function parseItems(raw: unknown[]): ProgramItem[] {
+  const items = raw.slice(0, MAX_ITEMS).map(parseProgramItem).filter((i): i is ProgramItem => i !== null);
+  return items.length > 0 ? items : [...DEFAULT_AD_ITEMS];
+}
+
 export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
   if (!isObj(raw)) return null;
   switch (raw.type) {
@@ -116,8 +131,18 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
     }
     case 'ad': {
       if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.muted !== 'boolean') return null;
-      const items = raw.items.slice(0, MAX_ITEMS).map(parseProgramItem).filter((i): i is ProgramItem => i !== null);
-      return { type: 'ad', host: raw.host, items: items.length > 0 ? items : [...DEFAULT_AD_ITEMS], muted: raw.muted };
+      return { type: 'ad', host: raw.host, items: parseItems(raw.items), muted: raw.muted };
+    }
+    case 'pictures': {
+      if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.paused !== 'boolean') return null;
+      if (!(PICTURES_PURPOSES as readonly unknown[]).includes(raw.purpose)) return null;
+      return {
+        type: 'pictures',
+        purpose: raw.purpose as PicturesPurpose,
+        host: raw.host,
+        items: parseItems(raw.items),
+        paused: raw.paused,
+      };
     }
     default:
       return null;

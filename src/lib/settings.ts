@@ -12,6 +12,8 @@ export interface Settings {
    * accidental ad clicks). Double-click maximizes. The site's control bar stays usable.
    */
   clickShield: boolean;
+  /** Cover the show with pictures while it's paused (by the user, not buffering). */
+  pausePictures: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
@@ -19,6 +21,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   autoSkip: true,
   adOverlay: true,
   clickShield: true,
+  pausePictures: false,
 });
 
 /** Valid stored fields win; anything missing or malformed falls back to the default. */

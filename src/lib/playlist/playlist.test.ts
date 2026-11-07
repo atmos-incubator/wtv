@@ -123,7 +123,21 @@ describe('playlist messages', () => {
       title: null,
       startS: 97,
       ads: [{ kind: 'img', keyword: 'cats', durationS: null }],
+      // From a runner started before views existed.
+      view: 'video',
+      show: null,
     });
+    expect(
+      parseEntryInfo({
+        gen: 1,
+        index: 0,
+        total: 1,
+        playlist: 'P',
+        view: 'pictures',
+        show: [{ kind: 'text', text: 'Now playing', durationS: 10 }],
+      }),
+    ).toMatchObject({ view: 'pictures', show: [{ kind: 'text', text: 'Now playing', durationS: 10 }] });
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', view: 'tv' })?.view).toBe('video');
     expect(parseEntryInfo(null)).toBeNull();
   });
 });

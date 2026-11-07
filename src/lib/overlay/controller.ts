@@ -6,11 +6,15 @@
  *                                        (top frame), then Start / Next if nothing plays
  *   3. Dev preview                     → ad slideshow
  *   4. Ad playing, pictures on         → ad slideshow (also the ad click shield)
- *   5. Click shield on, and the primary video is
+ *   5. Playlist entry with view=pictures → its [show] slideshow over the media for the
+ *                                        whole entry (dimmed with ⏸ while paused); the
+ *                                        tab if the media has no box (audio)
+ *   6. Paused show, `pausePictures` on → slideshow until it plays again (pause.ts)
+ *   7. Click shield on, and the primary video is
  *        maximized                     → transparent shield over everything, idle cursor hides
  *        in an ad (pictures off)       → transparent shield over everything
  *        a show (isShow)               → transparent shield, site control bar left uncovered
- *   6. Otherwise                       → nothing
+ *   8. Otherwise                       → nothing
  *
  * The ad slideshow covers the site's `player` role when it has one (some ads, like YouTube's
  * static ones, move or shrink the <video> and draw outside it), else the primary video.
@@ -18,6 +22,9 @@
  * corner for the rest of the ad; it, or the popup, brings the pictures back.
  * The ✕ on the ad slideshow hides the overlay, shield included, for the rest of that ad.
  * The ad program is the playlist entry's `[ads]` block, or the default `[img]` slideshow.
+ *
+ * Clicks on the non-ad pictures play / pause the show (so a click on pause pictures
+ * resumes it), and double-clicks maximize.
  *
  * Shield events: click → play / pause, except in the strip just above the site's progress
  * bar (normal playback only), where it seeks to that point of the bar (the `progressBar`
@@ -37,6 +44,7 @@ import { scheduler } from '../schedule';
 import type { PlaylistClient } from '../playlist/client';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
+import { PAUSE_PICTURES_DELAY_MS, pausePicturesDue } from './pause';
 import { DEFAULT_AD_ITEMS, type ForwardedKey } from './program';
 import {
   DEFAULT_CONTROL_INSET,
@@ -64,10 +72,29 @@ export interface OverlayStatus {
   adPicturesHidden: boolean;
 }
 
-type Mode = 'blackout' | 'ad' | 'pill' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
+type Mode =
+  | 'blackout'
+  | 'ad'
+  | 'pill'
+  | 'preview'
+  | 'show-pictures'
+  | 'pause-pictures'
+  | 'shield'
+  | 'shield-full'
+  | 'shield-max'
+  | null;
 
-/** Primary media events that can change whether it counts as a show. */
-const PRIMARY_EVENTS = ['loadedmetadata', 'durationchange', 'volumechange', 'play', 'emptied'] as const;
+/** Primary media events that can change whether it counts as a show, or is paused. */
+const PRIMARY_EVENTS = [
+  'loadedmetadata',
+  'durationchange',
+  'volumechange',
+  'play',
+  'pause',
+  'ended',
+  'seeked',
+  'emptied',
+] as const;
 const SYNC_DELAY_MS = 100;
 /** The "Show pictures" pill: size and inset from the player's top-right corner. */
 const PILL = { width: 140, height: 32, inset: 12 };
@@ -87,6 +114,9 @@ export function startOverlay(
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
   let suspended = false;
   let primaryCleanup: (() => void) | null = null;
+  /** When the primary last paused (performance.now()), until it plays again. */
+  let pausedAt: number | null = null;
+  let pauseTimer: ReturnType<typeof setTimeout> | undefined;
 
   const adActive = () => ads.status()?.active ?? false;
   const siteHasAds = () => Boolean(agent.profile().site?.config.roles.adIndicator?.length);
@@ -126,6 +156,39 @@ export function startOverlay(
     if (width < 60) return null;
     return { left: box.left + box.width - width - PILL.inset, top: box.top + PILL.inset, width, height: PILL.height };
   };
+  /**
+   * Pictures as the show: the media's box (or the player's), else the whole tab for media
+   * that has none (audio). A video with no box right now: nothing (the host holds its place).
+   */
+  const showTarget: OverlayTarget = () => {
+    const box = coverTarget();
+    if (box) return box;
+    const primary = agent.primary();
+    if (!primary) return null;
+    return primary.features(null).isVideo ? null : 'viewport';
+  };
+  const showPaused = () => {
+    const primary = agent.primary();
+    return primary ? !primary.features(null).playing : false;
+  };
+
+  function pauseDue(): boolean {
+    const el = primaryVideo();
+    const f = agent.primaryFeatures();
+    if (!el || !f) return false;
+    return pausePicturesDue({
+      enabled: ads.settings().pausePictures,
+      paused: el.paused,
+      ended: el.ended,
+      seeking: el.seeking,
+      readyState: el.readyState,
+      currentTime: el.currentTime,
+      pausedForMs: pausedAt === null ? null : performance.now() - pausedAt,
+      isShow: isShow(f),
+      adActive: adActive(),
+    });
+  }
+
   const shieldTarget: OverlayTarget = () => {
     const el = primaryVideo();
     if (!el) return null;
@@ -142,6 +205,9 @@ export function startOverlay(
     const settings = ads.settings();
     const ad = adActive();
     if (ad && settings.adOverlay) return dismissed ? 'pill' : 'ad';
+    // Sticky while the entry lasts, so the site swapping its media doesn't flash the page.
+    if (playlist.view() === 'pictures' && (agent.primary() || mode === 'show-pictures')) return 'show-pictures';
+    if (pauseDue()) return 'pause-pictures';
     if (!settings.clickShield || !primaryVideo()) return null;
     if (view.mediaMaximized()) return 'shield-max';
     if (ad) return dismissed ? null : 'shield-full';
@@ -171,18 +237,18 @@ export function startOverlay(
     }
   }
 
-  /** Blackout content (prompt, attempts, status) changes without a mode change. */
-  let blackoutShown = '';
+  /** What changes within a mode: blackout content (prompt, attempts, status), show paused. */
+  let shownSignature = '';
 
   function sync(force = false): void {
     if (!adActive()) dismissed = false;
     const next = nextMode();
     const blackout = next === 'blackout' ? playlist.blackout() : null;
-    const signature = blackout ? JSON.stringify(blackout) : '';
-    if (next === mode && signature === blackoutShown && !force) return;
+    const signature = blackout ? JSON.stringify(blackout) : next === 'show-pictures' ? String(showPaused()) : '';
+    if (next === mode && signature === shownSignature && !force) return;
     if (DEV_TOOLS && next !== mode) noteModeChange(mode, next);
     mode = next;
-    blackoutShown = signature;
+    shownSignature = signature;
     switch (next) {
       case 'blackout':
         overlay.show(
@@ -211,6 +277,30 @@ export function startOverlay(
         break;
       case 'pill':
         overlay.show({ type: 'pill' }, pillTarget);
+        break;
+      case 'show-pictures':
+        overlay.show(
+          {
+            type: 'pictures',
+            purpose: 'show',
+            host: location.hostname,
+            items: [...(playlist.show() ?? DEFAULT_AD_ITEMS)],
+            paused: showPaused(),
+          },
+          showTarget,
+        );
+        break;
+      case 'pause-pictures':
+        overlay.show(
+          {
+            type: 'pictures',
+            purpose: 'pause',
+            host: location.hostname,
+            items: [...(playlist.ads() ?? DEFAULT_AD_ITEMS)],
+            paused: true,
+          },
+          coverTarget,
+        );
         break;
       case 'shield':
       case 'shield-full':
@@ -327,15 +417,39 @@ export function startOverlay(
     }
   });
 
+  function clearPause(): void {
+    pausedAt = null;
+    if (pauseTimer !== undefined) clearTimeout(pauseTimer);
+    pauseTimer = undefined;
+  }
+
   function watchPrimary(): void {
     primaryCleanup?.();
     primaryCleanup = null;
+    clearPause();
     const el = agent.primary()?.element;
     if (!el) return;
     const controller = new AbortController();
     const opts = { passive: true, signal: AbortSignal.any([signal, controller.signal]) };
     for (const type of PRIMARY_EVENTS) el.addEventListener(type, syncSoon, opts);
-    primaryCleanup = () => controller.abort();
+    // Pause pictures wait a moment after the pause, and go as soon as it plays.
+    el.addEventListener(
+      'pause',
+      () => {
+        clearPause();
+        pausedAt = performance.now();
+        pauseTimer = setTimeout(() => {
+          pauseTimer = undefined;
+          sync();
+        }, PAUSE_PICTURES_DELAY_MS + 50);
+      },
+      opts,
+    );
+    for (const type of ['play', 'emptied'] as const) el.addEventListener(type, clearPause, opts);
+    primaryCleanup = () => {
+      controller.abort();
+      clearPause();
+    };
   }
 
   const offAd = ads.onAdChange(() => sync());

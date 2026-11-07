@@ -49,11 +49,22 @@ https://www.youtube.com/watch?v=abc | Some Title | t=1:37
   [img]                          (this site's pictures)
   [img cats 10]                  (10 seconds each)
 
-# comments start with # or //</pre>
+# comments start with # or //
+
+[view pictures]            ← before the first URL: pictures cover every entry
+[show]                     ← the pictures to show (like [ads])
+  [img beach]
+https://radio.example/live | Radio | view=pictures</pre>
               <p class="note">
                 Each line is a URL (with an optional <code>| title</code> and <code>| t=1:37</code> start time), an
                 <code>[ads]</code> block, a quote (<code>N: text</code>), a picture item (<code>[img keyword N]</code>), or a
                 comment. Indentation is up to you. Start times: <code>97</code>, <code>1:37</code>, <code>1h2m3s</code>.
+              </p>
+              <p class="note">
+                <code>view=pictures</code> on an entry (or <code>[view pictures]</code> before the first URL) plays it
+                unseen behind pictures, for music, radio and podcasts. The pictures come from a <code>[show]</code> block
+                (the entry's, else the playlist's), else its <code>[ads]</code>, else the site's pictures.
+                <code>view=video</code> turns it off for one entry.
               </p>
             </details>
           </section>
