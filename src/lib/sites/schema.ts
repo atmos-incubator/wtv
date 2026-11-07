@@ -12,6 +12,7 @@ export const ROLE_NAMES = [
   'player',
   'adIndicator',
   'skip',
+  'continuePrompt',
   'playButton',
   'progressBar',
   'title',
@@ -40,6 +41,7 @@ export const ROLE_DEFAULT_WHEN: Record<RoleName, Condition> = {
   player: 'exists',
   adIndicator: 'visible',
   skip: 'visible',
+  continuePrompt: 'visible',
   playButton: 'visible',
   // Players fade their controls out; the bar's geometry is still what a seek maps onto.
   progressBar: 'exists',

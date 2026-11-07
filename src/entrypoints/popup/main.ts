@@ -3,7 +3,14 @@ import { browser } from 'wxt/browser';
 import { browserAreas } from '../../lib/browser-storage';
 import { injectIntoTab } from '../../lib/injection';
 import { DEV_TOOLS } from '../../lib/env';
-import { MSG_PREVIEW_OVERLAY, MSG_STATUS, type AdStatus, type FrameStatus, type MediaStatus } from '../../lib/messages';
+import {
+  MSG_PREVIEW_OVERLAY,
+  MSG_SHOW_AD_PICTURES,
+  MSG_STATUS,
+  type AdStatus,
+  type FrameStatus,
+  type MediaStatus,
+} from '../../lib/messages';
 import { isWebUrl, originPatternForHost } from '../../lib/permissions';
 import { parseSettings, type Settings } from '../../lib/settings';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
@@ -267,11 +274,24 @@ function describeMedia(status: MediaStatus | null, running: boolean): Node[] {
   return nodes;
 }
 
-function describeAds(ads: AdStatus | null, tabMuted: boolean): Node[] {
+function describeAds(ads: AdStatus | null, tabMuted: boolean, tabId: number, picturesHidden: boolean): Node[] {
   if (!ads) return [note('No ad detection for this site.')];
   const nodes: Node[] = [];
   if (ads.active) {
     nodes.push(el('div', { text: ads.muteAds && tabMuted ? 'Ad playing · tab muted' : 'Ad playing' }));
+    if (picturesHidden) {
+      nodes.push(
+        note('Pictures hidden for this ad.'),
+        el(
+          'div',
+          { className: 'actions' },
+          button('Show ad pictures', async () => {
+            // Every frame: the ad may be in an embedded player.
+            await browser.tabs.sendMessage(tabId, { type: MSG_SHOW_AD_PICTURES }).catch(() => undefined);
+          }),
+        ),
+      );
+    }
   } else {
     nodes.push(note('No ad playing.'));
   }
@@ -405,7 +425,7 @@ async function render(): Promise<void> {
     row('Media', ...describeMedia(status?.media ?? null, granted), ...healthNotes, ...selectorsRow),
     ...(status && view ? [viewRow(tabId, view, shortcuts)] : []),
     playlistRow({ id: tabId, url: tab.url, title: tab.title }, runner, playlists),
-    ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted)))] : []),
+    ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted), tabId, status.overlay?.adPicturesHidden ?? false))] : []),
     settingsRow,
     ...devRow,
   );

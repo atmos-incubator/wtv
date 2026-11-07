@@ -25,6 +25,7 @@ const token = location.hash.slice(1);
 const root = document.documentElement;
 const badge = document.getElementById('badge') as HTMLElement;
 const dismiss = document.getElementById('dismiss') as HTMLButtonElement;
+const pill = document.getElementById('pill') as HTMLButtonElement;
 const prompt = document.getElementById('prompt') as HTMLElement;
 const promptStart = document.getElementById('prompt-start') as HTMLButtonElement;
 const promptStatus = document.getElementById('prompt-status') as HTMLElement;
@@ -80,6 +81,8 @@ function reset(): void {
   badge.hidden = true;
   dismiss.hidden = true;
   prompt.hidden = true;
+  pill.hidden = true;
+  root.classList.remove('pill');
   setShield(false, false);
 }
 
@@ -245,11 +248,21 @@ function handle(cmd: OverlayCommand | null): void {
       setShield(true, cmd.maximized, cmd.seekBand);
       wake();
       break;
+    case 'pill':
+      reset();
+      root.classList.add('pill');
+      pill.hidden = false;
+      break;
     case 'hide':
       reset();
       break;
   }
 }
+
+pill.addEventListener('click', (e) => {
+  e.stopPropagation();
+  emit({ type: 'undismiss' });
+});
 
 dismiss.addEventListener('click', (e) => {
   e.stopPropagation();

@@ -14,6 +14,8 @@
  *
  * The ad slideshow covers the site's `player` role when it has one (some ads, like YouTube's
  * static ones, move or shrink the <video> and draw outside it), else the primary video.
+ * After ✕, a small "Show pictures" pill (mode `pill`) sits in the player's top-right
+ * corner for the rest of the ad; it, or the popup, brings the pictures back.
  * The ✕ on the ad slideshow hides the overlay, shield included, for the rest of that ad.
  * The ad program is the playlist entry's `[ads]` block, or the default `[img]` slideshow.
  *
@@ -52,13 +54,23 @@ export interface OverlayController {
   preview(ms: number): boolean;
   /** Get out of the way (e.g. while the selector picker runs), then come back. */
   suspend(on: boolean): void;
+  /** For the popup: the ad pictures were hidden with ✕ during the current ad. */
+  status(): OverlayStatus;
+  /** Undo ✕ for the current ad. */
+  showAdPictures(): void;
 }
 
-type Mode = 'blackout' | 'ad' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
+export interface OverlayStatus {
+  adPicturesHidden: boolean;
+}
+
+type Mode = 'blackout' | 'ad' | 'pill' | 'preview' | 'shield' | 'shield-full' | 'shield-max' | null;
 
 /** Primary media events that can change whether it counts as a show. */
 const PRIMARY_EVENTS = ['loadedmetadata', 'durationchange', 'volumechange', 'play', 'emptied'] as const;
 const SYNC_DELAY_MS = 100;
+/** The "Show pictures" pill: size and inset from the player's top-right corner. */
+const PILL = { width: 140, height: 32, inset: 12 };
 
 export function startOverlay(
   ctx: ContentScriptContext,
@@ -103,7 +115,17 @@ export function startOverlay(
   // Only cover something that's on screen. Audio-only ads just get muted.
   // The player box doesn't depend on which media element is primary right now, which
   // can briefly be none while the site swaps or resizes its video.
-  const coverTarget: OverlayTarget = () => playerRect() ?? agent.primary()?.rect() ?? null;
+  // Maximized, the video sits in the top layer over the whole tab while the player box
+  // stays where it was in the page: cover the video then.
+  const coverTarget: OverlayTarget = () =>
+    (view.mediaMaximized() ? null : playerRect()) ?? agent.primary()?.rect() ?? null;
+  const pillTarget: OverlayTarget = () => {
+    const box = coverTarget();
+    if (!box || box === 'viewport') return null;
+    const width = Math.min(PILL.width, box.width - 2 * PILL.inset);
+    if (width < 60) return null;
+    return { left: box.left + box.width - width - PILL.inset, top: box.top + PILL.inset, width, height: PILL.height };
+  };
   const shieldTarget: OverlayTarget = () => {
     const el = primaryVideo();
     if (!el) return null;
@@ -119,7 +141,7 @@ export function startOverlay(
     if (previewing) return 'preview';
     const settings = ads.settings();
     const ad = adActive();
-    if (ad && settings.adOverlay && !dismissed) return 'ad';
+    if (ad && settings.adOverlay) return dismissed ? 'pill' : 'ad';
     if (!settings.clickShield || !primaryVideo()) return null;
     if (view.mediaMaximized()) return 'shield-max';
     if (ad) return dismissed ? null : 'shield-full';
@@ -186,6 +208,9 @@ export function startOverlay(
           },
           coverTarget,
         );
+        break;
+      case 'pill':
+        overlay.show({ type: 'pill' }, pillTarget);
         break;
       case 'shield':
       case 'shield-full':
@@ -269,6 +294,10 @@ export function startOverlay(
       case 'dismiss':
         dismissed = true;
         window.focus();
+        sync();
+        break;
+      case 'undismiss':
+        dismissed = false;
         sync();
         break;
       case 'start':
@@ -358,6 +387,13 @@ export function startOverlay(
         sync();
       }, ms);
       return true;
+    },
+    status() {
+      return { adPicturesHidden: mode === 'pill' };
+    },
+    showAdPictures() {
+      dismissed = false;
+      sync();
     },
     suspend(on) {
       suspended = on;

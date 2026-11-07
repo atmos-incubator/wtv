@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { MSG_STATUS as SRC_STATUS } from '../../src/lib/messages';
 import { PICK_ROLES as SRC_ROLES } from '../../src/lib/picker/messages';
 import { ROLE_NAMES } from '../../src/lib/sites/schema';
-import { AD_ROLES, MSG_STATUS, PICK_ROLES, evaluateRun, parseTargets, summarize, type Observation, type RoleLite } from './protocol';
+import { AD_ROLES, MOMENT_ROLES, MSG_STATUS, PICK_ROLES, evaluateRun, parseTargets, summarize, type Observation, type RoleLite } from './protocol';
 
 const role = (name: string, matchedIndex: number | null, counts = [1]): RoleLite => ({
   role: name,
@@ -28,7 +28,7 @@ describe('health runner protocol', () => {
   it('stays in sync with the extension', () => {
     expect(MSG_STATUS).toBe(SRC_STATUS);
     expect(PICK_ROLES).toBe(SRC_ROLES);
-    for (const r of AD_ROLES) expect(ROLE_NAMES).toContain(r);
+    for (const r of [...AD_ROLES, ...MOMENT_ROLES]) expect(ROLE_NAMES).toContain(r);
   });
 
   it('has a target for every bundled site', () => {
@@ -63,6 +63,12 @@ describe('health runner protocol', () => {
     expect(r.ok).toBe(true);
     expect(r.roles[1]).toMatchObject({ verdict: 'fallback', matched: '.playButton-2' });
     expect(r.roles[2]).toMatchObject({ verdict: 'pass', detail: 'found, but not visible' });
+  });
+
+  it('never fails a prompt role that only shows in rare moments', () => {
+    const r = evaluateRun({ ...good, roles: [role('video', 0), role('continuePrompt', null, [0])] });
+    expect(r.ok).toBe(true);
+    expect(r.roles[1]).toMatchObject({ verdict: 'not-seen' });
   });
 
   it('fails on missing roles, a heuristic-only video, no playback or no answer', () => {

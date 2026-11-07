@@ -5,6 +5,7 @@ export const ROLE_LABELS: Record<RoleName, string> = {
   player: 'Player',
   adIndicator: 'Ad indicator',
   skip: 'Skip button',
+  continuePrompt: 'Continue prompt',
   playButton: 'Play button',
   progressBar: 'Progress bar',
   title: 'Title',
@@ -18,6 +19,8 @@ export const ROLE_HINTS: Record<RoleName, string> = {
   player: 'The player’s outer box (video, controls, ads). The ad pictures cover it, and an unlisted Skip button is searched for inside it.',
   adIndicator: 'Something that is only there (or only visible) while an ad plays. Pick it during an ad.',
   skip: 'The “Skip ad” button. It only shows mid-ad, so use the countdown.',
+  continuePrompt:
+    'The “Yes” / “Continue” button of a “Still watching?” dialog. Clicked automatically after a pause, when nobody has used the page for a minute.',
   playButton: 'The player’s own play / pause button.',
   progressBar: 'The seek bar. Clicking just above it on the click shield jumps there.',
   title: 'The video or episode title.',

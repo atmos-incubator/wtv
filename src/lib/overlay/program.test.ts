@@ -96,7 +96,7 @@ describe('parseOverlayEvent', () => {
   const key = { type: 'key', key: 'k', code: 'KeyK', shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false };
 
   it('accepts dismiss, and clicks with coordinates', () => {
-    for (const type of ['dismiss', 'start', 'next']) expect(parseOverlayEvent({ type })).toEqual({ type });
+    for (const type of ['dismiss', 'undismiss', 'start', 'next']) expect(parseOverlayEvent({ type })).toEqual({ type });
     for (const type of ['click', 'dblclick']) {
       expect(parseOverlayEvent({ type, x: 0.2, y: 0.9 })).toEqual({ type, x: 0.2, y: 0.9 });
       expect(parseOverlayEvent({ type })).toBeNull();

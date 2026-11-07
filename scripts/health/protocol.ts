@@ -12,6 +12,8 @@ export const PICK_ROLES = 'wtv/pick/roles';
 
 /** Only present during ads, which aren't guaranteed: recorded as seen / not seen, never failed. */
 export const AD_ROLES: readonly string[] = ['adIndicator', 'skip'];
+/** Roles that only exist in rare moments (a "still watching?" dialog): reported, never judged. */
+export const MOMENT_ROLES: readonly string[] = ['continuePrompt'];
 
 export interface Target {
   url: string;
@@ -67,6 +69,9 @@ function judgeRole(o: Observation, r: RoleLite): RoleResult {
 
   if (r.role === 'adIndicator') return { role: r.role, verdict: o.adSeen ? 'seen' : 'not-seen', matched, detail: null };
   if (r.role === 'skip') return { role: r.role, verdict: o.skipSeen ? 'seen' : 'not-seen', matched, detail: null };
+  if (MOMENT_ROLES.includes(r.role)) {
+    return { role: r.role, verdict: r.matchedIndex !== null ? 'seen' : 'not-seen', matched, detail: null };
+  }
 
   if (r.role === 'video' && o.primarySource !== 'config') {
     return { role: r.role, verdict: 'fail', matched, detail: errorNote ?? 'its selectors didn’t pick the playing video' };

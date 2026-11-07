@@ -52,7 +52,7 @@ Not done, or done but not verified:
 - [ ] **Step 10 — Overlay control + YouTube's "Continue watching?"** [F1, F6]
 - [ ] **Step 11 — Selector panel: remove selectors, metadata preview** [F2, F4]
 - [ ] **Step 12 — Pictures outside ads: on pause, and as the show** [F5, F11]
-- [ ] **Step 13 — Playlist options: end time / duration, shuffle** [F16, F13]
+- [ ] **Step 13 — Playlist options: end time / duration, shuffle, loop** [F16, F13]
 - [ ] **Step 14 — Media library: durations, thumbnails, gone videos** [F7, F9, part of F10]
 - [ ] **Step 15 — Built-in playlists + backup / restore** [F3, F8, F12]
 - [ ] **Step 16 — Playlist explorer side panel** [F10]
@@ -71,22 +71,30 @@ isn't a video) and goes last.
 **Bring the ad pictures back after ✕** [F1]. Not done yet: ✕ hides them until that ad ends, with
 no way back.
 
-- After ✕, a small "Show pictures" pill sits in a corner of the player for the rest of the ad
-  (part of the shield, so it can't be an ad click). Clicking it shows the pictures again.
-- The popup's Media row gets **Show ad pictures** while an ad is on and they're hidden.
+- After ✕, a small **Show pictures** pill sits in the player's top-right corner for the rest of
+  the ad (its own small overlay; the rest of the ad is reachable, as after ✕ today). Clicking it
+  shows the pictures again.
+- The popup's Ads row gets **Show ad pictures** while an ad is on and they're hidden.
 
 **YouTube's "Video paused. Continue watching?" dialog** [F6, `docs/continue_watching_bug.md`].
 It once left the ad overlay up all night: the prompt paused the video during an ad, so the ad
 never ended.
 
 - New optional role **`continuePrompt`**: the dialog's confirm button (YouTube:
-  `yt-confirm-dialog-renderer #confirm-button button`, checked with a 📸 snapshot of the real
-  dialog). When it's visible, Wtv clicks it using the skip button's click strategies.
+  `ytd-popup-container yt-confirm-dialog-renderer #confirm-button button`, from the dialog's HTML
+  in the bug note). When it's visible, Wtv clicks it using the skip button's click strategies.
+  Health runs report it as seen / not seen, never a failure.
 - If the click is ignored, call `play()` on the video, and hide the dialog if it's still there.
+- Only when nobody is using the page: no key press or click on it for the last minute. YouTube
+  uses the same dialog for other confirmations (delete a playlist, …), and those only ever follow
+  a click, so this keeps Wtv from confirming something you asked for.
+- Checked for a few seconds after every pause of the video (the dialog pauses it), not watched
+  all the time.
 - Safety net, for any site: if an ad has "shown" for 10 minutes with the video's time not moving,
-  stop covering and muting, and log why. A stuck ad shouldn't run all night.
-- In a playlist, a prompt that can't be dismissed counts as the entry stalling: show Start / Next,
-  like a blocked autoplay.
+  stop covering and muting, and log why. A stuck ad shouldn't run all night. The ad probe also
+  slows to every 5 s once an ad has run 30 s.
+- Later, if needed: in a playlist, a prompt that can't be dismissed counts as the entry stalling
+  (Start / Next, like a blocked autoplay).
 
 ### Step 11 — Selector panel: remove selectors, metadata preview
 
@@ -148,8 +156,16 @@ for the whole entry. For music, radio, podcasts.
   **Shuffle** checkbox, ticked by default when the playlist has the line.
 - The order is shuffled once at start and kept in the runner's session state, so **Previous**
   goes back through the same order. **Reshuffle** in the popup.
-- Decide: should shuffle reshuffle when the playlist loops? (Playlists don't loop yet: add a
-  `[loop]` line here too?)
+
+**Loop**:
+
+- A `[loop]` line at the end of the playlist: after the last entry, start again from the first
+  (the blackout shows the first title, as between any two entries). **Finish** in the popup
+  becomes **Next** while looping; **Stop** ends it.
+- With shuffle, each lap is reshuffled, and the entry that just played never plays first in the
+  next lap.
+- The playlist page's **▶ Play** gets a **Loop** checkbox too, ticked when the playlist has the
+  line.
 
 ### Step 14 — Media library
 
@@ -177,7 +193,26 @@ playing [F9, F10, F7].
 **Built-in playlists** [F3, F8]:
 
 - Shipped as text files in `src/playlists/*.txt` (same format, plus a `# name:` first line),
-  validated at build time like site configs. YouTube to start; I provide the lists.
+  validated at build time like site configs. YouTube to start; I fill in the lists. A file with no
+  entries yet is skipped by the build (with a note), so the genres below can be stubbed now and
+  ship as they're filled in. Not all of them need to be ready for the store launch.
+- Starting genres (one playlist each, names to settle when filling them in):
+    - Artwork
+    - Red Bull clips
+    - Movie clips & previews
+    - Sports trick shots
+    - Satisfying making: silicone rubber colorizing / paint mixing, cake decorating, cookie icing,
+      woodworking
+    - Satisfying cleaning: hoof cleaning and trimming, room clutter, yard overgrowth, carpet
+      cleaning
+    - Pets: kittens, puppies, etc.
+    - Cat videos
+    - Nature: landscapes and critters
+    - Elemental: fire, snowfall, beach, rain
+    - Natural disasters
+    - Funny videos
+    - MTV-era music videos, with fun-fact title cards over the ad breaks: each entry's own
+      `[ads]` block of quotes (`10: Fun fact …`), which the format already supports.
 - Shown read-only on the playlists page under **Built in**. **Duplicate** makes an editable copy.
   Updates arrive with extension releases.
 - Durations / thumbnails for built-ins come from the media library as they're played. Not
@@ -222,11 +257,12 @@ A playlist entry can be something to read, not watch. New entry option `view=`:
 **Posts as title cards** [F15]: `url | view=card` for a single post: author, text and time on a
 full-screen card for `dur=` (default from text length).
 
-- X / Twitter: the public oEmbed endpoint (`publish.twitter.com/oembed`) returns a post's text
-  without signing in. Fetched by the background, rendered by the overlay page (never the
-  embed script).
-- Decide: which sites besides X? Bluesky (public API, no sign-in), Mastodon (public statuses),
-  Reddit (`.json`) are the easy ones.
+- One small adapter per site turns a post URL into `{ author, text, time, images }`. Fetched by
+  the background, rendered by the overlay page (never a site's embed script).
+- First adapter: X / Twitter, via the public oEmbed endpoint (`publish.twitter.com/oembed`), which
+  returns a post's text without signing in.
+- More microblog sites follow, each one adapter: Bluesky (public API, no sign-in), Mastodon
+  (public statuses), Reddit (`.json`), and others later. Not all at once.
 
 ---
 

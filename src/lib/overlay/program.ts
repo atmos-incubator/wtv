@@ -32,6 +32,8 @@ export type OverlayCommand =
    * `seekBand`: px at the bottom where a click seeks (0 = none); shown as a pointer cursor.
    */
   | { type: 'shield'; maximized: boolean; seekBand: number }
+  /** A small "Show pictures" button in a corner of the player, after ✕ during an ad. */
+  | { type: 'pill' }
   | { type: 'hide' };
 
 /** A key pressed while the overlay iframe had focus, handed back to the page. */
@@ -50,6 +52,8 @@ export interface ForwardedKey {
 export type OverlayEvent =
   /** ✕ on the ad overlay. */
   | { type: 'dismiss' }
+  /** "Show pictures" after ✕: bring the ad pictures back. */
+  | { type: 'undismiss' }
   /** Start / Next on the blackout prompt. */
   | { type: 'start' }
   | { type: 'next' }
@@ -94,7 +98,8 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
   if (!isObj(raw)) return null;
   switch (raw.type) {
     case 'hide':
-      return { type: 'hide' };
+    case 'pill':
+      return { type: raw.type };
     case 'blackout':
       return {
         type: 'blackout',
@@ -126,6 +131,7 @@ export function parseOverlayEvent(raw: unknown): OverlayEvent | null {
   if (!isObj(raw)) return null;
   switch (raw.type) {
     case 'dismiss':
+    case 'undismiss':
     case 'start':
     case 'next':
       return { type: raw.type };

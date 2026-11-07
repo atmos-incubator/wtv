@@ -19,8 +19,14 @@
  * can be added to the role: sites add ad formats with their own Skip buttons faster than
  * configs can follow.
  *
- * While an ad shows, the probe runs every PROBE_EVERY_MS. Its latest result is in
- * status().probe, and dev builds log it to the console whenever it changes.
+ * While an ad shows, the probe runs every PROBE_EVERY_MS (PROBE_SLOW_MS once the ad has
+ * gone on for PROBE_FAST_FOR_MS). Its latest result is in status().probe, and dev builds
+ * log it to the console whenever it changes.
+ *
+ * Stuck ads: if an ad has shown for STUCK_AD_MS with the video's time not moving (a
+ * site's "still watching?" dialog paused it mid-ad, say), the ad is reported over and
+ * ignored until the indicator goes away or the video moves again. A stuck ad shouldn't
+ * keep a tab muted and covered all night.
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
@@ -45,6 +51,9 @@ const SKIP_RETRY_MS = 1000;
 /** How soon after a click the button must be gone (or the ad over) to credit that click. */
 const SKIP_CREDIT_MS = 1500;
 const PROBE_EVERY_MS = 500;
+const PROBE_SLOW_MS = 5000;
+const PROBE_FAST_FOR_MS = 30_000;
+export const STUCK_AD_MS = 10 * 60_000;
 const PRIMARY_EVENTS = ['timeupdate', 'playing', 'loadedmetadata', 'durationchange', 'emptied'] as const;
 
 export interface AdWatcher {
@@ -78,6 +87,10 @@ export function startAdWatcher(
   /** What we've reported (stays true through the grace period). */
   let reported = false;
   let endTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Stuck-ad detection: when the primary's time last moved during this ad. */
+  let progressAt = 0;
+  let progressTime: number | null = null;
+  let stuck = false;
   /** When the indicator went away, and the primary's time at the last end check. */
   let goneAt = 0;
   let lastMediaTime: number | null = null;
@@ -140,9 +153,11 @@ export function startAdWatcher(
         clearTimeout(endTimer);
         endTimer = undefined;
       }
-      if (!reported) {
+      if (!reported && !stuck) {
         reported = true;
         adStartedAt = performance.now();
+        progressAt = adStartedAt;
+        progressTime = null;
         lastProbeAt = 0;
         lastProbeSig = '';
         lastProbe = null;
@@ -317,14 +332,15 @@ export function startAdWatcher(
 
   function runProbe(): void {
     const now = performance.now();
-    if (now - lastProbeAt < PROBE_EVERY_MS) return;
+    const every = now - adStartedAt < PROBE_FAST_FOR_MS ? PROBE_EVERY_MS : PROBE_SLOW_MS;
+    if (now - lastProbeAt < every) return;
     lastProbeAt = now;
     // Static ads can sit with nothing playing and nothing mutating: keep looking.
     if (probeTimer !== undefined) clearTimeout(probeTimer);
     probeTimer = setTimeout(() => {
       probeTimer = undefined;
-      if (rawActive) evaluateSoon();
-    }, PROBE_EVERY_MS);
+      if (rawActive && !stuck) evaluateSoon();
+    }, every);
 
     const areas = probeAreas();
     if (areas.length === 0) return;
@@ -366,10 +382,48 @@ export function startAdWatcher(
     }
     const { match, errors } = matchRole('adIndicator', matchers);
     selectorErrors = errors;
+    checkStuck(match !== null);
     setRaw(match !== null);
-    if (rawActive) runProbe();
-    else trackHome();
+    if (rawActive && !stuck) runProbe();
+    else if (!rawActive) trackHome();
     trySkip();
+  }
+
+  /** Whether the primary's time moved since the last call. */
+  function primaryMoved(): boolean {
+    const el = agent.primary()?.element;
+    if (!(el instanceof HTMLMediaElement)) return false;
+    const moved = progressTime !== null && el.currentTime !== progressTime;
+    progressTime = el.currentTime;
+    return moved;
+  }
+
+  /** See "Stuck ads" above. Called on every evaluation, before setRaw. */
+  function checkStuck(indicator: boolean): void {
+    const now = performance.now();
+    const moved = primaryMoved();
+    if (moved) progressAt = now;
+    if (stuck) {
+      if (!indicator || moved) {
+        stuck = false;
+        log(indicator ? 'stuck ad: the video moved again' : 'stuck ad: the indicator went away');
+      }
+      return;
+    }
+    if (!reported || !indicator || now - progressAt < STUCK_AD_MS) return;
+    stuck = true;
+    console.warn(
+      `[wtv] ads: an ad has shown for ${Math.round((now - progressAt) / 60_000)} min with the video not moving; ` +
+        'treating it as over (no more muting or covering) until the video plays or the ad indicator goes away.',
+    );
+    if (endTimer !== undefined) clearTimeout(endTimer);
+    endTimer = undefined;
+    reported = false;
+    skipTarget = null;
+    pendingStrategy = null;
+    probeCandidates = [];
+    report();
+    notify(adListeners, false);
   }
 
   /** Start / stop DOM observation depending on whether this site has ad selectors. */

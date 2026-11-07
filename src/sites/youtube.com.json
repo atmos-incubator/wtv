@@ -30,6 +30,9 @@
       ".ytp-ad-skip-button-modern",
       ".ytp-ad-skip-button"
     ],
+    "continuePrompt": [
+      "ytd-popup-container yt-confirm-dialog-renderer #confirm-button button"
+    ],
     "playButton": [
       {
         "selector": "button.ytp-play-button",

@@ -78,7 +78,7 @@ Each step is reviewed and committed before the next one starts.
 
 - One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (`controlBarInset` for the click shield; `adsInMainVideo` when ads play in the main `<video>`, as on YouTube). The folder holds only data, so the dev repo writer can be pointed at it.
 - Validated at build time (`wxt.config.ts` fails the build) and in tests. Bundled `host_permissions` are generated from `domains`.
-- **Roles:** `video`, `adIndicator`, `skip`, `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`.
+- **Roles:** `video`, `player` (optional: the player's outer box; ad pictures cover it, and it's searched for unlisted Skip buttons), `adIndicator`, `skip`, `continuePrompt` (optional, see Ad detection + muting), `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`.
 - **Each role is an ordered list of fallback selectors**, not a single selector. First match wins. Entries are a selector string or `{ "selector", "when" }`.
 - **Selector format supports shadow DOM** traversal with ` >>> `, e.g. `"ytd-app >>> #movie_player video"`.
 - **`when` condition** per selector, since many sites leave ad nodes in the DOM and only hide them:
@@ -116,7 +116,9 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 - Detect ads on video sites, mute the tab until the ad indicator is gone, then unmute.
 - **Mute the tab, not the element:** `chrome.tabs.update(tabId, { muted: true })`. Ads can play in other elements / iframes, and players reset `video.muted`.
 - **Only unmute what we muted:** check `tab.mutedInfo.reason === "extension"` and `extensionId` matches ours. Respect the user muting before an ad or unmuting during one.
-- **Grace period** of ~1–2s after the indicator clears before unmuting, to ride out gaps between back-to-back ads.
+- **Ending an ad** (`src/lib/ads/end.ts`, pure + tested): the indicator must be gone for 1.5 s *and* the show must be playing (its time moving), or 8 s must pass. The indicator can drop for a moment between the ads of a pod or while the player reloads the show, and ending the ad there flashed the page.
+- **Stuck ads:** an ad showing for 10 minutes with the video's time not moving is treated as over (no muting or covering) until the video moves or the indicator goes away.
+- **"Continue watching?" dialogs** (`continuePrompt` role, `src/lib/prompts/continue.ts`): looked for for 15 s after each pause of the video, and confirmed only when the page has had no trusted key / click / wheel for a minute (sites reuse the dialog for confirmations people ask for). Click strategies as for Skip; if all are ignored, Wtv plays the video and hides the dialog.
 - Driven by `MutationObserver` (child lists + `class` / `hidden` attributes, not `style`, which players animate constantly) + primary media events, with `timeupdate` as a heartbeat that catches style-only visibility changes while something plays. Evaluations are capped at one per 150 ms. Only runs on sites with an `adIndicator` role.
 - **Reporting:** each frame opens a port (`wtv-ad`) to the background only while it has an ad. A port closing (ad over, navigation, unload, script invalidated) clears that frame, so a dead frame can't leave a tab muted. If the worker restarts mid-ad, frames reconnect and re-send.
 - **Background:** tab "ad showing" = any frame active (`AD` badge). "Want mute" = any active frame with `muteAds` on. Mute ownership is kept in `storage.session` to survive worker restarts; tabs we muted whose frames never come back are unmuted after a 5 s recovery grace.
@@ -127,7 +129,8 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 
 - Automatically click the skip button when it appears and is clickable. Discovered / maintained as a role like `video` and `adIndicator`.
 - Content-script clicks are `isTrusted: false`, and some players ignore them. The only trusted route is `chrome.debugger` (shows a warning bar), so **skip is best-effort**. Mute + overlay is the guaranteed path.
-- The click is a full pointer + mouse down / up / click sequence at the button's centre (`src/lib/dom/click.ts`), not a bare `element.click()`.
+- Each retry on the same button uses the next **click strategy** (`src/lib/dom/click.ts`): the full pointer + mouse sequence at its centre, the same on whatever is hit-tested there (a label inside it), `element.click()`, then focus + Enter / Space. A strategy that makes the button go away within 1.5 s is remembered for the page and tried first. The ad status keeps a log of attempts.
+- **Unlisted Skip buttons:** when no `skip` selector matches, a visible button inside the `player` box that looks like Skip (class / id / label / short text, `src/lib/ads/skip.ts`), then anything saying "skip" where the show is or was just before the ad (the **ad probe**, `src/lib/ads/probe.ts`). Each is logged to the console so it can be added to the role.
 - If the Skip button is still there 1 s after the click and the site has `quirks.adsInMainVideo` (YouTube, which ignores untrusted clicks), the ad is seeked to its end instead. Only once per Skip button, and only once Skip is showing, so only skippable ads are skipped. The popup counts both.
 
 ### Media detection
@@ -144,6 +147,10 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
     - The current primary gets a stickiness bonus so near-ties don't flicker.
 - Content scripts run with `all_frames: true` for embedded players. Each frame picks its own primary. (Cross-origin embeds need permission for the embed's origin too.)
 - **Dev builds** outline the primary with a labelled dashed box and log changes to the console.
+- **Dev builds, debugging aids** (`src/lib/dev/`, compiled out of the store build):
+    - The **ad probe** runs twice a second during an ad (every 5 s after 30 s): what's on top in the player / video / pre-ad video areas, page elements drawn above our overlay, every element saying "skip" with an HTML snippet, iframes over the areas. Logged when it changes; also in the ad status.
+    - **📸 Snapshot** button (top right): saves the whole DOM (open shadow roots included), element boxes over the player, the probe, media / ad status, the overlay timeline and a screenshot (needs the toolbar icon clicked once on the tab: `captureVisibleTab` wants `activeTab`) as one JSON file in Downloads.
+    - **Timeline:** the last 300 overlay / ad events; an "overlay blip" warning prints it when the ad pictures go away and come back within 5 s.
 
 ### Selector picker (side panel)
 
@@ -168,8 +175,8 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 - Show a slideshow of images, or quotes, over the video while ads play.
 - **Frame:** `overlay.html` (extension page, the only web-accessible resource) in an iframe inside a **closed shadow root** on a `popover="manual"` host. The page can't read or restyle it; the popover puts it in the top layer (above fullscreen players, re-stacked on `fullscreenchange`). Kept alive between ads so the next one covers instantly; preloaded on sites with ad selectors.
     - Channel: `MessageChannel` handed over with a random token that's also in the iframe URL hash (unreadable by the page).
-    - Glued to the primary video's rect with a rAF loop while visible. No rect (audio-only) → no overlay, just mute.
-    - Covering the video is the ad click shield. A ✕ on the overlay hides it for the rest of the current ad.
+    - Glued with a rAF loop to the site's `player` box holding the primary video (ads like YouTube's surveys move the `<video>` out and draw in its place), else the primary video's rect. If the box disappears for a moment (re-layout), it holds its last place for 1 s. No rect (audio-only) → no overlay, just mute. Ad pictures and the blackout paint the host black from the first frame.
+    - Covering the video is the ad click shield. A ✕ on the overlay hides it for the rest of the current ad; a **Show pictures** pill in the player's top-right corner (and a popup button) brings it back.
     - Commands: `ad` (program + host), `blackout` (title, for playlists), `shield` (transparent click shield, see Click to play / pause), `hide`.
     - Not using `use_dynamic_url` yet: it would stop sites from detecting Wtv by probing `overlay.html`, but needs testing against `runtime.getURL`.
 - **Images:**
@@ -215,7 +222,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 - Single syntax for folders and filename keywords: folder match first, filename match as fallback. A separate syntax can be added later if there's a real need to force a filename match when a same-named folder exists.
 - **Bundled pack:** four original SVG cat cartoons in `public/cats/` (drawn for Wtv, so no licensing to track).
 - **Quotes:** duration-prefixed lines from the playlist `[ads]` block (see Playlists).
-- **Rotation:** program items in order; each `[img]` item expands to its images, shuffled. Loops with a fresh shuffle when exhausted; cross-fades between slides; cut when the ad ends (after the 1.5 s grace, same as unmute). Duration: item's explicit `N` > file name `_dNs` > 5 s.
+- **Rotation:** program items in order; each `[img]` item expands to its images, shuffled. Loops with a fresh shuffle when exhausted; cross-fades between slides; cut when the ad ends (see Ending an ad, same as unmute). Duration: item's explicit `N` > file name `_dNs` > 5 s.
 - **Fit:** fill the frame (`cover`) when that crops less than 20% of the picture, otherwise show it whole with letterbox bars (`contain`). Re-evaluated when the overlay resizes (`src/lib/overlay/fit.ts`, pure + tested).
 - **Setting:** `adOverlay` ("Show pictures during ads", on by default).
 

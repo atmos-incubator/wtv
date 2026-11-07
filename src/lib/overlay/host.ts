@@ -186,7 +186,7 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
       // Blackout and ad pictures are opaque: paint black from the first frame, so nothing
       // shows through before the iframe has loaded or switched over (at document_start, or
       // on the first ad, that can take a moment). The shield is see-through.
-      el.style.background = command.type === 'shield' ? 'transparent' : '#000';
+      el.style.background = command.type === 'shield' || command.type === 'pill' ? 'transparent' : '#000';
       el.style.display = 'block';
       lastRect = '';
       restack();

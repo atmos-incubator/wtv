@@ -4,6 +4,8 @@ import type { HandleKind } from './media/registry';
 import type { SiteProfile } from './sites/registry';
 
 export const MSG_STATUS = 'wtv/status';
+/** Popup → every frame of a tab: bring back the ad pictures hidden with ✕. */
+export const MSG_SHOW_AD_PICTURES = 'wtv/show-ad-pictures';
 /** Dev builds only: show the ad overlay for a few seconds without an ad. */
 export const MSG_PREVIEW_OVERLAY = 'wtv/dev-preview-overlay';
 
@@ -59,6 +61,7 @@ export interface AdStatus {
 export interface FrameStatus {
   media: MediaStatus;
   ads: AdStatus | null;
+  overlay: { adPicturesHidden: boolean };
 }
 
 export function isStatusRequest(msg: unknown): msg is StatusRequest {
