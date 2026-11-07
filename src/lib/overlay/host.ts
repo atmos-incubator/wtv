@@ -14,6 +14,7 @@
  */
 import { browser } from 'wxt/browser';
 import { WTV_UI_ATTR } from '../ads/probe';
+import { record } from '../dev/timeline';
 import { DEV_TOOLS } from '../env';
 import { OVERLAY_INIT, OVERLAY_PAGE, parseOverlayEvent, type OverlayCommand, type OverlayEvent } from './program';
 import type { Box } from './shield';
@@ -46,9 +47,11 @@ const BASE_STYLE = [
 
 const HOLD_MS = 1000;
 
+const rectText = (r: Box) => `${Math.round(r.width)}×${Math.round(r.height)} @ ${Math.round(r.left)},${Math.round(r.top)}`;
+
 /** Dev builds: a timeline of what the overlay did, to diagnose flashes. */
 function trace(...args: unknown[]): void {
-  if (DEV_TOOLS) console.debug(`[wtv] overlay +${Math.round(performance.now())}ms:`, ...args);
+  if (DEV_TOOLS) record('overlay host', ...args);
 }
 
 function randomToken(): string {
@@ -131,7 +134,7 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
       return;
     }
     if (lostAt) trace(`box back after ${Math.round(performance.now() - lostAt)}ms`);
-    else if (!placed) trace('placed', rect);
+    else if (!placed) trace('placed', rectText(rect));
     placed = true;
     lostAt = 0;
     const key = `${rect.left},${rect.top},${rect.width},${rect.height}`;
@@ -160,6 +163,7 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
     } catch {
       // Not connected; ensure() on the next show will recreate it.
     }
+    trace('restacked');
     notifyRestacked();
   }
 

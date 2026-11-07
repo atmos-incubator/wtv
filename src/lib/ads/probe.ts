@@ -45,6 +45,8 @@ export interface AdProbe {
   under: Record<string, string[]>;
   /** Element stack at each area's centre, top first. */
   stack: Record<string, string[]>;
+  /** Page elements painted above our overlay at each area's centre (top-layer rivals). */
+  above: Record<string, string[]>;
   skip: ProbeHit[];
   frames: { src: string; rect: string }[];
 }
@@ -134,6 +136,7 @@ export function probeAds(areas: readonly ProbeArea[], adStartedAt: number): Prob
 
   const under: Record<string, string[]> = {};
   const stack: Record<string, string[]> = {};
+  const above: Record<string, string[]> = {};
   for (const area of areas) {
     const counts = new Map<string, number>();
     for (const p of samplePoints(area.rect, vw, vh)) {
@@ -144,10 +147,11 @@ export function probeAds(areas: readonly ProbeArea[], adStartedAt: number): Prob
     under[area.name] = [...counts].map(([k, n]) => `${k} ×${n}`);
     const cx = area.rect.left + area.rect.width / 2;
     const cy = area.rect.top + area.rect.height / 2;
-    stack[area.name] =
-      cx >= 0 && cy >= 0 && cx < vw && cy < vh
-        ? topNotOurs(cx, cy).slice(0, STACK_DEPTH).map(describeElement)
-        : ['(centre off screen)'];
+    const onScreen = cx >= 0 && cy >= 0 && cx < vw && cy < vh;
+    stack[area.name] = onScreen ? topNotOurs(cx, cy).slice(0, STACK_DEPTH).map(describeElement) : ['(centre off screen)'];
+    const all = onScreen ? document.elementsFromPoint(cx, cy) : [];
+    const ours = all.findIndex((el) => el.hasAttribute(WTV_UI_ATTR));
+    above[area.name] = ours > 0 ? all.slice(0, ours).map(describeElement) : [];
   }
 
   const skip: ProbeHit[] = [];
@@ -195,6 +199,7 @@ export function probeAds(areas: readonly ProbeArea[], adStartedAt: number): Prob
       areas: areas.map((a) => ({ name: a.name, rect: rectLabel(a.rect) })),
       under,
       stack,
+      above,
       skip,
       frames,
     },
@@ -205,5 +210,5 @@ export function probeAds(areas: readonly ProbeArea[], adStartedAt: number): Prob
 
 /** What changed between probes worth logging again (ignores the timestamp). */
 export function probeSignature(p: AdProbe): string {
-  return JSON.stringify([p.areas, p.under, p.skip.map((s) => [s.target, s.visible, s.areas]), p.frames]);
+  return JSON.stringify([p.areas, p.under, p.above, p.skip.map((s) => [s.target, s.visible, s.areas]), p.frames]);
 }

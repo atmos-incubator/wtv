@@ -23,6 +23,7 @@ import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
 import { onRestacked } from '../overlay/top-layer';
 import { DEV_SCREENSHOT, type ScreenshotReply } from './messages';
+import { timeline } from './timeline';
 
 /** Elements kept in `layout`; the rest are counted. */
 const LAYOUT_MAX = 4000;
@@ -123,6 +124,7 @@ export function startSnapshotButton(ctx: ContentScriptContext, agent: MediaAgent
         media: agent.status(),
         ads: ads.status(),
         probe: probed?.probe ?? null,
+        timeline: timeline(),
         layout: layout.entries,
         layoutOmitted: layout.omitted,
         screenshot: null as string | null,

@@ -9,8 +9,9 @@
  *     observed because players animate styles constantly.
  *   - Profile or settings changes.
  *
- * Ad start is reported immediately. Ad end waits out a grace period, so back-to-back
- * ads don't flash the sound on between them.
+ * Ad start is reported immediately. Ad end waits until the indicator has been gone for a
+ * grace period and the show is actually playing (end.ts), so back-to-back ads and the
+ * player's reload after them don't flash the page between them.
  *
  * Skip: the `skip` role first. Failing that, a visible button inside the site's `player`
  * role that looks like a Skip button (see findUnlistedSkip), then anything saying "skip"
@@ -24,6 +25,8 @@
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { CLICK_STRATEGIES, activate, type ClickStrategy } from '../dom/click';
+import { record } from '../dev/timeline';
+import { findPlayer } from '../dom/player';
 import { isElementVisible, matchRole } from '../dom/query';
 import type { MediaAgent } from '../media/agent';
 import type { AdStatus } from '../messages';
@@ -33,10 +36,10 @@ import type { SiteProfile } from '../sites/registry';
 import { KEYS } from '../storage';
 import type { Box } from '../overlay/shield';
 import { WTV_UI_ATTR, probeAds, probeSignature, type AdProbe, type ProbeArea } from './probe';
+import { AD_END_POLL_MS, adEndDecision } from './end';
 import { createAdReporter } from './reporter';
 import { SKIP_CANDIDATES, describeElement, looksLikeSkip } from './skip';
 
-export const AD_END_GRACE_MS = 1500;
 const EVALUATE_DELAY_MS = 150;
 const SKIP_RETRY_MS = 1000;
 /** How soon after a click the button must be gone (or the ad over) to credit that click. */
@@ -75,6 +78,9 @@ export function startAdWatcher(
   /** What we've reported (stays true through the grace period). */
   let reported = false;
   let endTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the indicator went away, and the primary's time at the last end check. */
+  let goneAt = 0;
+  let lastMediaTime: number | null = null;
   let selectorErrors: string[] = [];
   let skipClicks = 0;
   let skipSeeks = 0;
@@ -119,7 +125,7 @@ export function startAdWatcher(
   const roles = () => agent.profile().site?.config.roles;
 
   function log(...args: unknown[]): void {
-    if (options.debug) console.debug(`[wtv] ads +${Math.round(performance.now())}ms:`, ...args);
+    if (options.debug) record('ads', ...args);
   }
 
   function report(): void {
@@ -130,6 +136,7 @@ export function startAdWatcher(
     rawActive = active;
     if (active) {
       if (endTimer !== undefined) {
+        log(`ad indicator back after ${Math.round(performance.now() - goneAt)}ms; still the same ad break`);
         clearTimeout(endTimer);
         endTimer = undefined;
       }
@@ -144,25 +151,46 @@ export function startAdWatcher(
         notify(adListeners, true);
       }
     } else if (reported && endTimer === undefined) {
-      endTimer = setTimeout(() => {
-        endTimer = undefined;
-        if (signal.aborted || rawActive) return;
-        reported = false;
-        skipTarget = null;
-        skipAttempts = 0;
-        seekedPast = false;
-        probeCandidates = [];
-        log('ad ended');
-        report();
-        notify(adListeners, false);
-      }, AD_END_GRACE_MS);
+      goneAt = performance.now();
+      lastMediaTime = null;
+      log('ad indicator gone; waiting for the show to play');
+      endTimer = setTimeout(checkEnd, AD_END_POLL_MS);
     }
+  }
+
+  /** Whether the primary's time moved since the last check (it's really playing). */
+  function showProgressing(): boolean {
+    const primary = agent.primary();
+    const el = primary?.element;
+    if (!(el instanceof HTMLMediaElement)) return primary?.features(null).playing ?? false;
+    const t = el.currentTime;
+    const moved = lastMediaTime !== null && t !== lastMediaTime && !el.paused;
+    lastMediaTime = t;
+    return moved;
+  }
+
+  function checkEnd(): void {
+    endTimer = undefined;
+    if (signal.aborted || rawActive) return;
+    const goneFor = performance.now() - goneAt;
+    const progressing = showProgressing();
+    if (adEndDecision(goneFor, progressing) === 'wait') {
+      endTimer = setTimeout(checkEnd, AD_END_POLL_MS);
+      return;
+    }
+    reported = false;
+    skipTarget = null;
+    skipAttempts = 0;
+    seekedPast = false;
+    probeCandidates = [];
+    log(`ad ended (${Math.round(goneFor)}ms after the indicator went${progressing ? '' : ', show not playing'})`);
+    report();
+    notify(adListeners, false);
   }
 
   /** A clickable Skip-looking button inside the player box, when no skip selector matched. */
   function findUnlistedSkip(): Element | null {
-    const matchers = roles()?.player;
-    const player = matchers ? matchRole('player', matchers).match?.element : null;
+    const player = findPlayer(roles()?.player, agent.primary()?.element ?? null);
     if (!player) return null;
     for (const el of player.querySelectorAll(SKIP_CANDIDATES)) {
       if (looksLikeSkip(el) && isClickable(el)) return el;
@@ -273,8 +301,7 @@ export function startAdWatcher(
 
   function probeAreas(): ProbeArea[] {
     const areas: ProbeArea[] = [];
-    const playerMatchers = roles()?.player;
-    const player = playerMatchers ? matchRole('player', playerMatchers).match?.element : null;
+    const player = findPlayer(roles()?.player, agent.primary()?.element ?? null);
     const pr = player?.getBoundingClientRect();
     if (pr && pr.width > 0 && pr.height > 0) areas.push({ name: 'player', rect: pr });
     const vr = agent.primary()?.rect();
@@ -319,6 +346,9 @@ export function startAdWatcher(
     console.log('areas', probe.areas);
     console.log('top-most element per sample point', probe.under);
     console.log('element stack at each centre (top first)', probe.stack);
+    if (Object.values(probe.above).some((a) => a.length > 0)) {
+      console.warn('page elements ABOVE our overlay at the centre', probe.above);
+    }
     if (probe.skip.length > 0) {
       console.table(probe.skip.map(({ html: _html, areas, ...rest }) => ({ ...rest, areas: areas.join(', ') })));
       for (const s of probe.skip) console.log(`${s.target} html:`, s.html);

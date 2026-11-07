@@ -35,7 +35,7 @@ describe('ad probe helpers', () => {
   });
 
   it('ignores the timestamp when deciding whether to log again', () => {
-    const p: AdProbe = { at: 100, areas: [], under: {}, stack: {}, skip: [], frames: [] };
+    const p: AdProbe = { at: 100, areas: [], under: {}, stack: {}, above: {}, skip: [], frames: [] };
     expect(probeSignature(p)).toBe(probeSignature({ ...p, at: 900 }));
     expect(probeSignature(p)).not.toBe(probeSignature({ ...p, under: { player: ['div ×9'] } }));
   });

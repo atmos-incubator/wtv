@@ -26,7 +26,9 @@
  */
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { AdWatcher } from '../ads/watcher';
+import { findPlayer, isPlayerFor } from '../dom/player';
 import { matchRole } from '../dom/query';
+import { record, timeline } from '../dev/timeline';
 import { DEV_TOOLS } from '../env';
 import type { MediaAgent } from '../media/agent';
 import { scheduler } from '../schedule';
@@ -82,12 +84,16 @@ export function startOverlay(
   };
 
   let playerEl: WeakRef<Element> | null = null;
-  /** The site's `player` box, if configured and on screen. Re-queried only when it goes away. */
+  /**
+   * The site's `player` box holding the primary video, if configured and on screen.
+   * Re-queried when the cached one goes away, collapses, or no longer holds the video
+   * (sites move videos between players, e.g. from an inline preview to the watch page).
+   */
   function playerRect(): DOMRect | null {
+    const media = agent.primary()?.element ?? null;
     let el = playerEl?.deref();
-    if (!el?.isConnected) {
-      const matchers = agent.profile().site?.config.roles.player;
-      el = matchers ? matchRole('player', matchers).match?.element : undefined;
+    if (!el || !isPlayerFor(el, media)) {
+      el = findPlayer(agent.profile().site?.config.roles.player, media) ?? undefined;
       playerEl = el ? new WeakRef(el) : null;
     }
     const r = el?.getBoundingClientRect();
@@ -121,6 +127,28 @@ export function startOverlay(
     return f && isShow(f) ? 'shield' : null;
   }
 
+  /** Dev: when the ad pictures last went away, to catch them coming straight back. */
+  let adLeftAt = 0;
+  const BLIP_MS = 5000;
+
+  function noteModeChange(from: Mode, to: Mode): void {
+    record('overlay', `mode ${from ?? 'none'} → ${to ?? 'none'}`, {
+      ad: adActive(),
+      dismissed,
+      suspended,
+      video: Boolean(primaryVideo()),
+    });
+    const now = performance.now();
+    if (from === 'ad') adLeftAt = now;
+    if (to === 'ad' && adLeftAt && now - adLeftAt < BLIP_MS) {
+      console.warn(
+        `[wtv] overlay blip: the ad pictures were off for ${Math.round(now - adLeftAt)}ms. ` +
+          'Recent timeline (also saved by 📸 Snapshot):',
+        timeline().slice(-40),
+      );
+    }
+  }
+
   /** Blackout content (prompt, attempts, status) changes without a mode change. */
   let blackoutShown = '';
 
@@ -130,14 +158,7 @@ export function startOverlay(
     const blackout = next === 'blackout' ? playlist.blackout() : null;
     const signature = blackout ? JSON.stringify(blackout) : '';
     if (next === mode && signature === blackoutShown && !force) return;
-    if (DEV_TOOLS && next !== mode) {
-      console.debug(`[wtv] overlay +${Math.round(performance.now())}ms: mode ${mode ?? 'none'} → ${next ?? 'none'}`, {
-        ad: adActive(),
-        dismissed,
-        suspended,
-        video: Boolean(primaryVideo()),
-      });
-    }
+    if (DEV_TOOLS && next !== mode) noteModeChange(mode, next);
     mode = next;
     blackoutShown = signature;
     switch (next) {
@@ -299,7 +320,8 @@ export function startOverlay(
     if (ads.settings().adOverlay && siteHasAds()) overlay.preload();
     syncSoon();
   });
-  const offPrimary = agent.onPrimaryChange(() => {
+  const offPrimary = agent.onPrimaryChange((p) => {
+    record('overlay', 'primary media changed', p ? (p.rect() ? 'has a box' : 'no box') : 'none');
     watchPrimary();
     sync();
   });
