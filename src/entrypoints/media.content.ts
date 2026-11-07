@@ -14,6 +14,8 @@ import { BUNDLED_MATCHES } from '../lib/sites/bundled';
 import { startViewService } from '../lib/view/service';
 
 const PREVIEW_MS = 12_000;
+/** How often to check whether the extension was reloaded or removed under this page. */
+const ORPHAN_CHECK_MS = 1000;
 
 /**
  * ISOLATED-world media agent + ad watcher + view (maximize, play/pause) + playlist client
@@ -27,6 +29,13 @@ export default defineContentScript({
   allFrames: true,
   noScriptStartedPostMessage: true,
   main(ctx) {
+    // When the extension is reloaded, updated or turned off, this script keeps running
+    // in tabs that were already open (MV3 doesn't inject the new one), but its overlay
+    // iframe goes blank: a black box over the video. Nothing tells us. WXT only notices
+    // when something reads `ctx.isInvalid`, which `ctx.setInterval` does on every tick;
+    // then every `onInvalidated` cleanup runs and the overlay is removed.
+    ctx.setInterval(() => undefined, ORPHAN_CHECK_MS);
+
     const agent = startMediaAgent(ctx, { debug: DEV_TOOLS });
     const ads = startAdWatcher(ctx, agent, { debug: DEV_TOOLS });
     startHealthMonitor(ctx, agent, ads);
