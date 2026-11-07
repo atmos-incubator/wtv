@@ -1,6 +1,8 @@
 import { browser } from 'wxt/browser';
 import { startAdController } from '../lib/ads/controller';
 import { browserAreas } from '../lib/browser-storage';
+import { startDevScreenshots } from '../lib/dev/screenshot';
+import { DEV_TOOLS } from '../lib/env';
 import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
 import { runMigrations, type InstallDetails } from '../lib/migrate';
 import { BUNDLED_SITES } from '../lib/sites/bundled';
@@ -62,4 +64,5 @@ export default defineBackground(() => {
   startViewController();
   startPlaylistRunner();
   startPlaylistMenus();
+  if (DEV_TOOLS) startDevScreenshots();
 });

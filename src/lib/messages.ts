@@ -48,6 +48,10 @@ export interface AdStatus {
   skipSeeks: number;
   /** The latest ad probe (what's where the show was) during the current or last ad. */
   probe: AdProbe | null;
+  /** The click strategy that last made a Skip button go away (see dom/click.ts). */
+  skipWorked: string | null;
+  /** Recent skip attempts and outcomes, oldest first. */
+  skipLog: string[];
   selectorErrors: string[];
 }
 

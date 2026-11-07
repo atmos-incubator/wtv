@@ -17,6 +17,7 @@ import { WTV_UI_ATTR } from '../ads/probe';
 import { DEV_TOOLS } from '../env';
 import { OVERLAY_INIT, OVERLAY_PAGE, parseOverlayEvent, type OverlayCommand, type OverlayEvent } from './program';
 import type { Box } from './shield';
+import { notifyRestacked } from './top-layer';
 
 export type OverlayTarget = () => Box | 'viewport' | null;
 
@@ -159,6 +160,7 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
     } catch {
       // Not connected; ensure() on the next show will recreate it.
     }
+    notifyRestacked();
   }
 
   document.addEventListener('fullscreenchange', restack, { signal });

@@ -23,7 +23,7 @@
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
-import { simulateClick } from '../dom/click';
+import { CLICK_STRATEGIES, activate, type ClickStrategy } from '../dom/click';
 import { isElementVisible, matchRole } from '../dom/query';
 import type { MediaAgent } from '../media/agent';
 import type { AdStatus } from '../messages';
@@ -32,14 +32,15 @@ import { DEFAULT_SETTINGS, parseSettings, type Settings } from '../settings';
 import type { SiteProfile } from '../sites/registry';
 import { KEYS } from '../storage';
 import type { Box } from '../overlay/shield';
-import { probeAds, probeSignature, type AdProbe, type ProbeArea } from './probe';
+import { WTV_UI_ATTR, probeAds, probeSignature, type AdProbe, type ProbeArea } from './probe';
 import { createAdReporter } from './reporter';
 import { SKIP_CANDIDATES, describeElement, looksLikeSkip } from './skip';
 
 export const AD_END_GRACE_MS = 1500;
 const EVALUATE_DELAY_MS = 150;
 const SKIP_RETRY_MS = 1000;
-const SKIP_MAX_ATTEMPTS = 3;
+/** How soon after a click the button must be gone (or the ad over) to credit that click. */
+const SKIP_CREDIT_MS = 1500;
 const PROBE_EVERY_MS = 500;
 const PRIMARY_EVENTS = ['timeupdate', 'playing', 'loadedmetadata', 'durationchange', 'emptied'] as const;
 
@@ -50,6 +51,8 @@ export interface AdWatcher {
   onAdChange(cb: (active: boolean) => void): () => void;
   /** Fires after settings load or change. */
   onSettingsChange(cb: (settings: Settings) => void): () => void;
+  /** Run the ad probe now, ad or not (dev snapshot). Null with nowhere to look. */
+  probeNow(): { probe: AdProbe; areas: ProbeArea[] } | null;
 }
 
 function isClickable(el: Element): boolean {
@@ -80,6 +83,11 @@ export function startAdWatcher(
   let skipTarget: WeakRef<Element> | null = null;
   let skipAttempts = 0;
   let lastSkipAt = 0;
+  /** The strategy of the last click on skipTarget, until it's credited or given up on. */
+  let pendingStrategy: ClickStrategy | null = null;
+  /** The last strategy that made a Skip button go away, and every attempt this page. */
+  let skipWorked: ClickStrategy | null = null;
+  const skipLog: string[] = [];
   /** Unlisted Skip buttons already reported to the console. */
   const reportedUnlisted = new WeakSet<Element>();
   /** Where the primary video was (page coordinates) the last time no ad showed. */
@@ -162,7 +170,28 @@ export function startAdWatcher(
     return null;
   }
 
+  function noteSkip(entry: string): void {
+    skipLog.push(`+${Math.round(performance.now() - adStartedAt)}ms ${entry}`);
+    if (skipLog.length > 20) skipLog.shift();
+    log(entry);
+  }
+
+  /** The last click's button went away, or the ad ended, soon after: that click worked. */
+  function creditSkip(): void {
+    if (!pendingStrategy) return;
+    const target = skipTarget?.deref();
+    const gone = !rawActive || !target?.isConnected || !isClickable(target);
+    if (!gone) return;
+    if (Date.now() - lastSkipAt <= SKIP_CREDIT_MS) {
+      skipWorked = pendingStrategy;
+      noteSkip(`skip worked: ${pendingStrategy}`);
+      console.info(`[wtv] ads: the Skip button responded to the "${pendingStrategy}" click strategy.`);
+    }
+    pendingStrategy = null;
+  }
+
   function trySkip(): void {
+    creditSkip();
     const matchers = roles()?.skip;
     if (!rawActive || !settings.autoSkip) return;
     let el: Element | null = null;
@@ -190,20 +219,31 @@ export function startAdWatcher(
       // (YouTube checks isTrusted). Where ads play in the main video, a skippable ad can
       // be skipped by seeking it to its end instead.
       if (!seekedPast && agent.profile().site?.config.quirks?.adsInMainVideo && seekPastAd()) {
+        // If the button goes now, the seek did it, not the click.
+        pendingStrategy = null;
+        noteSkip('click ignored; seeked the ad to its end');
         lastSkipAt = now;
         return;
       }
-      if (skipAttempts >= SKIP_MAX_ATTEMPTS) return;
+      if (skipAttempts >= CLICK_STRATEGIES.length) {
+        if (pendingStrategy) noteSkip(`skip ignored every click strategy: ${describeElement(el)}`);
+        pendingStrategy = null;
+        return;
+      }
     } else {
       skipTarget = new WeakRef(el);
       skipAttempts = 0;
       seekedPast = false;
     }
+    // What worked last time first, then the rest in order.
+    const order = skipWorked ? [skipWorked, ...CLICK_STRATEGIES.filter((s) => s !== skipWorked)] : CLICK_STRATEGIES;
+    const strategy = order[skipAttempts]!;
     skipAttempts++;
     lastSkipAt = now;
     skipClicks++;
-    log(`clicking skip (attempt ${skipAttempts})`, el);
-    if (el instanceof HTMLElement) simulateClick(el);
+    pendingStrategy = strategy;
+    noteSkip(`clicking skip (${strategy}): ${describeElement(el)}`);
+    if (el instanceof HTMLElement) activate(el, strategy, (e) => e.hasAttribute(WTV_UI_ATTR));
   }
 
   /**
@@ -387,6 +427,8 @@ export function startAdWatcher(
         autoSkip: settings.autoSkip,
         skipClicks,
         skipSeeks,
+        skipWorked,
+        skipLog: [...skipLog],
         probe: lastProbe,
         selectorErrors: [...new Set(selectorErrors)],
       };
@@ -399,6 +441,11 @@ export function startAdWatcher(
     onSettingsChange(cb) {
       settingsListeners.add(cb);
       return () => settingsListeners.delete(cb);
+    },
+    probeNow() {
+      const areas = probeAreas();
+      if (areas.length === 0) return null;
+      return { probe: probeAds(areas, rawActive ? adStartedAt : performance.now()).probe, areas };
     },
   };
 }

@@ -8,3 +8,7 @@ stats.html
 .health/
 
 docs/
+
+# Dev snapshots (the 📸 button in dev builds) dropped into the repo for debugging
+.debug/
+wtv-snapshot-*.json

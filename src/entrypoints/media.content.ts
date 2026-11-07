@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { startAdWatcher } from '../lib/ads/watcher';
+import { startSnapshotButton } from '../lib/dev/snapshot';
 import { DEV_TOOLS } from '../lib/env';
 import { startMediaAgent } from '../lib/media/agent';
 import { MSG_PREVIEW_OVERLAY, isStatusRequest, type FrameStatus } from '../lib/messages';
@@ -31,6 +32,7 @@ export default defineContentScript({
     const playlist = startPlaylistClient(ctx, agent, ads);
     const overlay = startOverlay(ctx, agent, ads, view, playlist);
     startPickerService(ctx, agent, overlay);
+    if (DEV_TOOLS) startSnapshotButton(ctx, agent, ads);
 
     const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {
       if (isStatusRequest(msg)) {

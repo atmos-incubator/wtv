@@ -93,7 +93,7 @@ export function mentionsSkip(parts: readonly string[]): boolean {
 }
 
 /** Every element under `root`, descending into open shadow roots. */
-function* deepElements(root: Document | ShadowRoot): Generator<Element> {
+export function* deepElements(root: Document | ShadowRoot): Generator<Element> {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const el = n as Element;
@@ -102,7 +102,7 @@ function* deepElements(root: Document | ShadowRoot): Generator<Element> {
   }
 }
 
-function ownText(el: Element): string {
+export function ownText(el: Element): string {
   let text = '';
   for (const n of el.childNodes) if (n.nodeType === Node.TEXT_NODE) text += n.textContent ?? '';
   return text.trim().replace(/\s+/g, ' ');
