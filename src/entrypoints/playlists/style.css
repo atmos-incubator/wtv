@@ -158,57 +158,10 @@ code,
   font-size: 12px;
 }
 
-/* A playlist's cover: one thumbnail, a quad of four, or the name on a color block. */
-.cover {
+/* A playlist's cover (src/lib/ui/cover.css): one thumbnail, a quad of four, or the name on a color block. */
+.list .cover {
   grid-row: span 2;
-  position: relative;
   width: 96px;
-  aspect-ratio: 16 / 9;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--line);
-}
-
-.cover img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.cover.quad {
-  display: grid;
-  grid-template: 1fr 1fr / 1fr 1fr;
-}
-
-.cover.quad img {
-  min-width: 0;
-  min-height: 0;
-}
-
-.cover .slide {
-  position: absolute;
-  inset: 0;
-}
-
-.cover.placeholder {
-  display: grid;
-  place-items: center;
-  padding: 4px;
-  background: hsl(var(--hue) 45% 42%);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.2;
-  text-align: center;
-}
-
-.cover.placeholder span {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
 }
 
 /* --- editor --- */

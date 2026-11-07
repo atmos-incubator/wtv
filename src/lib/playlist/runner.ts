@@ -30,6 +30,7 @@
  * (reshuffled when shuffling); otherwise the run finishes.
  *
  * The playlist is snapshotted when it starts; edits apply the next time it's played.
+ * Starting one also records when it last played, for the explorer's order (explore.ts).
  */
 import { browser } from 'wxt/browser';
 import { browserAreas } from '../browser-storage';
@@ -46,6 +47,7 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_RUNS,
   PL_STATE,
   parsePlaylistRequest,
   type EntryInfo,
@@ -53,8 +55,10 @@ import {
   type MediaInfo,
   type PlaylistApply,
   type RunnerSummary,
+  type RunSummary,
   type StepOp,
 } from './messages';
+import { parsePlays, withPlay } from './explore';
 import { getBuiltinPlaylist } from './builtin-bundle';
 import { getPlaylist } from './store';
 import { getRecord } from '../media-library/db';
@@ -212,8 +216,15 @@ async function start(
     nearEnd: false,
   };
   await put(tab.id, state);
+  await recordPlay(playlistId).catch((err: unknown) => console.warn('[wtv] could not record the play:', err));
   if (options.tv) await setTvMode(tab.id, true);
   await goTo(tab.id, state, index);
+}
+
+async function recordPlay(playlistId: string): Promise<void> {
+  const local = browserAreas().local;
+  const plays = parsePlays((await local.get(KEYS.playlistPlays))[KEYS.playlistPlays]);
+  await local.set({ [KEYS.playlistPlays]: withPlay(plays, playlistId, Date.now()) });
 }
 
 async function step(tabId: number, op: StepOp): Promise<void> {
@@ -340,13 +351,17 @@ async function tabUpdated(tabId: number, url: string | undefined, complete: bool
 }
 
 async function summary(tabId: number): Promise<RunnerSummary | null> {
-  const state = (await load())[tabId];
+  return summarize((await load())[tabId]);
+}
+
+function summarize(state: RunnerState | undefined): RunnerSummary | null {
   const entry = state && entryAt(state);
   if (!state || !entry) return null;
   return {
     playlistId: state.playlistId,
     name: state.name,
     index: state.index,
+    entry: playOrder(state)[state.index]!,
     total: state.entries.length,
     title: entry.title,
     url: entry.url,
@@ -355,6 +370,15 @@ async function summary(tabId: number): Promise<RunnerSummary | null> {
     loop: state.loop ?? false,
     lap: state.lap ?? 1,
   };
+}
+
+async function runs(): Promise<RunSummary[]> {
+  const out: RunSummary[] = [];
+  for (const [tabId, state] of Object.entries(await load())) {
+    const s = summarize(state);
+    if (s) out.push({ ...s, tabId: Number(tabId) });
+  }
+  return out;
 }
 
 /** Call synchronously at service-worker startup. */
@@ -387,6 +411,8 @@ export function startPlaylistRunner(): void {
         const tabId = senderTab ?? msg.tabId;
         return tabId === null ? undefined : reply(() => summary(tabId));
       }
+      case PL_RUNS:
+        return reply(runs);
       case PL_COMMAND: {
         if (msg.op === 'start') {
           const { playlistId, index, tv, shuffle, loop } = msg;

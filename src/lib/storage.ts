@@ -36,6 +36,8 @@ export const KEYS = {
   siteHealth: 'wtv.siteHealth',
   /** PlaylistStore (local): saved playlists, as text. */
   playlists: 'wtv.playlists',
+  /** PlaylistPlays (local): when each playlist last started playing (src/lib/playlist/explore.ts). */
+  playlistPlays: 'wtv.playlistPlays',
   /** Record<tabId, RunnerState> (session): playlists playing, one per tab. */
   runner: 'wtv.runner',
   /** Record<tabId, TvState> (session): tabs in TV mode (fullscreen window + maximized video). */

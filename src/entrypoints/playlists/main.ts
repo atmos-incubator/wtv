@@ -15,18 +15,16 @@ import {
   planImport,
 } from '../../lib/backup';
 import { browserAreas } from '../../lib/browser-storage';
-import { getThumbnail, listRecords } from '../../lib/media-library/db';
 import { LIB_CHANGED } from '../../lib/media-library/messages';
 import {
   coverRecords,
   describeLength,
   entryLengthS,
   formatClock,
-  libraryKey,
   playlistLength,
-  thumbnailOriginsFor,
   type MediaRecord,
 } from '../../lib/media-library/record';
+import { LibraryView } from '../../lib/media-library/thumbs';
 import type { ProgramItem } from '../../lib/overlay/program';
 import {
   compilePlaylist,
@@ -35,8 +33,7 @@ import {
   withoutEntries,
   type CompiledPlaylist,
 } from '../../lib/playlist/format';
-import { originPatternsFor } from '../../lib/playlist/match';
-import { PL_COMMAND } from '../../lib/playlist/messages';
+import { PARTIAL_ACCESS_NOTE, playPlaylist } from '../../lib/playlist/play';
 import type { BuiltinPlaylist } from '../../lib/playlist/builtin';
 import { BUILTIN_PLAYLISTS } from '../../lib/playlist/builtin-bundle';
 import {
@@ -48,9 +45,9 @@ import {
   type StoredPlaylist,
 } from '../../lib/playlist/store';
 import { parseSettings } from '../../lib/settings';
-import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-store';
 import { KEYS, readKey, writeKey } from '../../lib/storage';
+import { cover, picture } from '../../lib/ui/cover';
 
 const local = browserAreas().local;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -75,9 +72,6 @@ const loopBox = $<HTMLInputElement>('loop');
 const lengthNote = $('length');
 const removeGone = $<HTMLButtonElement>('remove-gone');
 
-/** Thumbnail hosts the user said no to at Play: not asked for again. */
-const DECLINED_THUMBNAILS = 'wtv.playlists.declinedThumbnailOrigins';
-
 textInput.placeholder = 'Paste URLs here, one per line.\n\nhttps://www.youtube.com/watch?v=… | Title | t=1:37';
 
 type AnyPlaylist = StoredPlaylist | BuiltinPlaylist;
@@ -89,10 +83,8 @@ let dirty = false;
 let compiled: CompiledPlaylist = compilePlaylist(parsePlaylist(''));
 /** The text's [shuffle] / [loop] as last seen: the checkboxes follow them when they change. */
 let lines = { shuffle: false, loop: false };
-/** The media library, by key. */
-let records = new Map<string, MediaRecord>();
-/** Object URLs of cached thumbnails, by key, with the image URL each was cached from. */
-const thumbs = new Map<string, { from: string; url: string }>();
+/** The media library, with its cached thumbnails. */
+const library = new LibraryView();
 
 function current(): AnyPlaylist | null {
   return playlists.find((p) => p.id === currentId) ?? BUILTIN_PLAYLISTS.find((p) => p.id === currentId) ?? null;
@@ -117,111 +109,11 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text 
 
 const formatTime = formatClock;
 
-function recordFor(url: string): MediaRecord | null {
-  const key = libraryKey(url);
-  return key ? (records.get(key) ?? null) : null;
-}
-
-/** Re-read the library and the thumbnails that changed. */
-async function loadLibrary(): Promise<void> {
-  try {
-    records = await listRecords();
-  } catch (err) {
-    console.warn('[wtv] could not read the media library:', err);
-    return;
-  }
-  for (const r of records.values()) {
-    const from = r.thumbnailCachedFrom;
-    const have = thumbs.get(r.key);
-    if (!from || have?.from === from) continue;
-    const blob = await getThumbnail(r.key).catch(() => null);
-    if (!blob) continue;
-    if (have) URL.revokeObjectURL(have.url);
-    thumbs.set(r.key, { from, url: URL.createObjectURL(blob) });
-  }
-}
-
-/** The cached copy, else the thumbnail's own URL. */
-function thumbSrc(record: MediaRecord | null): string | null {
-  return (record && thumbs.get(record.key)?.url) ?? record?.thumbnailUrl ?? null;
-}
-
-function picture(src: string): HTMLImageElement {
-  const img = el('img');
-  img.alt = '';
-  img.loading = 'lazy';
-  img.referrerPolicy = 'no-referrer';
-  img.src = src;
-  img.addEventListener('error', () => img.remove(), { once: true });
-  return img;
-}
-
 /** `placeholder`: a built-in's cover SVG, for entries with no thumbnail yet. */
 function thumbnail(record: MediaRecord | null, placeholder: string | null): HTMLElement {
   const box = el('span', 'thumb');
-  const src = thumbSrc(record) ?? placeholder;
+  const src = library.src(record) ?? placeholder;
   if (src) box.append(picture(src));
-  return box;
-}
-
-/** Frame length of the hover slideshow on a playlist's cover. */
-const COVER_SLIDE_MS = 1200;
-
-/** A stable hue per playlist for its placeholder. */
-function hueOf(id: string): number {
-  let h = 0;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
-
-/**
- * A playlist's cover, thumbnail-sized: the four most recently played entries' thumbnails
- * in a quad (or the one, with fewer than four), else the name on a color block. Hovering
- * (or focusing) `row` plays every thumbnail full size, COVER_SLIDE_MS each.
- */
-function cover(p: AnyPlaylist, srcs: readonly string[], row: HTMLElement): HTMLElement {
-  const box = el('span', 'cover');
-  if (srcs.length === 0 && isBuiltin(p) && p.cover) {
-    box.append(picture(p.cover));
-    return box;
-  }
-  if (srcs.length === 0) {
-    box.classList.add('placeholder');
-    box.style.setProperty('--hue', String(hueOf(p.id)));
-    box.append(el('span', '', p.name));
-    return box;
-  }
-  if (srcs.length >= 4) {
-    box.classList.add('quad');
-    box.append(...srcs.slice(0, 4).map(picture));
-  } else {
-    box.append(picture(srcs[0]!));
-  }
-  if (srcs.length < 2) return box;
-
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let slide: HTMLImageElement | null = null;
-  const start = () => {
-    if (timer !== undefined) return;
-    let i = 0;
-    slide = picture(srcs[0]!);
-    slide.className = 'slide';
-    box.append(slide);
-    timer = setInterval(() => {
-      i = (i + 1) % srcs.length;
-      if (slide) slide.src = srcs[i]!;
-    }, COVER_SLIDE_MS);
-  };
-  const stop = () => {
-    clearInterval(timer);
-    timer = undefined;
-    slide?.remove();
-    slide = null;
-  };
-  row.addEventListener('pointerenter', start);
-  row.addEventListener('pointerleave', stop);
-  row.addEventListener('focus', start);
-  row.addEventListener('blur', stop);
   return box;
 }
 
@@ -249,14 +141,13 @@ function playlistItem(p: AnyPlaylist): HTMLLIElement {
   b.setAttribute('aria-current', String(p.id === currentId));
   const { entries } = compilePlaylist(parsePlaylist(p.text));
   const n = entries.length;
-  const srcs = coverRecords(
+  // Only entries with a thumbnail: a quad once four have one, else the latest.
+  const tiles = coverRecords(
     entries.map((e) => e.url),
-    records,
-  )
-    .map(thumbSrc)
-    .filter((s): s is string => s !== null);
+    library.records,
+  ).map((r) => ({ src: library.src(r), title: r.title ?? r.url, key: r.key }));
   b.append(
-    cover(p, srcs, b),
+    cover({ id: p.id, name: p.name, tiles, placeholder: isBuiltin(p) ? p.cover : null, hoverTarget: b }),
     el('span', 'name', p.name),
     el('span', 'count', `${n} entr${n === 1 ? 'y' : 'ies'}`),
   );
@@ -295,7 +186,7 @@ function renderPreview(): void {
         } catch {
           // Shown as-is.
         }
-        const record = recordFor(e.url);
+        const record = library.recordFor(e.url);
         const length = entryLengthS(e, record?.durationS ?? null);
         lengths.push(length);
         const meta: string[] = [];
@@ -387,56 +278,11 @@ async function save(): Promise<StoredPlaylist | null> {
 async function playFrom(index: number | null): Promise<void> {
   const p: AnyPlaylist | null = dirty ? await save() : current();
   if (!p) return;
-  const { entries } = compilePlaylist(parsePlaylist(p.text));
-  if (entries.length === 0) return;
-
-  // Wtv only runs where it has host access: ask for every entry's site up front, in this
-  // click, so the runner can detect each video's end. And for the sites' thumbnail hosts,
-  // so the media library can cache thumbnails, unless the user said no to those before.
-  const urls = entries.map((e) => e.url);
-  const origins = originPatternsFor(urls);
-  const declined = declinedThumbnails();
-  const thumbnailOrigins = thumbnailOriginsFor(urls, BUNDLED_SITES).filter((o) => !declined.has(o));
-  let granted = await browser.permissions.contains({ origins });
-  const thumbsGranted = await browser.permissions.contains({ origins: thumbnailOrigins });
-  if (!granted || !thumbsGranted) {
-    const asked = [...origins, ...thumbnailOrigins];
-    const ok = await browser.permissions.request({ origins: asked }).catch(() => false);
-    if (!ok && !thumbsGranted) rememberDeclined([...declined, ...thumbnailOrigins]);
-    granted = ok || (await browser.permissions.contains({ origins }));
-  }
-
-  const result: unknown = await browser.runtime.sendMessage({
-    type: PL_COMMAND,
-    op: 'start',
-    playlistId: p.id,
-    index,
-    tv: tvBox.checked,
-    shuffle: shuffleBox.checked,
-    loop: loopBox.checked,
-  });
-  const error = (result as { error?: unknown } | null)?.error;
-  if (typeof error === 'string') setStatus(`Couldn’t start: ${error}`, true);
-  else if (!granted) {
-    setStatus('Playing. Without site access Wtv can’t tell when some videos end there; use Next (Alt+Shift+N).', true);
-  } else setStatus(`Playing “${p.name}” in a new tab.`);
-}
-
-function declinedThumbnails(): Set<string> {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(DECLINED_THUMBNAILS) ?? '[]');
-    return new Set(Array.isArray(raw) ? raw.filter((o): o is string => typeof o === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function rememberDeclined(origins: readonly string[]): void {
-  try {
-    localStorage.setItem(DECLINED_THUMBNAILS, JSON.stringify([...new Set(origins)]));
-  } catch {
-    // Storage blocked: we'll ask again next time.
-  }
+  if (compilePlaylist(parsePlaylist(p.text)).entries.length === 0) return;
+  const result = await playPlaylist(p, { index, tv: tvBox.checked, shuffle: shuffleBox.checked, loop: loopBox.checked });
+  if (!result.ok) setStatus(`Couldn’t start: ${result.error}`, true);
+  else if (result.partial) setStatus(`Playing. ${PARTIAL_ACCESS_NOTE}`, true);
+  else setStatus(`Playing “${p.name}” in a new tab.`);
 }
 
 $('duplicate').addEventListener('click', () => {
@@ -538,7 +384,7 @@ removeGone.addEventListener('click', () => {
 // The runner learned something (a duration, a thumbnail, a gone video).
 browser.runtime.onMessage.addListener((msg: unknown) => {
   if ((msg as { type?: unknown } | null)?.type !== LIB_CHANGED) return undefined;
-  void loadLibrary().then(() => {
+  void library.load().then(() => {
     renderList();
     if (current()) renderPreview();
   });
@@ -613,6 +459,7 @@ browser.storage.onChanged.addListener((changes, area) => {
   })();
 });
 
-void loadLibrary()
+void library
+  .load()
   .then(refresh)
   .then(renderEditor);

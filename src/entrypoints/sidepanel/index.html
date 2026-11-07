@@ -3,10 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Wtv selectors</title>
+    <title>Wtv</title>
   </head>
   <body>
-    <main id="app" aria-live="polite"></main>
+    <nav class="views" role="tablist" aria-label="Side panel">
+      <button id="tab-playlists" type="button" role="tab" aria-controls="playlists">Playlists</button>
+      <button id="tab-selectors" type="button" role="tab" aria-controls="selectors">Fix selectors</button>
+    </nav>
+    <main id="playlists" class="view" role="tabpanel" aria-labelledby="tab-playlists" hidden></main>
+    <main id="selectors" class="view" role="tabpanel" aria-labelledby="tab-selectors" aria-live="polite" hidden></main>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

@@ -223,6 +223,44 @@ export function coverRecords(urls: readonly string[], records: ReadonlyMap<strin
     .map(({ r }) => r);
 }
 
+export interface CoverSlot {
+  key: string;
+  /** The entry's title, else the library's, else the host. */
+  title: string;
+  record: MediaRecord | null;
+}
+
+/**
+ * Every video of a playlist once, for the explorer's cover: those with a thumbnail first
+ * (coverRecords' order), then the rest in playlist order.
+ */
+export function coverSlots(
+  entries: readonly { url: string; title: string | null }[],
+  records: ReadonlyMap<string, MediaRecord>,
+): CoverSlot[] {
+  const titles = new Map<string, string>();
+  const rest: CoverSlot[] = [];
+  for (const e of entries) {
+    const key = libraryKey(e.url) ?? e.url;
+    if (titles.has(key)) continue;
+    const record = records.get(key) ?? null;
+    let host = e.url;
+    try {
+      host = new URL(e.url).hostname.replace(/^www\./, '');
+    } catch {
+      // Shown as-is.
+    }
+    const title = e.title ?? record?.title ?? host;
+    titles.set(key, title);
+    if (!record?.thumbnailUrl) rest.push({ key, title, record });
+  }
+  const pictured = coverRecords(
+    entries.map((e) => e.url),
+    records,
+  ).map((r) => ({ key: r.key, title: titles.get(r.key) ?? r.title ?? r.url, record: r }));
+  return [...pictured, ...rest];
+}
+
 // --- thumbnail hosts -----------------------------------------------------------------
 
 /** Permission patterns for the thumbnail hosts of the sites these URLs are on. */

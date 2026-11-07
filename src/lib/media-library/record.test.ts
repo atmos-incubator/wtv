@@ -9,6 +9,7 @@ import {
   parseRecord,
   playlistLength,
   coverRecords,
+  coverSlots,
   thumbnailOriginsFor,
   thumbnailStale,
 } from './record';
@@ -130,5 +131,27 @@ describe('coverRecords', () => {
       'https://img.a.com/3.jpg',
     ]);
     expect(coverRecords([], records)).toEqual([]);
+  });
+});
+
+describe('coverSlots', () => {
+  const rec = (id: string, lastPlayedAt: number | null, thumb: boolean, title: string | null = null) =>
+    mergeRecord(
+      null,
+      { url: `https://www.a.com/v?id=${id}`, title, thumbnailUrl: thumb ? `https://img.a.com/${id}.jpg` : null, ...(lastPlayedAt ? { lastPlayedAt } : {}) },
+      1,
+    )!;
+  const records = new Map([rec('1', 10, true), rec('2', 30, true), rec('3', 5, false, 'Known title')].map((r) => [r.key, r]));
+  const entry = (id: string, title: string | null = null) => ({ url: `https://www.a.com/v?id=${id}`, title });
+
+  it('puts thumbnails first, then every other video once, in playlist order, with a title', () => {
+    const slots = coverSlots([entry('3'), entry('1', 'One'), entry('9'), entry('2'), entry('1'), entry('8', 'Eight')], records);
+    expect(slots.map((s) => [s.title, s.record?.thumbnailUrl ?? null])).toEqual([
+      ['a.com', 'https://img.a.com/2.jpg'],
+      ['One', 'https://img.a.com/1.jpg'],
+      ['Known title', null],
+      ['a.com', null],
+      ['Eight', null],
+    ]);
   });
 });

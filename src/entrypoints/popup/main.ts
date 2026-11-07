@@ -22,6 +22,7 @@ import { PL_COMMAND, PL_STATE, type RunnerSummary, type StepOp } from '../../lib
 import { addToPlaylist, listPlaylists, type StoredPlaylist } from '../../lib/playlist/store';
 import { FAIL_STREAK, brokenRoles, parseHealthStore, type HealthStore } from '../../lib/health/health';
 import { ROLE_LABELS } from '../../lib/picker/roles';
+import { requestSidePanelView, type SidePanelView } from '../../lib/sidepanel-view';
 
 const app = document.getElementById('app') as HTMLElement;
 const local = browserAreas().local;
@@ -153,6 +154,22 @@ function openPlaylists(id?: string): void {
   void browser.tabs.create({ url }).then(() => window.close());
 }
 
+/** Opens the side panel on `view`. sidePanel.open() must run synchronously inside the click. */
+function sidePanelButton(text: string, view: SidePanelView, windowId: number | undefined): HTMLButtonElement {
+  const b = el('button', { text });
+  b.type = 'button';
+  b.disabled = windowId === undefined;
+  b.addEventListener('click', () => {
+    if (windowId === undefined) return;
+    requestSidePanelView(view, windowId);
+    browser.sidePanel
+      .open({ windowId })
+      .then(() => window.close())
+      .catch((err: unknown) => console.error('[wtv] could not open side panel:', err));
+  });
+  return b;
+}
+
 function playlistsButton(id?: string): HTMLButtonElement {
   const b = el('button', { text: 'Playlists…' });
   b.type = 'button';
@@ -161,7 +178,7 @@ function playlistsButton(id?: string): HTMLButtonElement {
 }
 
 function playlistRow(
-  tab: { id: number; url?: string; title?: string },
+  tab: { id: number; url?: string; title?: string; windowId?: number },
   runner: RunnerSummary | null,
   playlists: StoredPlaylist[],
 ): HTMLElement {
@@ -236,7 +253,11 @@ function playlistRow(
         })
         .finally(() => (add.disabled = false));
     });
-    nodes.push(el('div', { className: 'actions' }, select, add, playlistsButton(runner?.playlistId)), result);
+    nodes.push(
+      el('div', { className: 'actions' }, select, add),
+      el('div', { className: 'actions' }, playlistsButton(runner?.playlistId), sidePanelButton('Explore…', 'playlists', tab.windowId)),
+      result,
+    );
   } else {
     nodes.push(el('div', { className: 'actions' }, playlistsButton(runner?.playlistId)));
   }
@@ -330,7 +351,7 @@ async function render(): Promise<void> {
     app.replaceChildren(
       el('h1', { text: 'Wtv' }),
       note('Wtv only runs on web pages.'),
-      row('Playlist', el('div', { className: 'actions' }, playlistsButton())),
+      row('Playlist', el('div', { className: 'actions' }, playlistsButton(), sidePanelButton('Explore…', 'playlists', tab?.windowId))),
       settingsRow,
     );
     return;
@@ -403,15 +424,7 @@ async function render(): Promise<void> {
     devRow.push(row('Dev', el('div', { className: 'actions' }, preview), out));
   }
 
-  // Selector side panel. sidePanel.open() must run synchronously inside the click.
-  const selectors = el('button', { text: 'Fix selectors…' });
-  selectors.type = 'button';
-  selectors.addEventListener('click', () => {
-    browser.sidePanel
-      .open({ windowId: tab.windowId })
-      .then(() => window.close())
-      .catch((err: unknown) => console.error('[wtv] could not open side panel:', err));
-  });
+  const selectors = sidePanelButton('Fix selectors…', 'selectors', tab.windowId);
   const selectorsRow = status ? [el('div', { className: 'actions' }, selectors)] : [];
   const broken = profile.site ? brokenRoles(health[profile.site.config.id]) : [];
   const healthNotes =
@@ -432,7 +445,7 @@ async function render(): Promise<void> {
     ...notes,
     row('Media', ...describeMedia(status?.media ?? null, granted, status?.metadata ?? null), ...healthNotes, ...selectorsRow),
     ...(status && view ? [viewRow(tabId, view, shortcuts)] : []),
-    playlistRow({ id: tabId, url: tab.url, title: tab.title }, runner, playlists),
+    playlistRow({ id: tabId, url: tab.url, title: tab.title, windowId: tab.windowId }, runner, playlists),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted), tabId, status.overlay?.adPicturesHidden ?? false))] : []),
     settingsRow,
     ...devRow,

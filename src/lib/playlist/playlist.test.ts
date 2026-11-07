@@ -8,6 +8,7 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_RUNS,
   PL_STATE,
   parseEntryInfo,
   parsePlaylistApply,
@@ -115,6 +116,7 @@ describe('playlist messages', () => {
     });
     expect(parsePlaylistRequest({ type: PL_COMMAND, op: 'next' })).toEqual({ type: PL_COMMAND, op: 'next', tabId: null });
     expect(parsePlaylistRequest({ type: PL_STATE, tabId: 4 })).toEqual({ type: PL_STATE, tabId: 4 });
+    expect(parsePlaylistRequest({ type: PL_RUNS, tabId: 4 })).toEqual({ type: PL_RUNS });
     expect(parsePlaylistRequest({ type: 'wtv/view/state' })).toBeNull();
   });
 

@@ -14,6 +14,7 @@
  *                (index null: from the top, or a random entry when shuffling)
  *     PL_COMMAND { op: 'next' | 'previous' | 'stop' | 'resume' | 'reshuffle', tabId }
  *     PL_STATE   { tabId }          → RunnerSummary | null
+ *     PL_RUNS                         → RunSummary[]   every playlist playing, in any tab
  *
  * `gen` changes every time the runner moves to an entry, so late events from the page
  * being left can't skip the next entry too.
@@ -27,6 +28,7 @@ export const PL_APPLY = 'wtv/playlist/apply';
 export const PL_COMMAND = 'wtv/playlist/command';
 export const PL_STATE = 'wtv/playlist/state';
 export const PL_INFO = 'wtv/playlist/info';
+export const PL_RUNS = 'wtv/playlist/runs';
 
 /** `gone`: the site says the media is unavailable (the `unavailable` role). */
 export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked', 'gone'] as const;
@@ -58,6 +60,8 @@ export interface RunnerSummary {
   name: string;
   /** Position in the play order. */
   index: number;
+  /** The entry's index in the playlist. */
+  entry: number;
   total: number;
   title: string | null;
   url: string;
@@ -67,6 +71,10 @@ export interface RunnerSummary {
   /** Next on the last entry starts the next lap. */
   loop: boolean;
   lap: number;
+}
+
+export interface RunSummary extends RunnerSummary {
+  tabId: number;
 }
 
 /** What a frame learned about its entry. Missing fields: not found. */
@@ -95,7 +103,8 @@ export type PageRequest =
       loop: boolean;
     }
   | { type: typeof PL_COMMAND; op: StepOp; tabId: number | null }
-  | { type: typeof PL_STATE; tabId: number | null };
+  | { type: typeof PL_STATE; tabId: number | null }
+  | { type: typeof PL_RUNS };
 
 export type PlaylistApply =
   | { type: typeof PL_APPLY; op: 'blackout'; title: string | null }
@@ -116,6 +125,8 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
         : null;
     case PL_STATE:
       return { type: PL_STATE, tabId };
+    case PL_RUNS:
+      return { type: PL_RUNS };
     case PL_INFO:
       return isIndex(raw.gen) && isObj(raw.info) ? { type: PL_INFO, gen: raw.gen, info: parseMediaInfo(raw.info) } : null;
     case PL_COMMAND:

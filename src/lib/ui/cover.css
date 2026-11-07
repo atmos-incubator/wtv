@@ -1,0 +1,89 @@
+/* A playlist's cover (cover.ts). The page sets its width; it keeps a 16:9 shape. */
+.cover {
+  position: relative;
+  display: grid;
+  grid-template: 1fr / 1fr;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--line);
+  container-type: inline-size;
+}
+
+.cover.quad {
+  grid-template: 1fr 1fr / 1fr 1fr;
+}
+
+.cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: cover;
+}
+
+.cover .tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 3px 4px;
+  overflow: hidden;
+  background: hsl(var(--hue) 45% 42%);
+  color: #fff;
+  font-size: clamp(9px, 7cqw, 16px);
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.cover .tile.turn {
+  animation: wtv-cover-in 0.6s ease-out;
+}
+
+.cover.quad .tile {
+  font-size: clamp(8px, 3.6cqw, 13px);
+}
+
+.cover .tile img {
+  position: absolute;
+  inset: 0;
+}
+
+.cover .tile-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.cover .slide {
+  position: absolute;
+  inset: 0;
+}
+
+.cover.placeholder {
+  place-items: center;
+  padding: 4px;
+  background: hsl(var(--hue) 45% 42%);
+  color: #fff;
+  font-size: clamp(10px, 7cqw, 18px);
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@keyframes wtv-cover-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover .tile.turn {
+    animation: none;
+  }
+}
