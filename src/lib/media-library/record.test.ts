@@ -8,6 +8,7 @@ import {
   mergeRecord,
   parseRecord,
   playlistLength,
+  coverRecords,
   thumbnailOriginsFor,
   thumbnailStale,
 } from './record';
@@ -112,5 +113,22 @@ describe('thumbnailOriginsFor', () => {
       thumbnailOriginsFor(['https://www.youtube.com/watch?v=a', 'https://m.youtube.com/watch?v=b', 'https://vimeo.com/1', 'x'], sites),
     ).toEqual(['*://i.ytimg.com/*']);
     expect(thumbnailOriginsFor(['https://vimeo.com/1'], sites)).toEqual([]);
+  });
+});
+
+describe('coverRecords', () => {
+  const rec = (id: string, lastPlayedAt: number | null, thumb = true) =>
+    mergeRecord(null, { url: `https://a.com/v?id=${id}`, thumbnailUrl: thumb ? `https://img.a.com/${id}.jpg` : null, ...(lastPlayedAt ? { lastPlayedAt } : {}) }, 1)!;
+  const records = new Map([rec('1', 10), rec('2', 30), rec('3', null), rec('4', 20), rec('5', 40, false)].map((r) => [r.key, r]));
+
+  it('puts the most recently played first, then the rest in playlist order, once each', () => {
+    const urls = ['1', '3', '2', '4', '5', '1', 'missing'].map((id) => `https://a.com/v?id=${id}`);
+    expect(coverRecords(urls, records).map((r) => r.thumbnailUrl)).toEqual([
+      'https://img.a.com/2.jpg',
+      'https://img.a.com/4.jpg',
+      'https://img.a.com/1.jpg',
+      'https://img.a.com/3.jpg',
+    ]);
+    expect(coverRecords([], records)).toEqual([]);
   });
 });

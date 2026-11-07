@@ -224,6 +224,15 @@ playing [F9, F10, F7].
   Updates arrive with extension releases.
 - Durations / thumbnails for built-ins come from the media library as they're played. Not
   shipped; it's the same on-demand cache [F10].
+- **Placeholder cover:** each built-in can ship an SVG beside its text file
+  (`src/playlists/<id>.svg`), bundled with the extension. It stands in until the user has played
+  the playlist: it's the playlist's cover, and the thumbnail of every entry that hasn't played
+  yet. Each entry's real thumbnail replaces it as soon as the media library has cached it.
+    - Checked at build time like the text files: real SVG, small (≤ 50 kB), no scripts, event
+      handlers or external references. Always shown with `<img>`, which doesn't run scripts anyway.
+    - No SVG: the cover is the playlist name on a color block, the same as user playlists.
+    - The sidebar covers (built after step 14: a quad of four thumbnails, or one, with the hover
+      slideshow) use the SVG in place of the color block.
 
 **Gone videos in the health check** [F12]:
 
@@ -242,7 +251,8 @@ its folder.
   search by playlist name and entry title, built-in and yours, sorted by last played.
 - Each playlist card shows a quad-layout slideshow of its entries' cached thumbnails, cycling
   slowly (the four most recent, then the next four). Entries with no cached thumbnail show their
-  title on a color block.
+  title on a color block. A built-in that hasn't played yet shows its placeholder SVG (step 15)
+  instead, and its unplayed entries show the SVG in their slots.
 - **▶ Play**, **Play in TV mode**, **Shuffle**, **Open** (goes to the playlists page editor). The
   current playlist and entry are highlighted while it runs.
 

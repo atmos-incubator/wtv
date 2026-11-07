@@ -202,6 +202,27 @@ export function describeLength({ totalS, unknown }: PlaylistLength, entries: num
   return unknown > 0 ? `${length}, ${unknownText}` : length;
 }
 
+// --- covers ---------------------------------------------------------------------------
+
+/**
+ * A playlist's cover pictures: the records of its entries that have a thumbnail, one per
+ * video, most recently played first (never-played ones after, in playlist order).
+ */
+export function coverRecords(urls: readonly string[], records: ReadonlyMap<string, MediaRecord>): MediaRecord[] {
+  const seen = new Set<string>();
+  const out: { r: MediaRecord; order: number }[] = [];
+  urls.forEach((url, order) => {
+    const key = libraryKey(url);
+    const r = key ? records.get(key) : undefined;
+    if (!r || !r.thumbnailUrl || seen.has(r.key)) return;
+    seen.add(r.key);
+    out.push({ r, order });
+  });
+  return out
+    .sort((a, b) => (b.r.lastPlayedAt ?? -1) - (a.r.lastPlayedAt ?? -1) || a.order - b.order)
+    .map(({ r }) => r);
+}
+
 // --- thumbnail hosts -----------------------------------------------------------------
 
 /** Permission patterns for the thumbnail hosts of the sites these URLs are on. */

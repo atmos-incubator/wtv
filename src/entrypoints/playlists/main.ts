@@ -9,6 +9,7 @@ import { browserAreas } from '../../lib/browser-storage';
 import { getThumbnail, listRecords } from '../../lib/media-library/db';
 import { LIB_CHANGED } from '../../lib/media-library/messages';
 import {
+  coverRecords,
   describeLength,
   entryLengthS,
   formatClock,
@@ -112,18 +113,82 @@ async function loadLibrary(): Promise<void> {
   }
 }
 
+/** The cached copy, else the thumbnail's own URL. */
+function thumbSrc(record: MediaRecord | null): string | null {
+  return (record && thumbs.get(record.key)?.url) ?? record?.thumbnailUrl ?? null;
+}
+
+function picture(src: string): HTMLImageElement {
+  const img = el('img');
+  img.alt = '';
+  img.loading = 'lazy';
+  img.referrerPolicy = 'no-referrer';
+  img.src = src;
+  img.addEventListener('error', () => img.remove(), { once: true });
+  return img;
+}
+
 function thumbnail(record: MediaRecord | null): HTMLElement {
   const box = el('span', 'thumb');
-  const src = (record && thumbs.get(record.key)?.url) ?? record?.thumbnailUrl;
-  if (src) {
-    const img = el('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.referrerPolicy = 'no-referrer';
-    img.src = src;
-    img.addEventListener('error', () => img.remove(), { once: true });
-    box.append(img);
+  const src = thumbSrc(record);
+  if (src) box.append(picture(src));
+  return box;
+}
+
+/** Frame length of the hover slideshow on a playlist's cover. */
+const COVER_SLIDE_MS = 1200;
+
+/** A stable hue per playlist for its placeholder. */
+function hueOf(id: string): number {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+
+/**
+ * A playlist's cover, thumbnail-sized: the four most recently played entries' thumbnails
+ * in a quad (or the one, with fewer than four), else the name on a color block. Hovering
+ * (or focusing) `row` plays every thumbnail full size, COVER_SLIDE_MS each.
+ */
+function cover(p: StoredPlaylist, srcs: readonly string[], row: HTMLElement): HTMLElement {
+  const box = el('span', 'cover');
+  if (srcs.length === 0) {
+    box.classList.add('placeholder');
+    box.style.setProperty('--hue', String(hueOf(p.id)));
+    box.append(el('span', '', p.name));
+    return box;
   }
+  if (srcs.length >= 4) {
+    box.classList.add('quad');
+    box.append(...srcs.slice(0, 4).map(picture));
+  } else {
+    box.append(picture(srcs[0]!));
+  }
+  if (srcs.length < 2) return box;
+
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let slide: HTMLImageElement | null = null;
+  const start = () => {
+    if (timer !== undefined) return;
+    let i = 0;
+    slide = picture(srcs[0]!);
+    slide.className = 'slide';
+    box.append(slide);
+    timer = setInterval(() => {
+      i = (i + 1) % srcs.length;
+      if (slide) slide.src = srcs[i]!;
+    }, COVER_SLIDE_MS);
+  };
+  const stop = () => {
+    clearInterval(timer);
+    timer = undefined;
+    slide?.remove();
+    slide = null;
+  };
+  row.addEventListener('pointerenter', start);
+  row.addEventListener('pointerleave', stop);
+  row.addEventListener('focus', start);
+  row.addEventListener('blur', stop);
   return box;
 }
 
@@ -143,10 +208,6 @@ function describeProgram(label: string, items: ProgramItem[] | null, isDefault: 
   return `${label}${isDefault ? ' (default)' : ''}: ${parts.filter(Boolean).join(', ')}`;
 }
 
-function countEntries(text: string): number {
-  return compilePlaylist(parsePlaylist(text)).entries.length;
-}
-
 // --- rendering ---------------------------------------------------------------------
 
 function renderList(): void {
@@ -155,8 +216,19 @@ function renderList(): void {
       const b = el('button');
       b.type = 'button';
       b.setAttribute('aria-current', String(p.id === currentId));
-      const n = countEntries(p.text);
-      b.append(el('span', '', p.name), el('span', 'count', `${n} entr${n === 1 ? 'y' : 'ies'}`));
+      const { entries } = compilePlaylist(parsePlaylist(p.text));
+      const n = entries.length;
+      const srcs = coverRecords(
+        entries.map((e) => e.url),
+        records,
+      )
+        .map(thumbSrc)
+        .filter((s): s is string => s !== null);
+      b.append(
+        cover(p, srcs, b),
+        el('span', 'name', p.name),
+        el('span', 'count', `${n} entr${n === 1 ? 'y' : 'ies'}`),
+      );
       b.addEventListener('click', () => void select(p.id));
       const li = el('li');
       li.append(b);
@@ -339,6 +411,7 @@ removeGone.addEventListener('click', () => {
 browser.runtime.onMessage.addListener((msg: unknown) => {
   if ((msg as { type?: unknown } | null)?.type !== LIB_CHANGED) return undefined;
   void loadLibrary().then(() => {
+    renderList();
     if (current()) renderPreview();
   });
   return undefined;
@@ -412,4 +485,6 @@ browser.storage.onChanged.addListener((changes, area) => {
   })();
 });
 
-void Promise.all([refresh(), loadLibrary()]).then(renderEditor);
+void loadLibrary()
+  .then(refresh)
+  .then(renderEditor);
