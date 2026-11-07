@@ -33,6 +33,10 @@
     "continuePrompt": [
       "ytd-popup-container yt-confirm-dialog-renderer #confirm-button button"
     ],
+    "unavailable": [
+      "#movie_player .ytp-error",
+      "ytd-watch-flexy yt-playability-error-supported-renderers"
+    ],
     "playButton": [
       {
         "selector": "button.ytp-play-button",
@@ -60,6 +64,9 @@
       "#owner #channel-name a"
     ]
   },
+  "thumbnailHosts": [
+    "i.ytimg.com"
+  ],
   "quirks": {
     "controlBarInset": 48,
     "adsInMainVideo": true

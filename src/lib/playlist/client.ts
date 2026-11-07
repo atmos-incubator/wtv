@@ -26,6 +26,12 @@
  *   - at the entry's end time (`end=` / `dur=`, or the hash's `e=`) the media pauses and,
  *     in a playlist, reports `ended`. An end time without a start time starts from 0, so a
  *     site resuming where the viewer left off can't skip past it;
+ *   - once the primary has played 3 s with no ad, the frame tells the runner what it knows
+ *     about the entry for the media library: the media's duration, and in the top frame
+ *     the page metadata (title, creator, thumbnail). A top frame with no player of its
+ *     own (an embed page) sends the page metadata after 8 s instead;
+ *   - until then, every frame looks for the site's `unavailable` role once a second and
+ *     reports `gone` if it shows (the runner shows "Unavailable" and moves on);
  *   - the entry's `[ads]` program replaces the default for the ad overlay, and
  *     `view=pictures` entries have their `[show]` program cover the media throughout.
  */
@@ -33,7 +39,9 @@ import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
+import { isElementVisible, matchRole } from '../dom/query';
 import { EVT_BLOCKED } from '../media/protocol';
+import { pageMetadata } from '../metadata/page';
 import { parseWtvHash, stripWtvHash, type WtvHash } from './hash';
 import { endState, seekDecision } from './seek';
 import type { PlayResult } from '../media/registry';
@@ -42,11 +50,13 @@ import type { ViewMode } from './format';
 import {
   PL_COMMAND,
   PL_HELLO,
+  PL_INFO,
   PL_MEDIA,
   parseEntryInfo,
   parsePlaylistApply,
   type EntryInfo,
   type MediaEvent,
+  type MediaInfo,
 } from './messages';
 
 /** Offer "Start" if nothing has played (and nothing was refused) by then. */
@@ -57,6 +67,13 @@ const SITE_AUTOPLAY_GRACE_MS = 2000;
 const ATTEMPT_DELAYS_MS = [0, 1500, 3000];
 /** Bridged media can't report its play() result; check whether it's playing after this. */
 const BRIDGED_CHECK_MS = 600;
+/** Tell the runner about the entry once it's played this long with no ad. */
+const INFO_AFTER_MS = 3000;
+/** Top frame with no player of its own (the player is embedded): send the page metadata after this. */
+const INFO_FALLBACK_MS = 8000;
+/** Look for the `unavailable` role this often, for this long after the entry starts (until it plays). */
+const GONE_POLL_MS = 1000;
+const GONE_WATCH_MS = 60_000;
 const WATCH_EVENTS = [
   'playing',
   'ended',
@@ -119,6 +136,10 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   /** The blackout is for this page's entry (not the one shown while leaving a page). */
   let awaitingStart = false;
   let primaryCleanup: (() => void) | null = null;
+  /** The entry's info went to the runner (it really played, or the fallback fired). */
+  let infoSent = false;
+  let infoTimer: ReturnType<typeof setTimeout> | undefined;
+  let gonePoll: ReturnType<typeof setInterval> | undefined;
   const sent = new Set<MediaEvent>();
   const adActive = () => ads.status()?.active ?? false;
   const listeners = new Set<() => void>();
@@ -258,10 +279,10 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   const active = () => entry !== null || fromHash;
 
   function trySeek(el: HTMLMediaElement): void {
-    if (seekDone || startS === null) return;
     const ad = adActive();
     if (ad || el.paused) cleanSince = null;
     else cleanSince ??= Date.now();
+    if (seekDone || startS === null) return;
     const decision = seekDecision({
       startS,
       currentTime: el.currentTime,
@@ -279,9 +300,79 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     }
   }
 
+  /** The page's metadata, for the top frame's report. */
+  function pageInfo(): MediaInfo {
+    const info: MediaInfo = {};
+    try {
+      const m = pageMetadata(agent.profile().site);
+      if (m.title) info.title = m.title;
+      if (m.creator) info.creator = m.creator;
+      if (m.thumbnail) info.thumbnailUrl = m.thumbnail;
+      if (m.duration) info.durationS = m.duration;
+    } catch (err) {
+      console.warn('[wtv] reading the page metadata failed:', err);
+    }
+    return info;
+  }
+
+  function sendInfo(info: MediaInfo): void {
+    if (!entry) return;
+    infoSent = true;
+    stopWatching();
+    browser.runtime.sendMessage({ type: PL_INFO, gen: entry.gen, info }).catch(() => undefined);
+  }
+
+  /** Played long enough, ad-free: report the entry for the media library. */
+  function maybeSendInfo(el: HTMLMediaElement): void {
+    if (!entry || infoSent || cleanSince === null || Date.now() - cleanSince < INFO_AFTER_MS) return;
+    const info = isTop ? pageInfo() : {};
+    // The media's own duration beats what the page says.
+    if (el.duration === Infinity) {
+      info.live = true;
+      delete info.durationS;
+    } else if (Number.isFinite(el.duration) && el.duration >= 1) {
+      info.durationS = el.duration;
+    }
+    sendInfo(info);
+  }
+
+  function stopWatching(): void {
+    if (infoTimer !== undefined) clearTimeout(infoTimer);
+    if (gonePoll !== undefined) clearInterval(gonePoll);
+    infoTimer = gonePoll = undefined;
+  }
+
+  /** Until the entry plays: watch for the site's "unavailable" message; top frame: the info fallback. */
+  function watchEntry(): void {
+    stopWatching();
+    if (!entry) return;
+    if (isTop) {
+      infoTimer = setTimeout(() => {
+        infoTimer = undefined;
+        if (!infoSent && !agent.primary()) sendInfo(pageInfo());
+      }, INFO_FALLBACK_MS);
+    }
+    const until = Date.now() + GONE_WATCH_MS;
+    gonePoll = setInterval(() => {
+      if (infoSent || sent.has('gone') || Date.now() > until) {
+        if (gonePoll !== undefined) clearInterval(gonePoll);
+        gonePoll = undefined;
+        return;
+      }
+      const matchers = agent.profile().site?.config.roles.unavailable;
+      if (!matchers?.length) return;
+      const found = matchRole('unavailable', matchers).match?.element;
+      if (found && isElementVisible(found)) {
+        console.info('[wtv] the site says this entry is unavailable');
+        report('gone');
+      }
+    }, GONE_POLL_MS);
+  }
+
   function onMediaEvent(el: HTMLMediaElement, type: string): void {
     if (!active()) return;
     trySeek(el);
+    maybeSendInfo(el);
     if (type === 'playing') {
       lift();
       report('playing');
@@ -354,6 +445,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     offPrimary();
     primaryCleanup?.();
     clearTimers();
+    stopWatching();
   });
 
   // An ad starting or ending changes whether it's safe to seek.
@@ -385,6 +477,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     endDone = false;
     seekDone = false;
     cleanSince = null;
+    infoSent = false;
+    stopWatching();
     sent.clear();
     if (hash) {
       showBlackout(hash.title ?? location.hostname, true);
@@ -397,6 +491,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
         if (!entry) return;
         endS = entry.endS;
         startS = entry.startS ?? (endS !== null ? 0 : null);
+        watchEntry();
         if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });
         else showBlackout(entry.title ?? (document.title || location.hostname), true);
         watchPrimary();

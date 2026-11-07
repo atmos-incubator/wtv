@@ -18,7 +18,7 @@ export type ValidationResult<T> =
 const HOSTNAME =
   /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
-const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'id', 'name', 'domains', 'roles', 'quirks']);
+const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'id', 'name', 'domains', 'roles', 'quirks', 'thumbnailHosts']);
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -185,6 +185,17 @@ export function validateSiteConfig(raw: unknown, expectedId?: string): Validatio
 
   const quirks = validateQuirks(raw.quirks, errors, warnings);
 
+  const thumbnailHosts: string[] = [];
+  if (raw.thumbnailHosts !== undefined) {
+    if (!Array.isArray(raw.thumbnailHosts)) errors.push('thumbnailHosts: must be an array of hostnames');
+    else {
+      raw.thumbnailHosts.forEach((h: unknown, i) => {
+        if (!isHostname(h)) errors.push(`thumbnailHosts[${i}]: "${String(h)}" is not a lowercase hostname`);
+        else if (!thumbnailHosts.includes(h)) thumbnailHosts.push(h);
+      });
+    }
+  }
+
   if (errors.length > 0) return { ok: false, errors, warnings };
 
   const value: SiteConfig = {
@@ -195,5 +206,6 @@ export function validateSiteConfig(raw: unknown, expectedId?: string): Validatio
     roles,
   };
   if (quirks && Object.keys(quirks).length > 0) value.quirks = quirks;
+  if (thumbnailHosts.length > 0) value.thumbnailHosts = thumbnailHosts;
   return { ok: true, value, warnings };
 }

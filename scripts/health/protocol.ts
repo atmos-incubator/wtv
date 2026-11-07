@@ -12,8 +12,8 @@ export const PICK_ROLES = 'wtv/pick/roles';
 
 /** Only present during ads, which aren't guaranteed: recorded as seen / not seen, never failed. */
 export const AD_ROLES: readonly string[] = ['adIndicator', 'skip'];
-/** Roles that only exist in rare moments (a "still watching?" dialog): reported, never judged. */
-export const MOMENT_ROLES: readonly string[] = ['continuePrompt'];
+/** Roles that only exist in rare moments (a "still watching?" dialog, a removed video): reported, never judged. */
+export const MOMENT_ROLES: readonly string[] = ['continuePrompt', 'unavailable'];
 
 export interface Target {
   url: string;

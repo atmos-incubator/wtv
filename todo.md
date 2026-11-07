@@ -187,8 +187,9 @@ playing [F9, F10, F7].
   `duration` and `og:video:duration` cover it.
 - **Thumbnails** [F10]: `og:image` / JSON-LD `thumbnailUrl`, fetched by the background and cached
   as a blob on first play. Needs host access to the image's host, so ask for it with the
-  playlist's other sites at Play (`i.ytimg.com` for YouTube). On demand only: nothing is fetched
-  for entries that haven't played.
+  playlist's other sites at Play (`i.ytimg.com` for YouTube, from the site config's new
+  `thumbnailHosts`). On demand only: nothing is fetched for entries that haven't played. Turned
+  down once, not asked again; without a cached copy the page shows the thumbnail URL itself.
 - **Gone videos** [F7]: a new optional role **`unavailable`** (YouTube: the "Video unavailable" /
   "This video has been removed" player error, checked with a snapshot). When it shows in a
   playlist, the entry is marked `gone` and the runner moves on after 3 s with the title card

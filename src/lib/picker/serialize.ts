@@ -19,6 +19,7 @@ export function siteConfigToJson(config: SiteConfig): string {
     domains: config.domains,
     roles,
   };
+  if (config.thumbnailHosts?.length) file.thumbnailHosts = config.thumbnailHosts;
   if (config.quirks && Object.keys(config.quirks).length > 0) file.quirks = config.quirks;
   return `${JSON.stringify(file, null, 2)}\n`;
 }

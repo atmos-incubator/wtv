@@ -13,6 +13,7 @@ export const ROLE_NAMES = [
   'adIndicator',
   'skip',
   'continuePrompt',
+  'unavailable',
   'playButton',
   'progressBar',
   'title',
@@ -42,6 +43,8 @@ export const ROLE_DEFAULT_WHEN: Record<RoleName, Condition> = {
   adIndicator: 'visible',
   skip: 'visible',
   continuePrompt: 'visible',
+  // The player's "Video unavailable" error. Sites keep error nodes around, hidden.
+  unavailable: 'visible',
   playButton: 'visible',
   // Players fade their controls out; the bar's geometry is still what a seek maps onto.
   progressBar: 'exists',
@@ -87,6 +90,11 @@ export interface SiteConfig {
   domains: string[];
   roles: Roles;
   quirks?: SiteQuirks;
+  /**
+   * Hosts the site's thumbnails come from (`i.ytimg.com`). Wtv asks for access to them
+   * at Play, to cache entry thumbnails; they never get content scripts.
+   */
+  thumbnailHosts?: string[];
 }
 
 export function effectiveWhen(role: RoleName, matcher: Matcher): Condition {

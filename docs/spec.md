@@ -76,9 +76,9 @@ Each step is reviewed and committed before the next one starts.
 
 ### Site configs + overrides
 
-- One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (`controlBarInset` for the click shield; `adsInMainVideo` when ads play in the main `<video>`, as on YouTube). The folder holds only data, so the dev repo writer can be pointed at it.
+- One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (`controlBarInset` for the click shield; `adsInMainVideo` when ads play in the main `<video>`, as on YouTube), optional `thumbnailHosts` (where the site's thumbnails live, e.g. `i.ytimg.com`: requested at Play for the media library, never given content scripts). The folder holds only data, so the dev repo writer can be pointed at it.
 - Validated at build time (`wxt.config.ts` fails the build) and in tests. Bundled `host_permissions` are generated from `domains`.
-- **Roles:** `video`, `player` (optional: the player's outer box; ad pictures cover it, and it's searched for unlisted Skip buttons), `adIndicator`, `skip`, `continuePrompt` (optional, see Ad detection + muting), `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`.
+- **Roles:** `video`, `player` (optional: the player's outer box; ad pictures cover it, and it's searched for unlisted Skip buttons), `adIndicator`, `skip`, `continuePrompt` (optional, see Ad detection + muting), `unavailable` (optional: the player's "Video unavailable" message, see Media library), `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`.
 - **Each role is an ordered list of fallback selectors**, not a single selector. First match wins. Entries are a selector string or `{ "selector", "when" }`.
 - **Selector format supports shadow DOM** traversal with ` >>> `, e.g. `"ytd-app >>> #movie_player video"`.
 - **`when` condition** per selector, since many sites leave ad nodes in the DOM and only hide them:
@@ -348,6 +348,17 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 - `[view pictures]` before the first URL makes every entry pictures; `view=video` / `view=pictures` on an entry overrides it. A `[view …]` after the first URL, or an unknown view, is reported and ignored.
 - Indentation is **not** significant. An `[ads]` or `[show]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
 
+### Media library
+
+What Wtv learns about each URL as it plays in a playlist, for the playlist features that need it before playing (`src/lib/media-library/`).
+
+- **Store:** IndexedDB `wtv-media` in the extension origin (beside the image library): `records` (title, creator, duration, live, thumbnail URL, status `ok` / `gone`, last played) and `thumbs` (cached thumbnail blobs). Written by the background, read by the playlists page; the background broadcasts `wtv/library/changed` after each write.
+- **Key:** the entry URL normalized like `sameEntryUrl` (no www. / m., no trailing slash, no hash), query parameters sorted, minus `t`, `start`, `si`, `pp`, `feature`, `utm_*` (`libraryKey`, pure + tested).
+- **What's recorded:** `playing` → status ok + last played. Once the primary has played 3 s with no ad, each frame sends `PL_INFO`: the media's own `duration` (or live), and from the top frame the metadata extractor's title, creator, thumbnail and duration (the media's own duration wins). A top frame with no player (an embed page) sends the page's metadata after 8 s. The runner files reports under its own entry URL for the reporting tab's current `gen`, never a URL the page names. Missing fields never erase known ones (`mergeRecord`).
+- **Thumbnails:** `og:image` / JSON-LD `thumbnailUrl`, fetched by the background the first time the entry plays (or when its URL changes) and cached as a blob (images only, ≤ 2 MB). Only with host access to the image's host: **▶ Play** asks for the entry sites' `thumbnailHosts` in the same prompt as the sites. Turned down once, a thumbnail host isn't asked for again (remembered in the playlists page's localStorage). Without a cached blob the page shows the thumbnail URL directly.
+- **Gone videos:** every frame of an entry polls the site's `unavailable` role once a second until the entry has really played (3 s ad-free) or 60 s pass. When it shows, the frame reports `gone`; the runner marks the record gone, blacks out with "Unavailable: <title>" for 3 s, and moves on. A gone entry that plays later is marked ok again.
+- **Playlists page:** each entry shows its thumbnail, its length (`1:30`, or `1:30 of 4:13` for part of a video, from `t=` / `end=` / `dur=` and the library), and the library's title when the entry has none. Gone entries are struck through and say "Unavailable"; **Remove gone entries (n)** deletes them from the text with their own `[ads]` / `[show]` blocks (`withoutEntries`, tested), for the user to save. Above the list: "about 2 h 10 min, 3 entries unknown" (`entryLengthS`, `describeLength`, tested).
+
 ### Hash params + seeking
 
 - Jump to a specific video location with a timestamp hash (`src/lib/playlist/hash.ts`, tested).
@@ -374,7 +385,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
     - For each site (`src/sites/*.json`; URLs in `scripts/health/targets.json`, a test checks every bundled site has one): load the URL, wait for ad-free playback (pre-roll ads extend the wait), then judge every configured role (`scripts/health/protocol.ts`, pure + tested):
         - ✅ pass, ⚠️ fallback (selector #1 broke, a fallback matched: an early warning), ❌ fail. Present-but-hidden controls pass.
         - `video` passes only if its selectors picked the playing video.
-        - Ads aren't guaranteed, so `adIndicator` / `skip` are 👁 seen / · not seen, never failures.
+        - Ads aren't guaranteed, so `adIndicator` / `skip` are 👁 seen / · not seen, never failures. Same for roles that only show in rare moments: `continuePrompt`, `unavailable`.
     - Results in `.health/results/<timestamp>/` (`report.json`, `summary.md`) + `.health/results/latest.md`. On failure: the page HTML + screenshot, so selectors can be fixed offline. Exit code 1 on any failure.
     - Daily: a macOS LaunchAgent (sample plist in the README), since a headful browser needs the logged-in session.
 - **In-extension** (`src/lib/health/`, local only, no telemetry):

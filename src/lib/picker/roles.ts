@@ -6,6 +6,7 @@ export const ROLE_LABELS: Record<RoleName, string> = {
   adIndicator: 'Ad indicator',
   skip: 'Skip button',
   continuePrompt: 'Continue prompt',
+  unavailable: 'Unavailable',
   playButton: 'Play button',
   progressBar: 'Progress bar',
   title: 'Title',
@@ -21,6 +22,8 @@ export const ROLE_HINTS: Record<RoleName, string> = {
   skip: 'The “Skip ad” button. It only shows mid-ad, so use the countdown.',
   continuePrompt:
     'The “Yes” / “Continue” button of a “Still watching?” dialog. Clicked automatically after a pause, when nobody has used the page for a minute.',
+  unavailable:
+    'The player’s “Video unavailable” / “This video has been removed” message. In a playlist, Wtv marks the entry gone and moves on. Pick it on a removed video.',
   playButton: 'The player’s own play / pause button.',
   progressBar: 'The seek bar. Clicking just above it on the click shield jumps there.',
   title: 'The video or episode title.',

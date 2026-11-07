@@ -17,6 +17,14 @@
  *
  * An entry with an end time (`end=` / `dur=`) reports `ended` when the media reaches it.
  *
+ * Gone: a frame that sees the site's `unavailable` role reports `gone`. The entry is
+ * marked gone in the media library, the tab shows "Unavailable: <title>" for 3 s, and
+ * the runner moves on.
+ *
+ * Media library (media-library/): `playing` records the play (status ok, last played);
+ * frames report what they learn about the entry (PL_INFO: title, creator, duration,
+ * thumbnail), always filed under the runner's own entry URL, never one a page names.
+ *
  * Order (order.ts): entries play in `order`, which is shuffled once at start when
  * shuffling, so Previous retraces it. Looping: past the last entry, a new lap starts
  * (reshuffled when shuffling); otherwise the run finishes.
@@ -36,16 +44,21 @@ import {
   PL_APPLY,
   PL_COMMAND,
   PL_HELLO,
+  PL_INFO,
   PL_MEDIA,
   PL_STATE,
   parsePlaylistRequest,
   type EntryInfo,
   type MediaEvent,
+  type MediaInfo,
   type PlaylistApply,
   type RunnerSummary,
   type StepOp,
 } from './messages';
 import { getPlaylist } from './store';
+import { getRecord } from '../media-library/db';
+import { libraryKey } from '../media-library/record';
+import { updateMedia } from '../media-library/service';
 import type { ProgramItem } from '../overlay/program';
 
 interface RunEntry {
@@ -84,6 +97,9 @@ export interface RunnerState {
 type RunnerStore = Record<string, RunnerState>;
 
 export const PLAYLIST_COMMANDS = { next: 'next', previous: 'previous' } as const;
+
+/** How long "Unavailable: <title>" shows before the next entry. */
+const GONE_DWELL_MS = 3000;
 
 let queue: Promise<unknown> = Promise.resolve();
 function serial<T>(task: () => Promise<T>): Promise<T> {
@@ -259,11 +275,29 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
 async function media(tabId: number, frameId: number, gen: number, event: MediaEvent): Promise<void> {
   const state = (await load())[tabId];
   if (!state || state.gen !== gen || state.phase === 'detached') return;
+  const entry = entryAt(state);
   switch (event) {
     case 'playing':
       // The top frame lifts its own blackout; a player in a child frame needs us to.
       if (frameId !== 0) await toTop(tabId, { type: PL_APPLY, op: 'lift' });
+      if (entry) void updateMedia({ url: entry.url, status: 'ok', lastPlayedAt: Date.now() });
       return;
+    case 'gone': {
+      if (!entry) return;
+      console.info(`[wtv] playlist entry ${state.index + 1} is unavailable: ${entry.url}`);
+      await updateMedia({ url: entry.url, status: 'gone' });
+      const key = libraryKey(entry.url);
+      const known = key ? await getRecord(key).catch(() => null) : null;
+      const title = entry.title ?? known?.title ?? displayTitle(entry);
+      await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: `Unavailable: ${title}` });
+      setTimeout(() => {
+        void serial(async () => {
+          const now = (await load())[tabId];
+          if (now && now.gen === gen && now.phase !== 'detached') await goTo(tabId, now, now.index + 1);
+        });
+      }, GONE_DWELL_MS);
+      return;
+    }
     case 'blocked':
       // An embedded player was refused autoplay: the top frame's blackout should offer
       // Start right away rather than waiting.
@@ -275,6 +309,13 @@ async function media(tabId: number, frameId: number, gen: number, event: MediaEv
     case 'ended':
       return goTo(tabId, state, state.index + 1);
   }
+}
+
+async function info(tabId: number, gen: number, report: MediaInfo): Promise<void> {
+  const state = (await load())[tabId];
+  if (!state || state.gen !== gen || state.phase === 'detached') return;
+  const entry = entryAt(state);
+  if (entry) await updateMedia({ url: entry.url, ...report });
 }
 
 async function tabUpdated(tabId: number, url: string | undefined, complete: boolean): Promise<void> {
@@ -336,6 +377,10 @@ export function startPlaylistRunner(): void {
       case PL_MEDIA:
         if (senderTab === undefined) return undefined;
         void serial(() => media(senderTab, sender.frameId ?? 0, msg.gen, msg.event));
+        return undefined;
+      case PL_INFO:
+        if (senderTab === undefined) return undefined;
+        void serial(() => info(senderTab, msg.gen, msg.info));
         return undefined;
       case PL_STATE: {
         const tabId = senderTab ?? msg.tabId;

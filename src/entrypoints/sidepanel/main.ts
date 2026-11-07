@@ -52,7 +52,7 @@ const KV_REPO_SITES = 'repoSitesHandle';
 const PICK_DELAY_MS = 5000;
 const PREVIEW_POLL_MS = 3000;
 /** Roles that only match while something is happening (an ad, a dialog). */
-const TRANSIENT_ROLES: readonly RoleName[] = ['adIndicator', 'skip', 'continuePrompt'];
+const TRANSIENT_ROLES: readonly RoleName[] = ['adIndicator', 'skip', 'continuePrompt', 'unavailable'];
 const isMetaRole = (role: RoleName) => (META_ROLES as readonly string[]).includes(role);
 
 interface Editor {

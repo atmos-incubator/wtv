@@ -3,7 +3,8 @@
  *
  *   content → background (runtime.sendMessage)
  *     PL_HELLO                       → EntryInfo | null   "is this page a playlist entry?" (every frame, at start)
- *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked, from frames that got an EntryInfo
+ *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked / gone, from frames that got an EntryInfo
+ *     PL_INFO   { gen, info }                              what the page says about the entry (title, duration…), for the media library
  *
  *   background → content, top frame only (tabs.sendMessage, frameId 0)
  *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
@@ -25,8 +26,10 @@ export const PL_MEDIA = 'wtv/playlist/media';
 export const PL_APPLY = 'wtv/playlist/apply';
 export const PL_COMMAND = 'wtv/playlist/command';
 export const PL_STATE = 'wtv/playlist/state';
+export const PL_INFO = 'wtv/playlist/info';
 
-export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked'] as const;
+/** `gone`: the site says the media is unavailable (the `unavailable` role). */
+export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked', 'gone'] as const;
 export type MediaEvent = (typeof MEDIA_EVENTS)[number];
 
 export const STEP_OPS = ['next', 'previous', 'stop', 'resume', 'reshuffle'] as const;
@@ -66,7 +69,19 @@ export interface RunnerSummary {
   lap: number;
 }
 
-export type ContentRequest = { type: typeof PL_HELLO } | { type: typeof PL_MEDIA; gen: number; event: MediaEvent };
+/** What a frame learned about its entry. Missing fields: not found. */
+export interface MediaInfo {
+  title?: string;
+  creator?: string;
+  thumbnailUrl?: string;
+  durationS?: number;
+  live?: boolean;
+}
+
+export type ContentRequest =
+  | { type: typeof PL_HELLO }
+  | { type: typeof PL_MEDIA; gen: number; event: MediaEvent }
+  | { type: typeof PL_INFO; gen: number; info: MediaInfo };
 
 export type PageRequest =
   | {
@@ -101,6 +116,8 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
         : null;
     case PL_STATE:
       return { type: PL_STATE, tabId };
+    case PL_INFO:
+      return isIndex(raw.gen) && isObj(raw.info) ? { type: PL_INFO, gen: raw.gen, info: parseMediaInfo(raw.info) } : null;
     case PL_COMMAND:
       if (raw.op === 'start') {
         if (typeof raw.playlistId !== 'string' || typeof raw.tv !== 'boolean') return null;
@@ -121,6 +138,22 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
     default:
       return null;
   }
+}
+
+const MAX_INFO_TEXT = 1000;
+
+function parseMediaInfo(raw: Record<string, unknown>): MediaInfo {
+  const info: MediaInfo = {};
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.slice(0, MAX_INFO_TEXT) : undefined);
+  const title = text(raw.title);
+  const creator = text(raw.creator);
+  const thumbnailUrl = text(raw.thumbnailUrl);
+  if (title) info.title = title;
+  if (creator) info.creator = creator;
+  if (thumbnailUrl && /^https?:\/\//i.test(thumbnailUrl)) info.thumbnailUrl = thumbnailUrl;
+  if (typeof raw.durationS === 'number' && Number.isFinite(raw.durationS) && raw.durationS > 0) info.durationS = raw.durationS;
+  if (raw.live === true) info.live = true;
+  return info;
 }
 
 export function parsePlaylistApply(raw: unknown): PlaylistApply | null {

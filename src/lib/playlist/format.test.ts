@@ -7,6 +7,7 @@ import {
   renderEntry,
   serializePlaylist,
   withEntryTitle,
+  withoutEntries,
 } from './format';
 import { parseTimestamp } from './time';
 
@@ -265,6 +266,38 @@ describe('edits', () => {
     );
     expect(serializePlaylist(appendEntry(parsePlaylist(''), 'https://a.com/2', null))).toBe('https://a.com/2\n');
     expect(() => appendEntry(parsePlaylist(''), 'chrome://settings', null)).toThrow();
+  });
+
+  it('removes entries with their own blocks, keeping comments and [loop]', () => {
+    const text = [
+      '[ads]',
+      '  [img cats]',
+      '',
+      'https://a.com/1 | One',
+      '[ads]',
+      '  5: Own quote',
+      '# about two',
+      '',
+      'https://a.com/2 | Two',
+      '',
+      'https://a.com/3 | Three',
+      '[show]',
+      '  [img night]',
+      '[loop]',
+      '',
+    ].join('\n');
+    const out = (gone: number[]) => serializePlaylist(withoutEntries(parsePlaylist(text), new Set(gone)));
+    expect(out([0])).toBe(['[ads]', '  [img cats]', '', '# about two', '', 'https://a.com/2 | Two', '', 'https://a.com/3 | Three', '[show]', '  [img night]', '[loop]', ''].join('\n'));
+    expect(out([1])).toBe(text.replace('https://a.com/2 | Two\n\n', ''));
+    expect(out([2])).toBe(text.replace('\nhttps://a.com/3 | Three\n[show]\n  [img night]', ''));
+    expect(out([])).toBe(text);
+    const all = compilePlaylist(withoutEntries(parsePlaylist(text), new Set([0, 1, 2])));
+    expect(all.entries).toEqual([]);
+  });
+
+  it('drops the blank lines before an entry removed at the end', () => {
+    const doc = withoutEntries(parsePlaylist('https://a.com/1\n\nhttps://a.com/2\n'), new Set([1]));
+    expect(serializePlaylist(doc)).toBe('https://a.com/1\n');
   });
 
   it('renders entries', () => {

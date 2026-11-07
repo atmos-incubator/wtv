@@ -2,9 +2,20 @@
  * Content-script registration. Scripts are registered at runtime for exactly the origins
  * Wtv holds host permission for: bundled sites (required host_permissions) plus any site
  * the user enabled (optional_host_permissions). Re-run whenever permissions change.
+ *
+ * Thumbnail hosts (`thumbnailHosts` in site configs, e.g. i.ytimg.com) are granted only so
+ * the background can cache thumbnails: they never get content scripts.
  */
 import { browser } from 'wxt/browser';
+import { allThumbnailOrigins } from './media-library/record';
 import { webMatchPatterns } from './permissions';
+import { BUNDLED_SITES } from './sites/bundled';
+
+/** The http(s) patterns that get content scripts. */
+export function contentScriptPatterns(origins: readonly string[]): string[] {
+  const thumbnails = allThumbnailOrigins(BUNDLED_SITES);
+  return webMatchPatterns(origins).filter((o) => !thumbnails.has(o));
+}
 
 /** Must match WXT's generated PublicPath type (.wxt/types/paths.d.ts, refreshed by `wxt prepare`). */
 export const SCRIPT_FILES = {
@@ -20,7 +31,7 @@ export const SCRIPT_IDS = {
 /** Returns the match patterns now registered. */
 export async function syncContentScripts(): Promise<string[]> {
   const { origins = [] } = await browser.permissions.getAll();
-  const matches = webMatchPatterns(origins);
+  const matches = contentScriptPatterns(origins);
 
   const ids: string[] = Object.values(SCRIPT_IDS);
   const existing = await browser.scripting.getRegisteredContentScripts({ ids });
@@ -71,7 +82,7 @@ export async function injectIntoTab(tabId: number, allFrames: boolean): Promise<
 
 /** Inject into every open tab matching the given patterns (after a permission grant). */
 export async function injectIntoMatchingTabs(patterns: readonly string[]): Promise<void> {
-  const web = webMatchPatterns(patterns);
+  const web = contentScriptPatterns(patterns);
   if (web.length === 0) return;
   const tabs = await browser.tabs.query({ url: web });
   await Promise.all(

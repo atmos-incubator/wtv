@@ -44,6 +44,8 @@ describe('validateSiteConfig', () => {
     ['missing name', { name: ' ' }],
     ['negative control bar inset', { quirks: { controlBarInset: -1 } }],
     ['non-boolean adsInMainVideo', { quirks: { adsInMainVideo: 'yes' } }],
+    ['thumbnail hosts that are not a list', { thumbnailHosts: 'i.ytimg.com' }],
+    ['a thumbnail host with a scheme', { thumbnailHosts: ['https://i.ytimg.com'] }],
   ])('rejects %s', (_label, patch) => {
     const r = validateSiteConfig({ ...base, ...patch });
     expect(r.ok).toBe(false);
@@ -64,6 +66,11 @@ describe('validateSiteConfig', () => {
   it('keeps known quirks', () => {
     const r = validateSiteConfig({ ...base, quirks: { controlBarInset: 48, adsInMainVideo: true } });
     expect(r.ok && r.value.quirks).toEqual({ controlBarInset: 48, adsInMainVideo: true });
+  });
+
+  it('keeps thumbnail hosts, deduplicated', () => {
+    const r = validateSiteConfig({ ...base, thumbnailHosts: ['i.ytimg.com', 'i.ytimg.com'] });
+    expect(r.ok && r.value.thumbnailHosts).toEqual(['i.ytimg.com']);
   });
 
   it('warns on unknown keys without failing', () => {

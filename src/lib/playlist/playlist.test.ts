@@ -6,6 +6,7 @@ import {
   PL_APPLY,
   PL_COMMAND,
   PL_HELLO,
+  PL_INFO,
   PL_MEDIA,
   PL_STATE,
   parseEntryInfo,
@@ -84,6 +85,15 @@ describe('playlist messages', () => {
       event: 'ended',
     });
     expect(parsePlaylistRequest({ type: PL_MEDIA, gen: 3, event: 'boom' })).toBeNull();
+    expect(parsePlaylistRequest({ type: PL_MEDIA, gen: 3, event: 'gone' })).toMatchObject({ event: 'gone' });
+    expect(
+      parsePlaylistRequest({
+        type: PL_INFO,
+        gen: 2,
+        info: { title: 'T', creator: '', thumbnailUrl: 'javascript:x', durationS: 253, live: 'yes', extra: 1 },
+      }),
+    ).toEqual({ type: PL_INFO, gen: 2, info: { title: 'T', durationS: 253 } });
+    expect(parsePlaylistRequest({ type: PL_INFO, gen: 2 })).toBeNull();
     expect(parsePlaylistRequest({ type: PL_COMMAND, op: 'start', playlistId: 'p', index: 0, tv: true })).toEqual({
       type: PL_COMMAND,
       op: 'start',

@@ -377,3 +377,33 @@ export function appendEntry(doc: PlaylistDoc, url: string, title: string | null)
   lines.push(line);
   return { ...doc, lines, trailingNewline: doc.lines.length === 0 ? true : doc.trailingNewline };
 }
+
+/**
+ * Remove entries (entryIndexes count entries, not lines), each with its own `[ads]` /
+ * `[show]` blocks: the lines after it, up to the next entry, that belong to those blocks.
+ * Comments, blank lines and anything else (a `[loop]`, say) stay. Where a removal leaves
+ * two blank lines together, one goes.
+ */
+export function withoutEntries(doc: PlaylistDoc, entryIndexes: ReadonlySet<number>): PlaylistDoc {
+  if (entryIndexes.size === 0) return doc;
+  const blockLine = (l: Line) => l.kind === 'ads' || l.kind === 'show' || l.kind === 'quote' || l.kind === 'img';
+  const lines: Line[] = [];
+  let seen = -1;
+  let removing = false;
+  /** Lines were dropped since the last line kept. */
+  let gap = false;
+  for (const line of doc.lines) {
+    if (line.kind === 'entry') removing = entryIndexes.has(++seen);
+    if (removing && (line.kind === 'entry' || blockLine(line))) {
+      gap = true;
+      continue;
+    }
+    const last = lines[lines.length - 1];
+    if (gap && line.kind === 'blank' && (last === undefined || last.kind === 'blank')) continue;
+    lines.push(line);
+    gap = false;
+  }
+  // Removed at the end: drop the blank lines that separated it.
+  if (gap) while (lines[lines.length - 1]?.kind === 'blank') lines.pop();
+  return { ...doc, lines };
+}
