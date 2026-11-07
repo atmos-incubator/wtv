@@ -4,7 +4,22 @@ import { describe, expect, it } from 'vitest';
 import { MSG_STATUS as SRC_STATUS } from '../../src/lib/messages';
 import { PICK_ROLES as SRC_ROLES } from '../../src/lib/picker/messages';
 import { ROLE_NAMES } from '../../src/lib/sites/schema';
-import { AD_ROLES, MOMENT_ROLES, MSG_STATUS, PICK_ROLES, evaluateRun, parseTargets, summarize, type Observation, type RoleLite } from './protocol';
+import { compilePlaylist, parsePlaylist } from '../../src/lib/playlist/format';
+import {
+  AD_ROLES,
+  MOMENT_ROLES,
+  MSG_STATUS,
+  PICK_ROLES,
+  evaluateRun,
+  judgeEntry,
+  parseBuiltinFile,
+  parseTargets,
+  summarize,
+  summarizePlaylists,
+  type EntryObservation,
+  type Observation,
+  type RoleLite,
+} from './protocol';
 
 const role = (name: string, matchedIndex: number | null, counts = [1]): RoleLite => ({
   role: name,
@@ -83,5 +98,58 @@ describe('health runner protocol', () => {
     expect(md).toContain('**1 of 2 site(s) failed.**');
     expect(md).toContain('## ✅ youtube.com');
     expect(md).toContain('| video | ✅ pass | `.video-1` |  |');
+  });
+});
+
+describe('built-in playlist check', () => {
+  const text = [
+    '# name: Cat videos',
+    '[shuffle]',
+    '[ads]',
+    '  10: Fun fact: cats sleep a lot',
+    'https://www.youtube.com/watch?v=aaa | Cat | t=10',
+    '  https://youtu.be/bbb',
+    '# https://example.com/commented-out',
+    '',
+  ].join('\n');
+
+  it('reads the same entries as the real parser', () => {
+    const file = parseBuiltinFile('cats', text);
+    expect(file).toEqual({ id: 'cats', name: 'Cat videos', urls: ['https://www.youtube.com/watch?v=aaa', 'https://youtu.be/bbb'] });
+    expect(file.urls).toEqual(compilePlaylist(parsePlaylist(text)).entries.map((e) => e.url));
+  });
+
+  it('reads every shipped file the same way the extension does', () => {
+    const dir = fileURLToPath(new URL('../../src/playlists/', import.meta.url));
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.txt'))) {
+      const t = readFileSync(dir + f, 'utf8');
+      expect(parseBuiltinFile(f, t).urls, f).toEqual(compilePlaylist(parsePlaylist(t)).entries.map((e) => e.url));
+    }
+  });
+
+  const seen: EntryObservation = { playlist: 'cats', url: 'https://www.youtube.com/watch?v=aaa', unavailableSeen: false, playability: { status: 'OK', reason: null }, error: null };
+
+  it('judges entries by the player and YouTube’s own status', () => {
+    expect(judgeEntry(seen).verdict).toBe('ok');
+    expect(judgeEntry({ ...seen, unavailableSeen: true, playability: null })).toMatchObject({ verdict: 'gone' });
+    expect(judgeEntry({ ...seen, playability: { status: 'ERROR', reason: 'Video unavailable' } })).toEqual({
+      url: seen.url,
+      verdict: 'gone',
+      detail: 'ERROR: Video unavailable',
+    });
+    expect(judgeEntry({ ...seen, playability: { status: 'LOGIN_REQUIRED', reason: 'This video is private' } }).verdict).toBe('gone');
+    expect(judgeEntry({ ...seen, playability: { status: 'AGE_CHECK_REQUIRED', reason: null } }).verdict).toBe('restricted');
+    expect(judgeEntry({ ...seen, playability: null, error: 'timeout' }).verdict).toBe('unknown');
+    expect(judgeEntry({ ...seen, playability: null }).verdict).toBe('ok');
+  });
+
+  it('lists gone entries per playlist', () => {
+    const md = summarizePlaylists([
+      { id: 'cats', name: 'Cat videos', entries: [judgeEntry(seen), judgeEntry({ ...seen, url: 'https://youtu.be/x', unavailableSeen: true })] },
+      { id: 'art', name: 'Artwork', entries: [judgeEntry(seen)] },
+    ]);
+    expect(md).toContain('## ❌ 1 gone · Cat videos (cats) · 2 entries');
+    expect(md).toContain('- ❌ gone: https://youtu.be/x (the player says it’s unavailable)');
+    expect(md).toContain('## ✅ · Artwork (art) · 1 entries');
   });
 });

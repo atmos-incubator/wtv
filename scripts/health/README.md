@@ -20,7 +20,14 @@ stick between runs.
 npm run health                       # every site in src/sites/
 npm run health -- --site youtube.com # one site
 npm run health -- --keep-open        # leave the browser open to poke at it
+npm run health -- --playlists        # also check every built-in playlist entry
 ```
+
+`--playlists` opens each entry of every built-in playlist (`src/playlists/*.txt`) without
+playing it, and marks it ❌ gone when the player shows its "Video unavailable" message (the
+`unavailable` role) or YouTube's `playabilityStatus` says it's removed or private (⚠️
+restricted: age or content checks a TV can't pass). The report gets a "Built-in playlists"
+section listing them per playlist. Gone entries don't change the exit code.
 
 It's headful on purpose: headless browsers and datacenter IPs get bot walls. Run it on
 your own machine, logged in.

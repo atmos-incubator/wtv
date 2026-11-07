@@ -146,3 +146,91 @@ export function parseTargets(raw: unknown): { targets: Record<string, Target>; e
   }
   return { targets, errors };
 }
+
+// --- built-in playlists (--playlists) --------------------------------------------------
+
+/** A built-in playlist file (src/playlists/<id>.txt), as far as the check needs it. */
+export interface BuiltinFile {
+  id: string;
+  name: string;
+  urls: string[];
+}
+
+/**
+ * The entry URLs of a built-in playlist. A deliberately small reading of the format
+ * (src/lib/playlist/format.ts): entry lines are the ones starting with http(s)://, the URL
+ * is everything before the first `|`. protocol.test.ts checks it against the real parser.
+ */
+export function parseBuiltinFile(id: string, text: string): BuiltinFile {
+  const lines = text.split(/\r?\n/);
+  const name = /^#\s*name:\s*(.+?)\s*$/i.exec(lines[0] ?? '')?.[1] ?? id;
+  const urls = lines
+    .map((l) => l.trim())
+    .filter((l) => /^https?:\/\//i.test(l))
+    .map((l) => l.split('|')[0]!.trim());
+  return { id, name, urls };
+}
+
+/** YouTube's own verdict, from the watch page's `ytInitialPlayerResponse.playabilityStatus`. */
+export interface Playability {
+  status: string;
+  reason: string | null;
+}
+
+export interface EntryObservation {
+  playlist: string;
+  url: string;
+  /** The extension's `unavailable` role matched on the page. */
+  unavailableSeen: boolean;
+  playability: Playability | null;
+  error: string | null;
+}
+
+export type EntryVerdict = 'ok' | 'gone' | 'restricted' | 'unknown';
+
+export interface EntryResult {
+  url: string;
+  verdict: EntryVerdict;
+  detail: string | null;
+}
+
+export interface PlaylistResult {
+  id: string;
+  name: string;
+  entries: EntryResult[];
+}
+
+/** Removed, private, or otherwise unplayable anywhere. */
+const GONE_STATUSES = new Set(['ERROR', 'UNPLAYABLE', 'LOGIN_REQUIRED']);
+/** Playable only after a check a TV can't pass (age, content warning). */
+const RESTRICTED_STATUSES = new Set(['AGE_CHECK_REQUIRED', 'AGE_VERIFICATION_REQUIRED', 'CONTENT_CHECK_REQUIRED']);
+
+export function judgeEntry(o: EntryObservation): EntryResult {
+  const status = o.playability?.status ?? null;
+  const reason = o.playability?.reason ?? null;
+  const detail = [status, reason].filter(Boolean).join(': ') || null;
+  if (status && GONE_STATUSES.has(status)) return { url: o.url, verdict: 'gone', detail };
+  if (o.unavailableSeen) return { url: o.url, verdict: 'gone', detail: 'the player says it’s unavailable' };
+  if (status && RESTRICTED_STATUSES.has(status)) return { url: o.url, verdict: 'restricted', detail };
+  if (status === 'OK') return { url: o.url, verdict: 'ok', detail: null };
+  if (o.error) return { url: o.url, verdict: 'unknown', detail: o.error };
+  // Not a YouTube page, or no player response: the unavailable role found nothing.
+  return { url: o.url, verdict: status ? 'unknown' : 'ok', detail };
+}
+
+const ENTRY_ICON: Record<EntryVerdict, string> = { ok: '✅', gone: '❌', restricted: '⚠️', unknown: '❔' };
+
+/** Markdown section for the report. Gone entries are listed, but don't fail the run. */
+export function summarizePlaylists(results: readonly PlaylistResult[]): string {
+  const lines = ['# Built-in playlists', ''];
+  if (results.length === 0) return [...lines, 'No built-in playlists with entries.', ''].join('\n');
+  for (const p of results) {
+    const bad = p.entries.filter((e) => e.verdict !== 'ok');
+    const gone = bad.filter((e) => e.verdict === 'gone').length;
+    const head = gone > 0 ? `❌ ${gone} gone` : bad.length > 0 ? '⚠️ check' : '✅';
+    lines.push(`## ${head} · ${p.name} (${p.id}) · ${p.entries.length} entries`, '');
+    for (const e of bad) lines.push(`- ${ENTRY_ICON[e.verdict]} ${e.verdict}: ${e.url}${e.detail ? ` (${e.detail})` : ''}`);
+    if (bad.length > 0) lines.push('');
+  }
+  return lines.join('\n');
+}

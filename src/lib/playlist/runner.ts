@@ -55,6 +55,7 @@ import {
   type RunnerSummary,
   type StepOp,
 } from './messages';
+import { getBuiltinPlaylist } from './builtin-bundle';
 import { getPlaylist } from './store';
 import { getRecord } from '../media-library/db';
 import { libraryKey } from '../media-library/record';
@@ -186,7 +187,7 @@ async function start(
   from: number | null,
   options: { tv: boolean; shuffle: boolean; loop: boolean },
 ): Promise<void> {
-  const playlist = await getPlaylist(browserAreas().local, playlistId);
+  const playlist = getBuiltinPlaylist(playlistId) ?? (await getPlaylist(browserAreas().local, playlistId));
   if (!playlist) throw new Error(`no playlist ${playlistId}`);
   const { entries } = compilePlaylist(parsePlaylist(playlist.text));
   if (entries.length === 0) throw new Error(`playlist "${playlist.name}" has no entries`);

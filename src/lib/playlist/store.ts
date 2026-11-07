@@ -18,7 +18,7 @@ export type PlaylistStore = Record<string, StoredPlaylist>;
 
 const MAX_NAME = 80;
 
-function isPlaylist(v: unknown, id: string): v is StoredPlaylist {
+export function isPlaylist(v: unknown, id: string): v is StoredPlaylist {
   if (typeof v !== 'object' || v === null) return false;
   const p = v as Record<string, unknown>;
   return (
@@ -30,7 +30,7 @@ function isPlaylist(v: unknown, id: string): v is StoredPlaylist {
   );
 }
 
-async function loadStore(area: KVArea): Promise<PlaylistStore> {
+export async function loadPlaylistStore(area: KVArea): Promise<PlaylistStore> {
   const raw = (await area.get(KEYS.playlists))[KEYS.playlists];
   const out: PlaylistStore = {};
   if (typeof raw !== 'object' || raw === null) return out;
@@ -38,7 +38,7 @@ async function loadStore(area: KVArea): Promise<PlaylistStore> {
   return out;
 }
 
-async function saveStore(area: KVArea, store: PlaylistStore): Promise<void> {
+export async function savePlaylistStore(area: KVArea, store: PlaylistStore): Promise<void> {
   await area.set({ [KEYS.playlists]: store });
 }
 
@@ -59,11 +59,11 @@ export function nextPlaylistName(existing: readonly { name: string }[]): string 
 
 /** Sorted by name. */
 export async function listPlaylists(area: KVArea): Promise<StoredPlaylist[]> {
-  return Object.values(await loadStore(area)).sort((a, b) => a.name.localeCompare(b.name));
+  return Object.values(await loadPlaylistStore(area)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getPlaylist(area: KVArea, id: string): Promise<StoredPlaylist | null> {
-  return (await loadStore(area))[id] ?? null;
+  return (await loadPlaylistStore(area))[id] ?? null;
 }
 
 /** Create (no id) or update. An empty name gets "Playlist N". */
@@ -72,7 +72,7 @@ export async function savePlaylist(
   input: { id?: string; name: string; text: string },
   now = Date.now(),
 ): Promise<StoredPlaylist> {
-  const store = await loadStore(area);
+  const store = await loadPlaylistStore(area);
   const existing = input.id ? store[input.id] : undefined;
   const id = existing?.id ?? newPlaylistId();
   const others = Object.values(store).filter((p) => p.id !== id);
@@ -84,15 +84,15 @@ export async function savePlaylist(
     updatedAt: now,
   };
   store[id] = saved;
-  await saveStore(area, store);
+  await savePlaylistStore(area, store);
   return saved;
 }
 
 export async function deletePlaylist(area: KVArea, id: string): Promise<void> {
-  const store = await loadStore(area);
+  const store = await loadPlaylistStore(area);
   if (!(id in store)) return;
   delete store[id];
-  await saveStore(area, store);
+  await savePlaylistStore(area, store);
 }
 
 /** Append a URL to a playlist (null id: a new playlist). Returns the playlist. */

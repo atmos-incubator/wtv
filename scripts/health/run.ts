@@ -23,6 +23,10 @@
  *   --timeout <s>     how long to wait for playback, per site (default 60; ads extend it)
  *   --setup           open every target and wait for Enter (consent, sign-in); no checks
  *   --keep-open       leave the browser open at the end
+ *   --playlists       also open every built-in playlist entry (src/playlists/*.txt) and
+ *                     list the gone ones (the `unavailable` role, or YouTube's own
+ *                     playabilityStatus). Gone entries are reported, but don't change the
+ *                     exit code: they're for whoever maintains the lists.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -34,9 +38,15 @@ import {
   MSG_STATUS,
   PICK_ROLES,
   evaluateRun,
+  judgeEntry,
+  parseBuiltinFile,
   parseTargets,
   summarize,
+  summarizePlaylists,
+  type EntryObservation,
   type Observation,
+  type Playability,
+  type PlaylistResult,
   type RoleLite,
   type SiteResult,
   type Target,
@@ -45,6 +55,7 @@ import {
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const EXTENSION = join(ROOT, '.output', 'chrome-mv3');
 const SITES = join(ROOT, 'src', 'sites');
+const PLAYLISTS = join(ROOT, 'src', 'playlists');
 const PROFILE = join(ROOT, '.health', 'profile');
 const RESULTS = join(ROOT, '.health', 'results');
 
@@ -55,6 +66,10 @@ const SETTLE_MS = 5000;
 const AD_EXTRA_MS = 120_000;
 /** Ad snapshots kept per site. */
 const AD_SNAPSHOTS = 3;
+/** --playlists: how long to watch each entry page for the unavailable message. */
+const ENTRY_WAIT_MS = 10_000;
+/** --playlists: with YouTube's status known, how long to give the player to show an error anyway. */
+const ENTRY_SETTLE_MS = 3000;
 
 /** The slice of the chrome.* API used inside the service worker. */
 interface ChromeLite {
@@ -230,6 +245,66 @@ async function observe(
   return obs;
 }
 
+/**
+ * Open one entry page and judge it: no playback (videos are paused as they start), just
+ * the player's own error (the `unavailable` role) and YouTube's playabilityStatus.
+ */
+async function checkEntry(ext: Extension, page: Page, playlist: string, url: string): Promise<EntryObservation> {
+  const obs: EntryObservation = { playlist, url, unavailableSeen: false, playability: null, error: null };
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const start = Date.now();
+    let tabId: number | null = null;
+    while (Date.now() - start < ENTRY_WAIT_MS) {
+      await page.waitForTimeout(POLL_MS);
+      obs.playability ??= await page
+        .evaluate(() => {
+          const status = (window as unknown as { ytInitialPlayerResponse?: { playabilityStatus?: { status?: unknown; reason?: unknown } } })
+            .ytInitialPlayerResponse?.playabilityStatus;
+          for (const v of document.querySelectorAll('video')) v.pause();
+          return typeof status?.status === 'string'
+            ? { status: status.status, reason: typeof status.reason === 'string' ? status.reason : null }
+            : null;
+        })
+        .catch((): Playability | null => null);
+      tabId ??= await ext.findTab(page.url());
+      if (tabId !== null) {
+        const report = await ext.ask<{ roles: RoleLite[] }>(tabId, { type: PICK_ROLES });
+        if (report?.roles.some((r) => r.role === 'unavailable' && r.matchedIndex !== null)) {
+          obs.unavailableSeen = true;
+          break;
+        }
+      }
+      if (obs.playability && Date.now() - start >= ENTRY_SETTLE_MS) break;
+    }
+  } catch (err) {
+    obs.error = err instanceof Error ? err.message.split('\n')[0]! : String(err);
+  }
+  return obs;
+}
+
+async function checkPlaylists(ext: Extension, context: BrowserContext): Promise<PlaylistResult[]> {
+  const files = readdirSync(PLAYLISTS)
+    .filter((f) => f.endsWith('.txt'))
+    .sort()
+    .map((f) => parseBuiltinFile(f.replace(/\.txt$/, ''), readFileSync(join(PLAYLISTS, f), 'utf8')))
+    .filter((f) => f.urls.length > 0);
+  const page = await context.newPage();
+  const results: PlaylistResult[] = [];
+  for (const file of files) {
+    console.info(`[health] playlist ${file.id}: ${file.urls.length} entries`);
+    const entries = [];
+    for (const url of file.urls) {
+      const result = judgeEntry(await checkEntry(ext, page, file.id, url));
+      if (result.verdict !== 'ok') console.info(`[health]   ${result.verdict}: ${url}${result.detail ? ` (${result.detail})` : ''}`);
+      entries.push(result);
+    }
+    results.push({ id: file.id, name: file.name, entries });
+  }
+  await page.close();
+  return results;
+}
+
 function loadSiteIds(): string[] {
   return readdirSync(SITES)
     .filter((f) => f.endsWith('.json'))
@@ -250,6 +325,7 @@ async function main(): Promise<void> {
       timeout: { type: 'string', default: '60' },
       setup: { type: 'boolean', default: false },
       'keep-open': { type: 'boolean', default: false },
+      playlists: { type: 'boolean', default: false },
     },
   });
   if (!existsSync(join(EXTENSION, 'manifest.json'))) fail(`no build at ${EXTENSION}; run "npm run health" (it builds first)`);
@@ -320,8 +396,14 @@ async function main(): Promise<void> {
     if (!values['keep-open']) await page.close();
   }
 
-  const summary = summarize(results, startedAt.toISOString());
-  writeFileSync(join(outDir, 'report.json'), JSON.stringify({ startedAt: startedAt.toISOString(), results }, null, 2));
+  const playlists = values.playlists ? await checkPlaylists(ext, context) : null;
+
+  let summary = summarize(results, startedAt.toISOString());
+  if (playlists) summary += `\n${summarizePlaylists(playlists)}`;
+  writeFileSync(
+    join(outDir, 'report.json'),
+    JSON.stringify({ startedAt: startedAt.toISOString(), results, ...(playlists ? { playlists } : {}) }, null, 2),
+  );
   writeFileSync(join(outDir, 'summary.md'), summary);
   writeFileSync(join(RESULTS, 'latest.md'), summary);
   console.info(`\n${summary}\n[health] results: ${outDir}`);

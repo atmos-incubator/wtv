@@ -1,10 +1,19 @@
 /**
- * Playlists page: list, edit (as text), play, export. The text is the playlist; the
+ * Playlists page: list, edit (as text), play, export; built-in playlists (read-only,
+ * Duplicate to edit); backup / restore of everything. The text is the playlist; the
  * entries column is a live preview of what it parses to, filled in from the media library
  * (durations, thumbnails, titles, gone entries) for entries that have played.
  */
 import './style.css';
 import { browser } from 'wxt/browser';
+import {
+  backupFileName,
+  describePlan,
+  makeBackup,
+  parseBackup,
+  planChangesAnything,
+  planImport,
+} from '../../lib/backup';
 import { browserAreas } from '../../lib/browser-storage';
 import { getThumbnail, listRecords } from '../../lib/media-library/db';
 import { LIB_CHANGED } from '../../lib/media-library/messages';
@@ -28,14 +37,30 @@ import {
 } from '../../lib/playlist/format';
 import { originPatternsFor } from '../../lib/playlist/match';
 import { PL_COMMAND } from '../../lib/playlist/messages';
-import { deletePlaylist, listPlaylists, savePlaylist, type StoredPlaylist } from '../../lib/playlist/store';
+import type { BuiltinPlaylist } from '../../lib/playlist/builtin';
+import { BUILTIN_PLAYLISTS } from '../../lib/playlist/builtin-bundle';
+import {
+  deletePlaylist,
+  listPlaylists,
+  loadPlaylistStore,
+  savePlaylist,
+  savePlaylistStore,
+  type StoredPlaylist,
+} from '../../lib/playlist/store';
+import { parseSettings } from '../../lib/settings';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
-import { KEYS } from '../../lib/storage';
+import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-store';
+import { KEYS, readKey, writeKey } from '../../lib/storage';
 
 const local = browserAreas().local;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const list = $<HTMLUListElement>('list');
+const builtinHeading = $('builtin-heading');
+const builtinList = $<HTMLUListElement>('builtin-list');
+const builtinNote = $('builtin-note');
+const backupStatus = $('backup-status');
+const importFile = $<HTMLInputElement>('import-file');
 const empty = $('empty');
 const editor = $('editor');
 const nameInput = $<HTMLInputElement>('name');
@@ -55,6 +80,9 @@ const DECLINED_THUMBNAILS = 'wtv.playlists.declinedThumbnailOrigins';
 
 textInput.placeholder = 'Paste URLs here, one per line.\n\nhttps://www.youtube.com/watch?v=… | Title | t=1:37';
 
+type AnyPlaylist = StoredPlaylist | BuiltinPlaylist;
+const isBuiltin = (p: AnyPlaylist | null): p is BuiltinPlaylist => p !== null && 'builtin' in p;
+
 let playlists: StoredPlaylist[] = [];
 let currentId: string | null = new URLSearchParams(location.search).get('id');
 let dirty = false;
@@ -66,8 +94,8 @@ let records = new Map<string, MediaRecord>();
 /** Object URLs of cached thumbnails, by key, with the image URL each was cached from. */
 const thumbs = new Map<string, { from: string; url: string }>();
 
-function current(): StoredPlaylist | null {
-  return playlists.find((p) => p.id === currentId) ?? null;
+function current(): AnyPlaylist | null {
+  return playlists.find((p) => p.id === currentId) ?? BUILTIN_PLAYLISTS.find((p) => p.id === currentId) ?? null;
 }
 
 function setStatus(text: string, warn = false): void {
@@ -128,9 +156,10 @@ function picture(src: string): HTMLImageElement {
   return img;
 }
 
-function thumbnail(record: MediaRecord | null): HTMLElement {
+/** `placeholder`: a built-in's cover SVG, for entries with no thumbnail yet. */
+function thumbnail(record: MediaRecord | null, placeholder: string | null): HTMLElement {
   const box = el('span', 'thumb');
-  const src = thumbSrc(record);
+  const src = thumbSrc(record) ?? placeholder;
   if (src) box.append(picture(src));
   return box;
 }
@@ -150,8 +179,12 @@ function hueOf(id: string): number {
  * in a quad (or the one, with fewer than four), else the name on a color block. Hovering
  * (or focusing) `row` plays every thumbnail full size, COVER_SLIDE_MS each.
  */
-function cover(p: StoredPlaylist, srcs: readonly string[], row: HTMLElement): HTMLElement {
+function cover(p: AnyPlaylist, srcs: readonly string[], row: HTMLElement): HTMLElement {
   const box = el('span', 'cover');
+  if (srcs.length === 0 && isBuiltin(p) && p.cover) {
+    box.append(picture(p.cover));
+    return box;
+  }
   if (srcs.length === 0) {
     box.classList.add('placeholder');
     box.style.setProperty('--hue', String(hueOf(p.id)));
@@ -210,32 +243,34 @@ function describeProgram(label: string, items: ProgramItem[] | null, isDefault: 
 
 // --- rendering ---------------------------------------------------------------------
 
-function renderList(): void {
-  list.replaceChildren(
-    ...playlists.map((p) => {
-      const b = el('button');
-      b.type = 'button';
-      b.setAttribute('aria-current', String(p.id === currentId));
-      const { entries } = compilePlaylist(parsePlaylist(p.text));
-      const n = entries.length;
-      const srcs = coverRecords(
-        entries.map((e) => e.url),
-        records,
-      )
-        .map(thumbSrc)
-        .filter((s): s is string => s !== null);
-      b.append(
-        cover(p, srcs, b),
-        el('span', 'name', p.name),
-        el('span', 'count', `${n} entr${n === 1 ? 'y' : 'ies'}`),
-      );
-      b.addEventListener('click', () => void select(p.id));
-      const li = el('li');
-      li.append(b);
-      return li;
-    }),
+function playlistItem(p: AnyPlaylist): HTMLLIElement {
+  const b = el('button');
+  b.type = 'button';
+  b.setAttribute('aria-current', String(p.id === currentId));
+  const { entries } = compilePlaylist(parsePlaylist(p.text));
+  const n = entries.length;
+  const srcs = coverRecords(
+    entries.map((e) => e.url),
+    records,
+  )
+    .map(thumbSrc)
+    .filter((s): s is string => s !== null);
+  b.append(
+    cover(p, srcs, b),
+    el('span', 'name', p.name),
+    el('span', 'count', `${n} entr${n === 1 ? 'y' : 'ies'}`),
   );
+  b.addEventListener('click', () => void select(p.id));
+  const li = el('li');
+  li.append(b);
+  return li;
+}
+
+function renderList(): void {
+  list.replaceChildren(...playlists.map(playlistItem));
   empty.hidden = playlists.length > 0;
+  builtinList.replaceChildren(...BUILTIN_PLAYLISTS.map(playlistItem));
+  builtinHeading.hidden = builtinList.hidden = BUILTIN_PLAYLISTS.length === 0;
 }
 
 function renderPreview(): void {
@@ -247,6 +282,8 @@ function renderPreview(): void {
 
   const lengths: (number | null)[] = [];
   const gone: number[] = [];
+  const shown = current();
+  const placeholder = isBuiltin(shown) ? shown.cover : null;
   if (compiled.entries.length === 0) {
     entriesList.replaceChildren(el('p', 'note', 'No entries yet.'));
   } else {
@@ -286,7 +323,7 @@ function renderPreview(): void {
         play.setAttribute('aria-label', `Play from entry ${i + 1}`);
         play.addEventListener('click', () => void playFrom(i));
         li.append(
-          thumbnail(record),
+          thumbnail(record, placeholder),
           el('span', 'entry-title', e.title ?? record?.title ?? e.url),
           play,
           el('span', 'entry-meta', meta.join(' · ')),
@@ -296,7 +333,7 @@ function renderPreview(): void {
     );
   }
   lengthNote.textContent = describeLength(playlistLength(lengths), compiled.entries.length);
-  removeGone.hidden = gone.length === 0;
+  removeGone.hidden = gone.length === 0 || isBuiltin(current());
   removeGone.textContent = `Remove gone entries (${gone.length})`;
   removeGone.dataset.entries = gone.join(',');
   $<HTMLButtonElement>('play').disabled = compiled.entries.length === 0;
@@ -306,8 +343,12 @@ function renderEditor(): void {
   const p = current();
   editor.hidden = !p;
   if (!p) return;
+  const builtin = isBuiltin(p);
   nameInput.value = p.name;
   textInput.value = p.text;
+  nameInput.readOnly = textInput.readOnly = builtin;
+  builtinNote.hidden = !builtin;
+  $('save').hidden = $('delete').hidden = builtin;
   setDirty(false);
   setStatus('');
   renderPreview();
@@ -320,7 +361,7 @@ function renderEditor(): void {
 
 async function refresh(): Promise<void> {
   playlists = await listPlaylists(local);
-  if (!current()) currentId = playlists[0]?.id ?? null;
+  if (!current()) currentId = playlists[0]?.id ?? BUILTIN_PLAYLISTS[0]?.id ?? null;
   renderList();
 }
 
@@ -334,7 +375,7 @@ async function select(id: string): Promise<void> {
 
 async function save(): Promise<StoredPlaylist | null> {
   const p = current();
-  if (!p) return null;
+  if (!p || isBuiltin(p)) return null;
   const saved = await savePlaylist(local, { id: p.id, name: nameInput.value, text: textInput.value });
   setDirty(false);
   await refresh();
@@ -344,7 +385,7 @@ async function save(): Promise<StoredPlaylist | null> {
 
 /** `index`: an entry's ▶ (it plays first); null: ▶ Play (from the top, or anywhere when shuffling). */
 async function playFrom(index: number | null): Promise<void> {
-  const p = dirty ? await save() : current();
+  const p: AnyPlaylist | null = dirty ? await save() : current();
   if (!p) return;
   const { entries } = compilePlaylist(parsePlaylist(p.text));
   if (entries.length === 0) return;
@@ -397,6 +438,93 @@ function rememberDeclined(origins: readonly string[]): void {
     // Storage blocked: we'll ask again next time.
   }
 }
+
+$('duplicate').addEventListener('click', () => {
+  const p = current();
+  if (!p) return;
+  if (dirty && !confirm('Duplicate the saved version? Your unsaved changes stay unsaved here.')) return;
+  void (async () => {
+    const copy = await savePlaylist(local, { name: isBuiltin(p) ? p.name : `${p.name} copy`, text: p.text });
+    setDirty(false);
+    await refresh();
+    await select(copy.id);
+    setStatus(isBuiltin(p) ? 'Your own copy: edit away.' : 'Duplicated.');
+  })();
+});
+
+// --- backup / restore ----------------------------------------------------------------
+
+function setBackupStatus(text: string, warn = false): void {
+  backupStatus.textContent = text;
+  backupStatus.classList.toggle('warn', warn);
+}
+
+$('export').addEventListener('click', () => {
+  void (async () => {
+    const backup = makeBackup({
+      playlists: await loadPlaylistStore(local),
+      overrides: await loadOverrideStore(local),
+      settings: parseSettings(await readKey<unknown>(local, KEYS.settings, undefined)),
+    });
+    const url = URL.createObjectURL(new Blob([`${JSON.stringify(backup, null, 2)}\n`], { type: 'application/json' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: backupFileName() });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    const n = backup.playlists.length;
+    setBackupStatus(`Exported ${n} playlist${n === 1 ? '' : 's'}, your selectors and settings. Pictures aren’t included.`);
+  })().catch((err: unknown) => setBackupStatus(`Couldn’t export: ${String(err)}`, true));
+});
+
+$('import').addEventListener('click', () => {
+  if (dirty && !confirm('Discard unsaved changes?')) return;
+  importFile.value = '';
+  importFile.click();
+});
+
+importFile.addEventListener('change', () => {
+  const file = importFile.files?.[0];
+  if (!file) return;
+  void (async () => {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await file.text());
+    } catch {
+      setBackupStatus(`${file.name} isn’t a Wtv backup file.`, true);
+      return;
+    }
+    const parsed = parseBackup(raw);
+    if (!parsed.ok) {
+      setBackupStatus(parsed.error, true);
+      return;
+    }
+    const plan = planImport(
+      {
+        playlists: await loadPlaylistStore(local),
+        overrides: await loadOverrideStore(local),
+        settings: parseSettings(await readKey<unknown>(local, KEYS.settings, undefined)),
+      },
+      parsed.backup,
+    );
+    const skipped = parsed.warnings.length ? `\n\nSkipped:\n${parsed.warnings.join('\n')}` : '';
+    if (!planChangesAnything(plan)) {
+      setBackupStatus(`Nothing to import: everything already matches ${file.name}.`);
+      return;
+    }
+    if (!confirm(`Import ${file.name}?\n\n${describePlan(plan)}${skipped}`)) return;
+    await savePlaylistStore(local, plan.next.playlists);
+    await saveOverrideStore(local, plan.next.overrides);
+    await writeKey(local, KEYS.settings, plan.next.settings);
+    setDirty(false);
+    await refresh();
+    renderEditor();
+    const n = plan.added.length + plan.replaced.length;
+    setBackupStatus(
+      `Imported ${n} playlist${n === 1 ? '' : 's'}${plan.overrides.length ? ', selectors' : ''}${plan.settingsChanged ? ', settings' : ''}.` +
+        (parsed.warnings.length ? ` ${parsed.warnings.length} item(s) skipped.` : ''),
+      parsed.warnings.length > 0,
+    );
+  })().catch((err: unknown) => setBackupStatus(`Couldn’t import: ${String(err)}`, true));
+});
 
 removeGone.addEventListener('click', () => {
   const indexes = new Set((removeGone.dataset.entries ?? '').split(',').filter(Boolean).map(Number));

@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'wxt';
 import { isDevToolsMode } from './src/lib/build-mode';
+import { checkSvg, loadBuiltinPlaylists } from './src/lib/playlist/builtin';
 import { loadSiteConfigs } from './src/lib/sites/load';
 import { hostPermissionPatterns } from './src/lib/sites/match';
 
 const SITES_DIR = fileURLToPath(new URL('./src/sites/', import.meta.url));
+const PLAYLISTS_DIR = fileURLToPath(new URL('./src/playlists/', import.meta.url));
 
 /** Validate bundled site configs at build time; any error fails the build. */
 function bundledSitesForBuild() {
@@ -27,10 +29,31 @@ function bundledSitesForBuild() {
   return result.configs;
 }
 
+/** Validate the built-in playlists and their cover SVGs at build time; any error fails the build. */
+function checkBuiltinPlaylists(): void {
+  const texts: Record<string, string> = {};
+  const covers: Record<string, string> = {};
+  const errors: string[] = [];
+  for (const file of readdirSync(PLAYLISTS_DIR)) {
+    const path = join(PLAYLISTS_DIR, file);
+    if (file.endsWith('.txt')) texts[path] = readFileSync(path, 'utf8');
+    else if (file.endsWith('.svg')) {
+      const bytes = readFileSync(path);
+      covers[path] = bytes.toString('utf8');
+      errors.push(...checkSvg(covers[path], bytes.length).map((e) => `playlists/${file}: ${e}`));
+    }
+  }
+  const result = loadBuiltinPlaylists(texts, covers);
+  for (const n of result.notes) console.info(`[wtv] built-in playlist: ${n}`);
+  errors.push(...result.errors);
+  if (errors.length > 0) throw new Error(`[wtv] invalid built-in playlists:\n  ${errors.join('\n  ')}`);
+}
+
 export default defineConfig({
   srcDir: 'src',
   manifest: ({ mode }) => {
     const dev = isDevToolsMode(mode);
+    checkBuiltinPlaylists();
     return {
       name: dev ? 'Wtv (dev)' : 'Wtv',
       description: 'Web TV: the internet as a TV station. Mutes ads and shows something nicer instead.',

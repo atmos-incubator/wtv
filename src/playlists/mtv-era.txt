@@ -1,0 +1,7 @@
+# name: MTV-era music videos
+# Give each video its own [ads] block of fun facts, e.g.
+#   [ads]
+#     10: Fun fact: …
+#
+# One YouTube URL per line (optional "| Title", "| t=1:37", "| end=2:30").
+# Not shipped until it has entries.

@@ -1,0 +1,5 @@
+# name: Artwork
+# Painting, drawing and sculpture: watching art get made.
+#
+# One YouTube URL per line (optional "| Title", "| t=1:37", "| end=2:30").
+# Not shipped until it has entries.

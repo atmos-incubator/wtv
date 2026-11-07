@@ -1,0 +1,5 @@
+# name: Movie clips & previews
+# Scenes and trailers.
+#
+# One YouTube URL per line (optional "| Title", "| t=1:37", "| end=2:30").
+# Not shipped until it has entries.

@@ -203,7 +203,10 @@ playing [F9, F10, F7].
   validated at build time like site configs. YouTube to start; I fill in the lists. A file with no
   entries yet is skipped by the build (with a note), so the genres below can be stubbed now and
   ship as they're filled in. Not all of them need to be ready for the store launch.
-- Starting genres (one playlist each, names to settle when filling them in):
+- Starting genres (one playlist each, names to settle when filling them in). Stubbed as
+  `src/playlists/<stem>.txt`, in this order: `artwork`, `red-bull`, `movie-clips`,
+  `trick-shots`, `satisfying-making`, `satisfying-cleaning`, `pets`, `cats`, `nature`,
+  `elemental`, `disasters`, `funny`, `mtv-era`:
     - Artwork
     - Red Bull clips
     - Movie clips & previews
