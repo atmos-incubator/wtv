@@ -5,6 +5,7 @@ import { DEV_TOOLS } from '../lib/env';
 import { startMediaAgent } from '../lib/media/agent';
 import { MSG_PREVIEW_OVERLAY, MSG_SHOW_AD_PICTURES, isStatusRequest, type FrameStatus } from '../lib/messages';
 import { startHealthMonitor } from '../lib/health/monitor';
+import { pageMetadata } from '../lib/metadata/page';
 import { startOverlay } from '../lib/overlay/controller';
 import { startPickerService } from '../lib/picker/service';
 import { startPlaylistClient } from '../lib/playlist/client';
@@ -38,7 +39,12 @@ export default defineContentScript({
 
     const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: unknown) => void) => {
       if (isStatusRequest(msg)) {
-        const status: FrameStatus = { media: agent.status(), ads: ads.status(), overlay: overlay.status() };
+        let metadata: FrameStatus['metadata'] = null;
+        if (window === window.top) {
+          const { title, creator } = pageMetadata(agent.profile().site);
+          metadata = { title, creator };
+        }
+        const status: FrameStatus = { media: agent.status(), ads: ads.status(), overlay: overlay.status(), metadata };
         sendResponse(status);
       } else if ((msg as { type?: unknown } | null)?.type === MSG_SHOW_AD_PICTURES) {
         overlay.showAdPictures();

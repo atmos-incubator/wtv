@@ -19,9 +19,7 @@ Not done, or done but not verified:
       unit-tested. Run it, check `.health/results/latest.md`, and fix whatever the first real run
       turns up.
 - [ ] **Metadata extraction** (spec: JSON-LD `VideoObject` → OpenGraph → `meta` / `itemprop` →
-      role selectors, with the stale-OpenGraph check on SPAs). Never built: the `title`,
-      `description`, `keywords` and `creator` roles exist but nothing reads them. Needed by the
-      selector preview (step 11) and the media library (step 14). Built in step 11.
+      role selectors, with the stale-OpenGraph check on SPAs). Built in step 11; tick with it.
 - [ ] **Backup / restore** of playlists + selector overrides as a JSON export / import. Built in
       step 15, alongside built-in playlists.
 - [ ] **Publishing over the previous extension** (checklist in `docs/spec.md`):
@@ -101,7 +99,9 @@ never ended.
 **Remove selectors that don't match** [F2]:
 
 - Every selector row in the side panel gets a **✕** that removes it. For a built-in selector this
-  saves an override for that role without it. **Reset** still restores the built-in list.
+  saves an override for that role without it. **Reset** still restores the built-in list, and
+  **Undo** reverses the last removal. Removing every built-in selector of a role turns that role
+  off for the site.
 - **Remove unmatched** per role removes every selector with 0 matches. It asks first, because
   transient roles (skip, ad indicator) legitimately match nothing outside an ad.
 
@@ -109,12 +109,15 @@ never ended.
 
 - `src/lib/metadata/`: per page, title / creator / description / keywords / thumbnail / duration
   from JSON-LD `VideoObject`, then OpenGraph (`og:title`, `og:image`, `og:video:duration`), then
-  `meta` / `itemprop`, then the role selectors. Pure parsing over a DOM snapshot, unit-tested with
-  fixture HTML. OpenGraph is only trusted when `og:url` matches the current URL (YouTube leaves
-  stale tags behind after in-app navigation).
+  `meta` / `itemprop`, then the role selectors. A selector you saved yourself goes first: you
+  picked it because the page's own data was wrong. Pure parsing over facts collected from the DOM
+  (the JSON-LD texts, the tags, what each role's selector reads), unit-tested with fixtures of
+  those, since the tests have no DOM. OpenGraph is only trusted when `og:url` matches the current
+  URL (YouTube leaves stale tags behind after in-app navigation).
 - Side panel **Preview** section: the extracted values, live, each labelled with where it came
-  from (JSON-LD / OpenGraph / your selector). It updates as you edit a selector, so you can see
-  what a change does.
+  from (JSON-LD / OpenGraph / your selector), with every other source's value one click away.
+  While you edit a metadata role's selector, the test line shows what it reads; once saved it
+  wins in the Preview.
 - The popup shows the extracted title / creator in the Media row.
 
 ### Step 12 — Pictures outside ads

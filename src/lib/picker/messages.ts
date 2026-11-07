@@ -13,6 +13,8 @@ export const PICK_TEST = 'wtv/pick/test';
 export const PICK_ROLES = 'wtv/pick/roles';
 export const PICK_RESULT = 'wtv/pick/result';
 export const PICK_CANCELLED = 'wtv/pick/cancelled';
+/** The page's metadata (title, creator, ...) with where each value came from. Top frame. */
+export const PICK_METADATA = 'wtv/pick/metadata';
 /** Keys pressed while the side panel has focus, forwarded to the in-page picker. */
 export const PICK_KEY = 'wtv/pick/key';
 
@@ -24,7 +26,8 @@ export type PickRequest =
   | { type: typeof PICK_CANCEL }
   | { type: typeof PICK_KEY; key: PickKey }
   | { type: typeof PICK_TEST; role: RoleName; selector: string; when: Condition | null }
-  | { type: typeof PICK_ROLES };
+  | { type: typeof PICK_ROLES }
+  | { type: typeof PICK_METADATA };
 
 export interface Candidate {
   selector: string;
@@ -49,6 +52,8 @@ export interface TestResult {
   /** The role's condition (exists / visible) is satisfied by at least one match. */
   satisfied: boolean;
   error: string | null;
+  /** Metadata roles: what the first match reads (its text, or a meta tag's content). */
+  value?: string | null;
 }
 
 export interface MatcherReport {
@@ -94,6 +99,8 @@ export function parsePickRequest(raw: unknown): PickRequest | null {
       return (PICK_KEYS as readonly unknown[]).includes(m.key) ? { type: PICK_KEY, key: m.key as PickKey } : null;
     case PICK_ROLES:
       return { type: PICK_ROLES };
+    case PICK_METADATA:
+      return { type: PICK_METADATA };
     case PICK_TEST: {
       if (!isRole(m.role) || typeof m.selector !== 'string') return null;
       const when = (CONDITIONS as readonly unknown[]).includes(m.when) ? (m.when as Condition) : null;

@@ -5,6 +5,8 @@
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { deepQueryAll, isElementVisible } from '../dom/query';
+import { META_ROLES } from '../metadata/extract';
+import { pageMetadata, readRoleValue } from '../metadata/page';
 import type { MediaAgent } from '../media/agent';
 import type { OverlayController } from '../overlay/controller';
 import { togglePlayback } from '../view/playback';
@@ -105,14 +107,22 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
         picker?.key(msg.key);
         break;
       case 'wtv/pick/test': {
-        const { elements, ...rest } = evaluate(msg.selector, msg.when ?? ROLE_DEFAULT_WHEN[msg.role]);
+        const when = msg.when ?? ROLE_DEFAULT_WHEN[msg.role];
+        const { elements, ...rest } = evaluate(msg.selector, when);
         flashMatches(elements);
         const result: TestResult = rest;
+        if ((META_ROLES as readonly string[]).includes(msg.role)) {
+          const hit = when === 'visible' ? elements.find(isElementVisible) : elements[0];
+          result.value = hit ? readRoleValue(hit) : null;
+        }
         sendResponse(result);
         break;
       }
       case 'wtv/pick/roles':
         sendResponse(rolesReport());
+        break;
+      case 'wtv/pick/metadata':
+        sendResponse(pageMetadata(agent.profile().site));
         break;
     }
     return undefined;

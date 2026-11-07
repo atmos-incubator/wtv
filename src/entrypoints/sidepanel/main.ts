@@ -1,6 +1,7 @@
 /**
  * Selector side panel: inspect each role's selectors on the current tab, pick elements
- * to generate new ones, test them live, and save them as local overrides.
+ * to generate new ones, test them live, remove ones that don't match, and save the result
+ * as local overrides. A Preview shows the metadata Wtv reads from the page.
  * Dev builds can also write the resulting site config straight into src/sites/.
  */
 import './style.css';
@@ -9,9 +10,17 @@ import { browserAreas } from '../../lib/browser-storage';
 import { DEV_TOOLS } from '../../lib/env';
 import { getKv, setKv } from '../../lib/images/db';
 import {
+  META_FIELDS,
+  META_ROLES,
+  META_SOURCE_LABELS,
+  type MetaField,
+  type PageMetadata,
+} from '../../lib/metadata/extract';
+import {
   PICK_CANCEL,
   PICK_CANCELLED,
   PICK_KEY,
+  PICK_METADATA,
   PICK_RESULT,
   PICK_ROLES,
   PICK_START,
@@ -27,7 +36,13 @@ import { ROLE_HINTS, ROLE_LABELS } from '../../lib/picker/roles';
 import { siteConfigToJson } from '../../lib/picker/serialize';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-store';
-import { resolveSite, withRoleOverride, withoutRoleOverride } from '../../lib/sites/overrides';
+import {
+  resolveSite,
+  withRoleOverride,
+  withSelectorsRemoved,
+  withoutRoleOverride,
+  type SiteOverride,
+} from '../../lib/sites/overrides';
 import { CONDITIONS, ROLE_DEFAULT_WHEN, type Condition, type Matcher, type RoleName } from '../../lib/sites/schema';
 import { validateMatchers } from '../../lib/sites/validate';
 
@@ -35,6 +50,10 @@ const app = document.getElementById('app') as HTMLElement;
 const local = browserAreas().local;
 const KV_REPO_SITES = 'repoSitesHandle';
 const PICK_DELAY_MS = 5000;
+const PREVIEW_POLL_MS = 3000;
+/** Roles that only match while something is happening (an ad, a dialog). */
+const TRANSIENT_ROLES: readonly RoleName[] = ['adIndicator', 'skip', 'continuePrompt'];
+const isMetaRole = (role: RoleName) => (META_ROLES as readonly string[]).includes(role);
 
 interface Editor {
   role: RoleName;
@@ -54,7 +73,23 @@ const state: {
   picking: RoleName | null;
   editor: Editor | null;
   message: string | null;
-} = { tabId: null, frameId: 0, report: null, error: null, picking: null, editor: null, message: null };
+  /** The role whose "Remove unmatched" is waiting for a yes. */
+  confirmRemove: RoleName | null;
+  /** The last removal, until something else changes the overrides. */
+  undo: { siteId: string; before: SiteOverride | undefined; label: string } | null;
+  metadata: PageMetadata | null;
+} = {
+  tabId: null,
+  frameId: 0,
+  report: null,
+  error: null,
+  picking: null,
+  editor: null,
+  message: null,
+  confirmRemove: null,
+  undo: null,
+  metadata: null,
+};
 
 // --- DOM helpers ---------------------------------------------------------------------
 
@@ -94,6 +129,12 @@ async function toFrame<T>(message: unknown): Promise<T> {
   return (await browser.tabs.sendMessage(state.tabId, message, { frameId: state.frameId })) as T;
 }
 
+/** The top frame, whatever frame the last pick happened in. */
+async function toTop<T>(message: unknown): Promise<T> {
+  if (state.tabId === null) throw new Error('No tab');
+  return (await browser.tabs.sendMessage(state.tabId, message, { frameId: 0 })) as T;
+}
+
 function toAllFrames(message: unknown): void {
   if (state.tabId !== null) browser.tabs.sendMessage(state.tabId, message).catch(() => undefined);
 }
@@ -108,12 +149,15 @@ async function refresh(): Promise<void> {
     state.error = 'Wtv isn’t running on this page. Enable it from the toolbar popup, or reload the page.';
   }
   render();
+  await refreshPreview();
 }
 
 // --- picking / testing / saving -----------------------------------------------------------
 
 function startPick(role: RoleName, delayMs: number): void {
   state.frameId = 0;
+  state.undo = null;
+  state.confirmRemove = null;
   state.picking = role;
   state.editor = null;
   state.message = delayMs > 0 ? 'Get the element on screen; picking starts in 5 s.' : 'Click the element in the page.';
@@ -183,6 +227,7 @@ async function save(): Promise<void> {
   await saveOverrideStore(local, next);
 
   state.editor = null;
+  state.undo = null;
   state.message = `Saved ${ROLE_LABELS[ed.role].toLowerCase()} selector for ${siteId}.`;
   // Let the content script pick up the storage change before re-reading.
   setTimeout(() => void refresh(), 400);
@@ -193,7 +238,44 @@ async function resetRole(role: RoleName): Promise<void> {
   const { siteId } = siteIdentity(state.report);
   const store = await loadOverrideStore(local);
   await saveOverrideStore(local, withoutRoleOverride(store, siteId, role));
+  state.undo = null;
+  state.confirmRemove = null;
   state.message = `${ROLE_LABELS[role]} reset to the built-in selectors.`;
+  setTimeout(() => void refresh(), 400);
+}
+
+/** Remove selectors from a role (as an override), keeping the site's previous overrides for Undo. */
+async function removeSelectors(role: RoleName, selectors: readonly string[]): Promise<void> {
+  if (!state.report || selectors.length === 0) return;
+  const { siteId, bundled } = siteIdentity(state.report);
+  const store = await loadOverrideStore(local);
+  const before = store[siteId] ? structuredClone(store[siteId]) : undefined;
+  const next = withSelectorsRemoved(store, bundled, siteId, role, selectors);
+  state.confirmRemove = null;
+  if (next === store) {
+    state.message = 'Nothing to remove.';
+    render();
+    return;
+  }
+  await saveOverrideStore(local, next);
+  const what = selectors.length === 1 ? `“${selectors[0]}”` : `${selectors.length} selectors`;
+  const left = resolveSite(siteId, bundled, next[siteId])?.config.roles[role]?.length ?? 0;
+  const off = left === 0 && bundled?.roles[role]?.length ? ` ${ROLE_LABELS[role]} is now off for ${siteId}.` : '';
+  state.message = null;
+  state.undo = { siteId, before, label: `Removed ${what} from ${ROLE_LABELS[role].toLowerCase()}.${off}` };
+  setTimeout(() => void refresh(), 400);
+}
+
+async function undoRemove(): Promise<void> {
+  const undo = state.undo;
+  if (!undo) return;
+  const store = await loadOverrideStore(local);
+  const next = { ...store };
+  if (undo.before) next[undo.siteId] = undo.before;
+  else delete next[undo.siteId];
+  await saveOverrideStore(local, next);
+  state.undo = null;
+  state.message = 'Removal undone.';
   setTimeout(() => void refresh(), 400);
 }
 
@@ -282,17 +364,24 @@ document.addEventListener('keydown', (e) => {
   toAllFrames({ type: PICK_KEY, key });
 });
 
-browser.tabs.onActivated.addListener(() => {
-  cancelPick();
+function forgetPage(): void {
   state.editor = null;
   state.frameId = 0;
+  state.undo = null;
+  state.confirmRemove = null;
+  state.metadata = null;
+  shownMetadata = '';
+}
+
+browser.tabs.onActivated.addListener(() => {
+  cancelPick();
+  forgetPage();
   void refresh();
 });
 
 browser.tabs.onUpdated.addListener((tabId, info) => {
   if (tabId === state.tabId && info.status === 'complete') {
-    state.editor = null;
-    state.frameId = 0;
+    forgetPage();
     void refresh();
   }
 });
@@ -300,7 +389,9 @@ browser.tabs.onUpdated.addListener((tabId, info) => {
 // --- rendering ---------------------------------------------------------------------------
 
 function statusChip(r: RoleReport): HTMLElement {
-  if (r.matchers.length === 0) return el('span', { className: 'chip', text: 'not set' });
+  if (r.matchers.length === 0) {
+    return el('span', { className: 'chip', text: r.source === 'override' ? 'removed · yours' : 'not set' });
+  }
   if (r.matchedIndex === null) return el('span', { className: 'chip bad', text: 'no match' });
   const which = r.matchers.length > 1 ? ` #${r.matchedIndex + 1}` : '';
   return el('span', { className: 'chip ok', text: `matched${which}${r.source === 'override' ? ' · yours' : ''}` });
@@ -311,14 +402,49 @@ function selectorList(r: RoleReport): HTMLElement | null {
   return el(
     'ul',
     { className: 'selectors' },
-    ...r.matchers.map((m, i) =>
-      el(
+    ...r.matchers.map((m, i) => {
+      const remove = button('✕', () => removeSelectors(r.role, [m.selector]), 'remove');
+      remove.title = 'Remove this selector';
+      remove.setAttribute('aria-label', `Remove selector ${m.selector}`);
+      remove.disabled = state.picking !== null;
+      return el(
         'li',
         {},
         el('span', { className: i === r.matchedIndex ? 'hit' : m.satisfied ? '' : 'miss', text: m.satisfied ? '✓' : '✗' }),
         el('code', { text: m.selector }),
         el('span', { className: 'count', text: m.error ? 'invalid' : `${m.count} · ${m.when}` }),
-      ),
+        remove,
+      );
+    }),
+  );
+}
+
+const unmatched = (r: RoleReport) => r.matchers.filter((m) => m.count === 0).map((m) => m.selector);
+
+function confirmRemoveView(r: RoleReport): HTMLElement {
+  const list = unmatched(r);
+  const all = list.length === r.matchers.length;
+  const lines = [
+    `Remove ${list.length === 1 ? 'the selector' : `the ${list.length} selectors`} that match nothing on this page right now?`,
+  ];
+  if (TRANSIENT_ROLES.includes(r.role)) {
+    lines.push(
+      `${ROLE_LABELS[r.role]} selectors normally match nothing until it shows (during an ad or a dialog), so only do this while it's on screen.`,
+    );
+  }
+  if (all) lines.push(`That's all of them, which turns ${ROLE_LABELS[r.role].toLowerCase()} off for this site.`);
+  return el(
+    'div',
+    { className: 'warn confirm' },
+    ...lines.map((text) => el('p', { text })),
+    el(
+      'div',
+      { className: 'actions' },
+      button(`Remove ${list.length}`, () => removeSelectors(r.role, list), 'primary'),
+      button('Cancel', () => {
+        state.confirmRemove = null;
+        render();
+      }),
     ),
   );
 }
@@ -328,6 +454,7 @@ function editorView(ed: Editor): HTMLElement {
   input.type = 'text';
   input.value = ed.selector;
   input.spellcheck = false;
+  input.dataset.key = 'selector';
   input.setAttribute('aria-label', 'Selector');
   input.addEventListener('input', () => {
     ed.selector = input.value;
@@ -387,6 +514,16 @@ function editorView(ed: Editor): HTMLElement {
           : `${t.count} match${t.count === 1 ? '' : 'es'} on the page${t.satisfied ? '' : ' · condition not met right now'} (outlined in green).`,
       })
     : null;
+  const reads =
+    t && !t.error && t.value !== undefined
+      ? el('p', { className: 'reads', text: t.value ? `Reads: “${t.value.slice(0, 240)}”` : 'Reads: nothing (no text).' })
+      : null;
+  const metaNote = isMetaRole(ed.role)
+    ? el('p', {
+        className: 'note',
+        text: 'Once saved, your selector is used ahead of the page’s own data (JSON-LD, OpenGraph, meta tags). See Preview above.',
+      })
+    : null;
 
   return el(
     'div',
@@ -396,6 +533,8 @@ function editorView(ed: Editor): HTMLElement {
     input,
     el('div', { className: 'row' }, when, el('label', { className: 'check' }, keep, document.createTextNode('Keep the current selectors as fallbacks'))),
     testLine,
+    reads,
+    metaNote,
     el(
       'div',
       { className: 'actions' },
@@ -420,12 +559,22 @@ function roleView(r: RoleReport): HTMLElement {
     const pick = button('Pick', () => startPick(r.role, 0));
     const later = button('Pick in 5 s', () => startPick(r.role, PICK_DELAY_MS));
     const type = button('Type selector', () => {
+      state.confirmRemove = null;
       state.editor = { role: r.role, element: null, candidates: [], selector: '', when: null, keepExisting: true, test: null };
       state.frameId = 0;
       render();
     });
     for (const b of [pick, later, type]) b.disabled = busy;
     actions.append(pick, later, type);
+    const misses = unmatched(r).length;
+    if (misses > 0 && state.confirmRemove !== r.role) {
+      const b = button(`Remove unmatched (${misses})`, () => {
+        state.confirmRemove = r.role;
+        render();
+      });
+      b.disabled = busy;
+      actions.append(b);
+    }
     if (r.source === 'override') actions.append(button('Reset', () => resetRole(r.role)));
   }
 
@@ -436,11 +585,163 @@ function roleView(r: RoleReport): HTMLElement {
     el('p', { className: 'note', text: ROLE_HINTS[r.role] }),
     selectorList(r),
     actions,
+    state.confirmRemove === r.role && !picking && unmatched(r).length > 0 ? confirmRemoveView(r) : null,
     editing && state.editor ? editorView(state.editor) : null,
   );
 }
 
+// --- metadata preview -------------------------------------------------------------------
+
+const FIELD_LABELS: Record<MetaField, string> = {
+  title: 'Title',
+  creator: 'Creator',
+  description: 'Description',
+  keywords: 'Keywords',
+  thumbnail: 'Thumbnail',
+  duration: 'Duration',
+};
+
+/** Kept across renders, so its open state and contents survive; refreshed on its own. */
+const previewBox = el('details', { className: 'preview' });
+const PREVIEW_OPEN_KEY = 'wtv.previewOpen';
+try {
+  previewBox.open = localStorage.getItem(PREVIEW_OPEN_KEY) !== '0';
+} catch {
+  previewBox.open = true;
+}
+previewBox.addEventListener('toggle', () => {
+  try {
+    localStorage.setItem(PREVIEW_OPEN_KEY, previewBox.open ? '1' : '0');
+  } catch {
+    // Not important.
+  }
+});
+/** Fields whose "other values" list is open. */
+const openFields = new Set<MetaField>();
+let shownMetadata = '';
+
+function formatDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+function displayValue(field: MetaField, value: string): string {
+  return field === 'duration' ? formatDuration(Number(value)) : value;
+}
+
+function fieldView(meta: PageMetadata, field: MetaField): HTMLElement {
+  const [winner, ...others] = meta.candidates[field];
+  const value: Node = !winner
+    ? el('span', { className: 'note', text: '—' })
+    : field === 'thumbnail'
+      ? Object.assign(el('img'), { src: winner.value, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' })
+      : el('span', { className: `value ${field}`, text: displayValue(field, winner.value) });
+  let chip: HTMLElement | null = null;
+  if (winner) {
+    chip = el('span', { className: `chip${winner.source === 'yours' ? ' ok' : ''}`, text: META_SOURCE_LABELS[winner.source] });
+    chip.title = winner.detail;
+  }
+
+  let more: HTMLDetailsElement | null = null;
+  if (others.length > 0) {
+    const details = el(
+      'details',
+      { className: 'others' },
+      el('summary', { text: `${others.length} other value${others.length === 1 ? '' : 's'}` }),
+      el(
+        'ul',
+        {},
+        ...others.map((c) =>
+          el(
+            'li',
+            {},
+            el('span', { className: 'chip', text: `${META_SOURCE_LABELS[c.source]} · ${c.detail}` }),
+            el('span', { className: 'value', text: displayValue(field, c.value) }),
+          ),
+        ),
+      ),
+    );
+    details.open = openFields.has(field);
+    details.addEventListener('toggle', () => {
+      if (details.open) openFields.add(field);
+      else openFields.delete(field);
+    });
+    more = details;
+  }
+  return el(
+    'div',
+    { className: 'field' },
+    el('div', { className: 'field-head' }, el('span', { className: 'field-name', text: FIELD_LABELS[field] }), chip),
+    value,
+    more,
+  );
+}
+
+function renderPreview(): void {
+  const meta = state.metadata;
+  const children: (Node | null)[] = [
+    el('summary', { text: 'Preview' }),
+    el('p', {
+      className: 'note',
+      text: 'What Wtv reads about this page: your selectors first, then the page’s own data, then the site’s selectors. Hover a source for details.',
+    }),
+  ];
+  if (!meta) {
+    children.push(el('p', { className: 'note', text: 'Nothing read yet.' }));
+  } else {
+    if (meta.staleHead) {
+      children.push(
+        el('p', {
+          className: 'note',
+          text: 'This page’s OpenGraph and meta tags describe a page you were on earlier (the site switched pages without reloading), so they’re ignored.',
+        }),
+      );
+    }
+    children.push(...META_FIELDS.map((f) => fieldView(meta, f)));
+  }
+  previewBox.replaceChildren(...children.filter((c): c is Node => c !== null));
+}
+
+async function refreshPreview(): Promise<void> {
+  if (!state.report) return;
+  try {
+    state.metadata = await toTop<PageMetadata>({ type: PICK_METADATA });
+  } catch {
+    state.metadata = null;
+  }
+  const key = JSON.stringify(state.metadata);
+  if (key === shownMetadata) return;
+  shownMetadata = key;
+  renderPreview();
+}
+
+setInterval(() => {
+  if (document.visibilityState === 'visible' && state.report && !state.picking) void refreshPreview();
+}, PREVIEW_POLL_MS);
+
+// --- rendering ---------------------------------------------------------------------------
+
+/** Re-rendering replaces the inputs; put the caret back where it was. */
+function keepingFocus(draw: () => void): void {
+  const active = document.activeElement;
+  const key = active instanceof HTMLElement ? active.dataset.key : undefined;
+  const input = active instanceof HTMLInputElement ? active : null;
+  const range = input ? ([input.selectionStart, input.selectionEnd] as const) : null;
+  draw();
+  if (!key) return;
+  const next = app.querySelector<HTMLElement>(`[data-key="${key}"]`);
+  next?.focus();
+  if (next instanceof HTMLInputElement && range) next.setSelectionRange(range[0], range[1]);
+}
+
 function render(): void {
+  keepingFocus(draw);
+}
+
+function draw(): void {
   const report = state.report;
   if (!report) {
     app.replaceChildren(
@@ -468,7 +769,12 @@ function render(): void {
           text: `No site config here. Saving a selector creates one for ${report.host.replace(/^www\./, '')}.`,
         })
       : null,
-    state.message ? el('p', { className: 'warn', text: state.message }) : null,
+    state.undo
+      ? el('div', { className: 'warn undo' }, el('span', { text: state.undo.label }), button('Undo', undoRemove))
+      : state.message
+        ? el('p', { className: 'warn', text: state.message })
+        : null,
+    previewBox,
     ...report.roles.map(roleView),
     el(
       'footer',

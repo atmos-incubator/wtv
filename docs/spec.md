@@ -84,8 +84,15 @@ Each step is reviewed and committed before the next one starts.
 - **`when` condition** per selector, since many sites leave ad nodes in the DOM and only hide them:
     - `exists` or `visible`. Defaults per role (`adIndicator`, `skip`, `playButton` → `visible`; others → `exists`).
     - Class / attribute conditions are written in the CSS itself (e.g. `#movie_player.ad-showing`), so no separate detector types.
-- **Metadata extraction order:** JSON-LD `VideoObject` → OpenGraph → `meta` / `itemprop` → role selectors.
-    - On SPAs (YouTube) OpenGraph tags go stale after in-app navigation, so verify the URL matches before trusting them.
+- **Metadata extraction** (`src/lib/metadata/`: `extract.ts` pure + tested over collected page facts; `page.ts` collects them from the DOM): title, creator, description, keywords, thumbnail, duration. Order per field:
+    1. The user's own selector for the role (an override saved in the side panel: they picked it because the page's data was wrong).
+    2. JSON-LD (`VideoObject` first, then other media and article types; `@graph` and nested items like an article's `video` included).
+    3. OpenGraph (`og:*`, `video:*`, `article:*`).
+    4. Other meta tags: `name=` (`description`, `keywords`, `author`, `twitter:*`) and microdata (`itemprop`, only on media / article items).
+    5. The site config's selector for the role.
+    6. `document.title` (title only, without a leading "(3)" notification count).
+    - On SPAs (YouTube) the `<head>` goes stale after in-app navigation: when `og:url` (else `<link rel=canonical>`) names another page, every OpenGraph and `name=` tag is ignored. A JSON-LD item whose `url` is another page of the same site is ignored too; one on another site (an embedded video) is kept.
+    - Used by the popup's Media row (title, creator) and the side panel Preview; the media library (step 14 of round 2) will store it.
 - **Overrides:**
     - Stored per role, not per site.
     - Each override records `baseHash`: a hash of the bundled role it replaced (`none` if the bundled config had no such role). No manual version bumping.
@@ -156,6 +163,11 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 
 - `chrome.sidePanel` UI to pick DOM nodes and generate unique CSS selectors for each role. Opened from the popup's **Fix selectors…**. Ships in the store build (users fix their own session); only the repo writer is dev-only.
 - Per role: current selectors with live match counts and which one wins, source (built-in / yours), **Pick**, **Pick in 5 s**, **Type selector**, **Reset**.
+- **Removing selectors:** a **✕** on each selector row, and **Remove unmatched (n)** per role (every selector with 0 matches right now; asks first, and warns for roles that only show during an ad or dialog). Removal saves an override with the rest (`withSelectorsRemoved`, pure + tested):
+    - What's left equals the built-in list: the override is dropped instead (same as Reset).
+    - Nothing left of a built-in role: an empty override, which turns the role off for that site ("removed · yours") until Reset or a release that changes the role.
+    - **Undo** restores the site's overrides as they were before the last removal.
+- **Preview** (collapsible, at the top): the metadata Wtv reads from the page (see Metadata below), each value with its source; hover the source for the exact tag / JSON-LD key, and expand "other values" to see what every other source says. Refreshed every 3 s while the panel is visible. While editing a metadata role's selector, the test line shows what it reads.
 - Generate **several ranked candidates** per pick (own generator in `src/lib/picker/`, no dependency):
     - Prefer: `id`, test ids (`data-testid` etc.), `itemprop`, other `data-*`, `name`.
     - Then: stable class names (singles and pairs), then "inside a stable ancestor".

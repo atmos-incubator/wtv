@@ -6,6 +6,7 @@ import {
   roleHash,
   validateOverrideStore,
   withRoleOverride,
+  withSelectorsRemoved,
   withoutRoleOverride,
   type OverrideStore,
 } from './overrides';
@@ -132,6 +133,61 @@ describe('store editing', () => {
   });
 });
 
+describe('withSelectorsRemoved', () => {
+  const two: SiteConfig = {
+    ...bundled,
+    roles: { ...bundled.roles, skip: [{ selector: '.skip' }, { selector: '.skip-old', when: 'exists' }] },
+  };
+  const resolved = (store: OverrideStore) => resolveSite('example.com', two, store['example.com']);
+
+  it('removes a built-in selector as an override of the rest', () => {
+    const store = withSelectorsRemoved({}, two, 'example.com', 'skip', ['.skip-old'], 5);
+    expect(store['example.com']?.roles.skip).toEqual({
+      matchers: [{ selector: '.skip' }],
+      baseHash: roleHash(two.roles.skip),
+      savedAt: 5,
+    });
+    expect(resolved(store)?.config.roles.skip).toEqual([{ selector: '.skip' }]);
+  });
+
+  it('turns a built-in role off when every selector is removed, and survives validation', () => {
+    const store = withSelectorsRemoved({}, two, 'example.com', 'skip', ['.skip', '.skip-old']);
+    expect(store['example.com']?.roles.skip?.matchers).toEqual([]);
+    const r = resolved(validateOverrideStore(JSON.parse(JSON.stringify(store))).store);
+    expect(r?.config.roles.skip).toBeUndefined();
+    expect(r?.sources.skip).toBe('override');
+  });
+
+  it('drops the override when what is left is the built-in list', () => {
+    let store = withRoleOverride({}, two, 'example.com', 'skip', [{ selector: '.mine' }, ...two.roles.skip!]);
+    store = withSelectorsRemoved(store, two, 'example.com', 'skip', ['.mine']);
+    expect(store).toEqual({});
+  });
+
+  it('removes from the user’s own list, and drops a role the built-in config lacks once empty', () => {
+    let store = withRoleOverride({}, two, 'example.com', 'title', [{ selector: 'h1' }, { selector: 'h2' }]);
+    store = withSelectorsRemoved(store, two, 'example.com', 'title', ['h2']);
+    expect(store['example.com']?.roles.title?.matchers).toEqual([{ selector: 'h1' }]);
+    store = withSelectorsRemoved(store, two, 'example.com', 'title', ['h1']);
+    expect(store).toEqual({});
+  });
+
+  it('keeps a user-defined site’s name and domains', () => {
+    let store = withRoleOverride({}, undefined, 'vimeo.com', 'video', [{ selector: 'a' }, { selector: 'b' }], {
+      name: 'Vimeo',
+      domains: ['vimeo.com'],
+    });
+    store = withSelectorsRemoved(store, undefined, 'vimeo.com', 'video', ['b']);
+    expect(store['vimeo.com']).toMatchObject({ name: 'Vimeo', domains: ['vimeo.com'] });
+    expect(resolveSite('vimeo.com', undefined, store['vimeo.com'])?.config.roles.video).toEqual([{ selector: 'a' }]);
+  });
+
+  it('is a no-op for selectors that are not there', () => {
+    const store = {};
+    expect(withSelectorsRemoved(store, two, 'example.com', 'skip', ['.nope'])).toBe(store);
+  });
+});
+
 describe('pruneStaleOverrides', () => {
   it('removes stale roles and reports them', () => {
     let store = withRoleOverride({}, bundled, 'example.com', 'skip', fix, {}, 1);
@@ -172,6 +228,13 @@ describe('validateOverrideStore', () => {
     expect(Object.keys(store)).toEqual(['example.com']);
     expect(Object.keys(store['example.com']?.roles ?? {})).toEqual(['video']);
     expect(warnings.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('drops an empty override with no built-in role behind it', () => {
+    const { store } = validateOverrideStore({
+      'example.com': { roles: { title: { matchers: [], baseHash: NO_BASE, savedAt: 1 } } },
+    });
+    expect(store).toEqual({});
   });
 
   it('treats a non-object as empty', () => {

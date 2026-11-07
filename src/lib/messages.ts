@@ -62,6 +62,8 @@ export interface FrameStatus {
   media: MediaStatus;
   ads: AdStatus | null;
   overlay: { adPicturesHidden: boolean };
+  /** Top frame only (null elsewhere): what the page says it's showing. */
+  metadata: { title: string | null; creator: string | null } | null;
 }
 
 export function isStatusRequest(msg: unknown): msg is StatusRequest {

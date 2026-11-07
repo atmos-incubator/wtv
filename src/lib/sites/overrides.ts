@@ -15,6 +15,7 @@ import { isHostname, isRecord, isRoleName, validateMatchers } from './validate';
 export const NO_BASE = 'none';
 
 export interface RoleOverride {
+  /** Empty: every built-in selector of the role was removed, so the role is off. */
   matchers: Matcher[];
   baseHash: string;
   savedAt: number;
@@ -98,7 +99,8 @@ export function resolveSite(
   const stale: StaleOverride[] = [];
   for (const [role, ov] of Object.entries(override?.roles ?? {}) as [RoleName, RoleOverride][]) {
     if (isOverrideCurrent(bundled, role, ov)) {
-      config.roles[role] = structuredClone(ov.matchers);
+      if (ov.matchers.length > 0) config.roles[role] = structuredClone(ov.matchers);
+      else delete config.roles[role];
       sources[role] = 'override';
     } else {
       stale.push({ siteId, role, savedAt: ov.savedAt });
@@ -152,6 +154,29 @@ export function withRoleOverride(
   return { ...store, [siteId]: entry };
 }
 
+/**
+ * Remove selectors from a role's effective list (bundled or override). Pure.
+ *   - What's left equals the bundled list: the override is dropped (same as Reset).
+ *   - Nothing left of a bundled role: an empty override, which turns the role off until
+ *     Reset or a release that changes it.
+ *   - Nothing left of a role the bundled config lacks: the override is dropped.
+ */
+export function withSelectorsRemoved(
+  store: OverrideStore,
+  bundled: SiteConfig | undefined,
+  siteId: string,
+  role: RoleName,
+  selectors: readonly string[],
+  now: number = Date.now(),
+): OverrideStore {
+  const current = resolveSite(siteId, bundled, store[siteId])?.config.roles[role] ?? [];
+  const drop = new Set(selectors);
+  const left = current.filter((m) => !drop.has(m.selector));
+  if (left.length === current.length) return store;
+  if (roleHash(left) === roleHash(bundled?.roles[role])) return withoutRoleOverride(store, siteId, role);
+  return withRoleOverride(store, bundled, siteId, role, left, {}, now);
+}
+
 /** Remove one role override (revert to bundled). Pure. */
 export function withoutRoleOverride(store: OverrideStore, siteId: string, role: RoleName): OverrideStore {
   const existing = store[siteId];
@@ -201,7 +226,8 @@ export function validateOverrideStore(raw: unknown): { store: OverrideStore; war
       }
       const errors: string[] = [];
       const matchers = validateMatchers(ov.matchers, `${path}.matchers`, errors, warnings);
-      if (errors.length > 0 || matchers.length === 0) {
+      // Empty is valid only as "removed every built-in selector" (it has a base).
+      if (errors.length > 0 || (matchers.length === 0 && ov.baseHash === NO_BASE)) {
         warnings.push(...errors, `${path}: invalid selectors, override dropped`);
         continue;
       }

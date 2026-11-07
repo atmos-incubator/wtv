@@ -246,11 +246,13 @@ async function frameStatus(tabId: number): Promise<FrameStatus | null> {
   }
 }
 
-function describeMedia(status: MediaStatus | null, running: boolean): Node[] {
+function describeMedia(status: MediaStatus | null, running: boolean, metadata: FrameStatus['metadata']): Node[] {
   if (!status) {
     return [note(running ? 'Wtv isn’t running in this tab yet. Reload the page.' : 'Not active on this page.')];
   }
   const nodes: Node[] = [];
+  if (metadata?.title) nodes.push(el('div', { className: 'media-title', text: metadata.title }));
+  if (metadata?.creator) nodes.push(note(metadata.creator));
   const p = status.primary;
   if (!p) {
     nodes.push(note(`No media detected yet (${status.candidates} candidates).`));
@@ -422,7 +424,7 @@ async function render(): Promise<void> {
     el('div', { text: support }),
     ...(actions.childElementCount > 0 ? [actions] : []),
     ...notes,
-    row('Media', ...describeMedia(status?.media ?? null, granted), ...healthNotes, ...selectorsRow),
+    row('Media', ...describeMedia(status?.media ?? null, granted, status?.metadata ?? null), ...healthNotes, ...selectorsRow),
     ...(status && view ? [viewRow(tabId, view, shortcuts)] : []),
     playlistRow({ id: tabId, url: tab.url, title: tab.title }, runner, playlists),
     ...(status ? [row('Ads', ...describeAds(status.ads, Boolean(tab.mutedInfo?.muted), tabId, status.overlay?.adPicturesHidden ?? false))] : []),
