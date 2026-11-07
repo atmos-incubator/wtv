@@ -23,6 +23,9 @@
  *     <video>, so an ad ending looks like the video ending);
  *   - every frame with a primary video seeks it to the entry's start time (`t=`) once
  *     that's safe (seek.ts: after metadata, never during an ad);
+ *   - at the entry's end time (`end=` / `dur=`, or the hash's `e=`) the media pauses and,
+ *     in a playlist, reports `ended`. An end time without a start time starts from 0, so a
+ *     site resuming where the viewer left off can't skip past it;
  *   - the entry's `[ads]` program replaces the default for the ad overlay, and
  *     `view=pictures` entries have their `[show]` program cover the media throughout.
  */
@@ -32,7 +35,7 @@ import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
 import { EVT_BLOCKED } from '../media/protocol';
 import { parseWtvHash, stripWtvHash, type WtvHash } from './hash';
-import { seekDecision } from './seek';
+import { endState, seekDecision } from './seek';
 import type { PlayResult } from '../media/registry';
 import type { ProgramItem } from '../overlay/program';
 import type { ViewMode } from './format';
@@ -54,12 +57,6 @@ const SITE_AUTOPLAY_GRACE_MS = 2000;
 const ATTEMPT_DELAYS_MS = [0, 1500, 3000];
 /** Bridged media can't report its play() result; check whether it's playing after this. */
 const BRIDGED_CHECK_MS = 600;
-/** Report near-end this close to the end (YouTube's end screen starts ~20 s out). */
-const NEAR_END_S = 20;
-/** Treat playback this close to the end as ended (some players stop just short). */
-const END_SLACK_S = 0.25;
-/** Shorter media isn't the show (and has no meaningful near-end). */
-const MIN_SHOW_S = 30;
 const WATCH_EVENTS = [
   'playing',
   'ended',
@@ -107,6 +104,10 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   let fromHash = false;
   /** Where to seek to, from the entry (source of truth) or the hash. */
   let startS: number | null = null;
+  /** Where to stop, from the entry or the hash. */
+  let endS: number | null = null;
+  /** Paused at the end time already (once: the viewer may play on). */
+  let endDone = false;
   let seekDone = false;
   /** Since when the primary has been playing with no ad showing (ms epoch), else null. */
   let cleanSince: number | null = null;
@@ -290,15 +291,25 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       considerStarting();
       return;
     }
-    const d = el.duration;
-    if (adActive() || el.loop || !Number.isFinite(d) || d < 1) return;
+    if (adActive() || el.loop) return;
     if (type === 'ended') {
-      report('ended');
+      if (Number.isFinite(el.duration) && el.duration >= 1) report('ended');
       return;
     }
-    const left = d - el.currentTime;
-    if (d >= MIN_SHOW_S && left <= NEAR_END_S) report('near-end');
-    if (el.currentTime > 0 && left <= END_SLACK_S) report('ended');
+    const state = endState({
+      currentTime: el.currentTime,
+      duration: el.duration,
+      endS: endDone ? null : endS,
+      seekDone,
+    });
+    if (state === 'end-time') {
+      endDone = true;
+      console.info(`[wtv] reached the end time, ${endS}s`);
+      el.pause();
+      report('ended');
+    } else if (state) {
+      report(state);
+    }
   }
 
   function watchPrimary(): void {
@@ -369,7 +380,9 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   function begin(hash: WtvHash | null): void {
     entry = null;
     fromHash = hash !== null;
-    startS = hash?.t ?? null;
+    endS = hash?.end ?? null;
+    startS = hash?.t ?? (endS !== null ? 0 : null);
+    endDone = false;
     seekDone = false;
     cleanSince = null;
     sent.clear();
@@ -382,7 +395,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       .then((raw: unknown) => {
         entry = parseEntryInfo(raw);
         if (!entry) return;
-        startS = entry.startS;
+        endS = entry.endS;
+        startS = entry.startS ?? (endS !== null ? 0 : null);
         if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });
         else showBlackout(entry.title ?? (document.title || location.hostname), true);
         watchPrimary();

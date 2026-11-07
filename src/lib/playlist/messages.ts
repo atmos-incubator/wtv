@@ -9,8 +9,9 @@
  *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
  *
  *   playlists page | popup → background
- *     PL_COMMAND { op: 'start', playlistId, index, tv }    plays in a new tab
- *     PL_COMMAND { op: 'next' | 'previous' | 'stop' | 'resume', tabId }
+ *     PL_COMMAND { op: 'start', playlistId, index, tv, shuffle, loop }   plays in a new tab
+ *                (index null: from the top, or a random entry when shuffling)
+ *     PL_COMMAND { op: 'next' | 'previous' | 'stop' | 'resume' | 'reshuffle', tabId }
  *     PL_STATE   { tabId }          → RunnerSummary | null
  *
  * `gen` changes every time the runner moves to an entry, so late events from the page
@@ -28,7 +29,7 @@ export const PL_STATE = 'wtv/playlist/state';
 export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked'] as const;
 export type MediaEvent = (typeof MEDIA_EVENTS)[number];
 
-export const STEP_OPS = ['next', 'previous', 'stop', 'resume'] as const;
+export const STEP_OPS = ['next', 'previous', 'stop', 'resume', 'reshuffle'] as const;
 export type StepOp = (typeof STEP_OPS)[number];
 
 /** What a frame needs to know about the entry it's showing. */
@@ -39,6 +40,8 @@ export interface EntryInfo {
   playlist: string;
   title: string | null;
   startS: number | null;
+  /** Pause here (seconds of the media's own time); in a playlist, the next entry starts. */
+  endS: number | null;
   /** The entry's ad program; null = the site's images. */
   ads: ProgramItem[] | null;
   /** `pictures`: a slideshow covers the media for the whole entry. */
@@ -50,18 +53,32 @@ export interface EntryInfo {
 export interface RunnerSummary {
   playlistId: string;
   name: string;
+  /** Position in the play order. */
   index: number;
   total: number;
   title: string | null;
   url: string;
   /** The user navigated the tab away from the entry; the runner is waiting for Resume. */
   detached: boolean;
+  shuffle: boolean;
+  /** Next on the last entry starts the next lap. */
+  loop: boolean;
+  lap: number;
 }
 
 export type ContentRequest = { type: typeof PL_HELLO } | { type: typeof PL_MEDIA; gen: number; event: MediaEvent };
 
 export type PageRequest =
-  | { type: typeof PL_COMMAND; op: 'start'; playlistId: string; index: number; tv: boolean }
+  | {
+      type: typeof PL_COMMAND;
+      op: 'start';
+      playlistId: string;
+      /** The entry to start with; null: from the top (shuffled: anywhere). */
+      index: number | null;
+      tv: boolean;
+      shuffle: boolean;
+      loop: boolean;
+    }
   | { type: typeof PL_COMMAND; op: StepOp; tabId: number | null }
   | { type: typeof PL_STATE; tabId: number | null };
 
@@ -86,9 +103,17 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
       return { type: PL_STATE, tabId };
     case PL_COMMAND:
       if (raw.op === 'start') {
-        return typeof raw.playlistId === 'string' && isIndex(raw.index) && typeof raw.tv === 'boolean'
-          ? { type: PL_COMMAND, op: 'start', playlistId: raw.playlistId, index: raw.index, tv: raw.tv }
-          : null;
+        if (typeof raw.playlistId !== 'string' || typeof raw.tv !== 'boolean') return null;
+        if (raw.index !== null && raw.index !== undefined && !isIndex(raw.index)) return null;
+        return {
+          type: PL_COMMAND,
+          op: 'start',
+          playlistId: raw.playlistId,
+          index: isIndex(raw.index) ? raw.index : null,
+          tv: raw.tv,
+          shuffle: raw.shuffle === true,
+          loop: raw.loop === true,
+        };
       }
       return (STEP_OPS as readonly unknown[]).includes(raw.op)
         ? { type: PL_COMMAND, op: raw.op as StepOp, tabId }
@@ -109,7 +134,8 @@ export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
 
 export function parseEntryInfo(raw: unknown): EntryInfo | null {
   if (!isObj(raw)) return null;
-  const { gen, index, total, playlist, title, startS, ads, view, show } = raw;
+  const { gen, index, total, playlist, title, startS, endS, ads, view, show } = raw;
+  const seconds = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
   const program = (v: unknown) =>
     Array.isArray(v) ? v.map(parseProgramItem).filter((i): i is ProgramItem => i !== null) : null;
   if (!isIndex(gen) || !isIndex(index) || !isIndex(total) || typeof playlist !== 'string') return null;
@@ -119,7 +145,8 @@ export function parseEntryInfo(raw: unknown): EntryInfo | null {
     total,
     playlist,
     title: typeof title === 'string' && title ? title : null,
-    startS: typeof startS === 'number' && Number.isFinite(startS) && startS >= 0 ? startS : null,
+    startS: seconds(startS),
+    endS: seconds(endS),
     ads: program(ads),
     view: isViewMode(view) ? view : 'video',
     show: program(show),

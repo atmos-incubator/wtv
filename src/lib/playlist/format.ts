@@ -5,12 +5,14 @@
  * but is preserved):
  *
  *   playlist  := line*
- *   line      := blank | comment | ads | show | view | quote | img | entry
+ *   line      := blank | comment | ads | show | view | shuffle | loop | quote | img | entry
  *   blank     := whitespace only
  *   comment   := "#" any  |  "//" any
  *   ads       := "[ads]"                                  (case-insensitive)
  *   show      := "[show]"                                 (case-insensitive)
  *   view      := "[view" " " mode "]"                     e.g. `[view pictures]`
+ *   shuffle   := "[shuffle]"                              (case-insensitive)
+ *   loop      := "[loop]"                                 (case-insensitive)
  *   quote     := seconds ":" text                         e.g. `20: Take a moment to breathe`
  *   img       := "[img" (" " keyword)? (" " seconds)? "]" e.g. `[img]`, `[img cats]`, `[img cats 10]`
  *   entry     := url ("|" field)*                         url is http(s)
@@ -28,6 +30,14 @@
  * unseen behind a slideshow (music, radio, podcasts). Its pictures are the entry's
  * `[show]` block, else the playlist's `[show]`, else the entry's ads program, else the
  * site's pictures.
+ *
+ * Times: `t=` starts the entry there; `end=` stops it there, or `dur=` that long after the
+ * start. `end=` wins if both are given (flagged). An end at or before the start is
+ * ignored (flagged).
+ *
+ * Order: `[shuffle]` before the first entry plays the playlist in a random order;
+ * `[loop]` after the last entry starts it again when it ends. Both are defaults for the
+ * Play buttons, which can turn them off.
  *
  * Round trip: the document keeps every line's raw text, so serialize(parse(text)) ===
  * text (line endings normalized to the first one found). Structured edits re-render
@@ -50,6 +60,8 @@ export type Line =
   | { kind: 'ads'; raw: string }
   | { kind: 'show'; raw: string }
   | { kind: 'view'; raw: string; mode: string }
+  | { kind: 'shuffle'; raw: string }
+  | { kind: 'loop'; raw: string }
   | { kind: 'quote'; raw: string; durationS: number; text: string }
   | { kind: 'img'; raw: string; keyword: string | null; durationS: number | null }
   | { kind: 'entry'; raw: string; url: string; title: string | null; options: EntryOption[] }
@@ -70,6 +82,8 @@ export interface PlaylistEntry {
   title: string | null;
   /** From `t=`, seconds. */
   startS: number | null;
+  /** From `end=`, else `dur=` after the start; seconds of the media's own time. */
+  endS: number | null;
   /** The entry's own `[ads]` block, else the playlist default, else null (site images). */
   ads: ProgramItem[] | null;
   view: ViewMode;
@@ -90,13 +104,19 @@ export interface CompiledPlaylist {
   defaultAds: ProgramItem[] | null;
   defaultShow: ProgramItem[] | null;
   defaultView: ViewMode;
+  /** `[shuffle]` before the first entry. */
+  shuffle: boolean;
+  /** `[loop]` after the last entry. */
+  loop: boolean;
   problems: Problem[];
 }
 
 const MAX_TEXT = 500;
-const KNOWN_OPTIONS = new Set(['t', 'view']);
+const KNOWN_OPTIONS = new Set(['t', 'end', 'dur', 'view']);
 const ADS_RE = /^\[ads\]$/i;
 const SHOW_RE = /^\[show\]$/i;
+const SHUFFLE_RE = /^\[shuffle\]$/i;
+const LOOP_RE = /^\[loop\]$/i;
 const VIEW_RE = /^\[view\s+([^\]\s]+)\s*\]$/i;
 const IMG_RE = /^\[img(?:\s+([^\]]*?))?\s*\]$/i;
 const QUOTE_RE = /^(\d+(?:\.\d+)?)\s*:\s*(.+)$/;
@@ -143,6 +163,8 @@ export function parseLine(raw: string): Line {
   if (body.startsWith('#') || body.startsWith('//')) return { kind: 'comment', raw };
   if (ADS_RE.test(body)) return { kind: 'ads', raw };
   if (SHOW_RE.test(body)) return { kind: 'show', raw };
+  if (SHUFFLE_RE.test(body)) return { kind: 'shuffle', raw };
+  if (LOOP_RE.test(body)) return { kind: 'loop', raw };
   const view = VIEW_RE.exec(body);
   if (view) return { kind: 'view', raw, mode: view[1]!.toLowerCase() };
 
@@ -157,7 +179,7 @@ export function parseLine(raw: string): Line {
     if (durationS <= 0) return { kind: 'invalid', raw, error: 'quote duration must be more than 0 seconds' };
     return { kind: 'quote', raw, durationS, text: quote[2]!.trim().slice(0, MAX_TEXT) };
   }
-  return { kind: 'invalid', raw, error: 'not a URL, [ads], [show], [view …], [img …], "N: text" or # comment' };
+  return { kind: 'invalid', raw, error: 'not a URL, [ads], [show], [view …], [shuffle], [loop], [img …], "N: text" or # comment' };
 }
 
 export function parsePlaylist(text: string): PlaylistDoc {
@@ -180,6 +202,9 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
   const defaultAds: ProgramItem[] = [];
   const defaultShow: ProgramItem[] = [];
   let defaultView: ViewMode = 'video';
+  let shuffle = false;
+  /** Line of the last `[loop]`; it only counts if no entry follows it. */
+  let loopAt: number | null = null;
   type Draft = Omit<PlaylistEntry, 'ads' | 'view' | 'show'> & {
     view: ViewMode | null;
     ownAds: ProgramItem[];
@@ -195,11 +220,17 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
     switch (line.kind) {
       case 'entry': {
         let startS: number | null = null;
+        let endOpt: EntryOption | null = null;
+        let durOpt: EntryOption | null = null;
         let view: ViewMode | null = null;
         for (const opt of line.options) {
           if (opt.key === 't') {
             startS = parseTimestamp(opt.value);
             if (startS === null) problems.push({ line: at, message: `t=${opt.value} is not a timestamp` });
+          } else if (opt.key === 'end') {
+            endOpt = opt;
+          } else if (opt.key === 'dur') {
+            durOpt = opt;
           } else if (opt.key === 'view') {
             const mode = opt.value.toLowerCase();
             if (isViewMode(mode)) view = mode;
@@ -208,8 +239,13 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
             problems.push({ line: at, message: `unknown option ${opt.key}= (kept, ignored)` });
           }
         }
-        entries.push({ url: line.url, title: line.title, startS, view, line: i, ownAds: [], ownShow: [] });
+        const endS = entryEnd(startS, endOpt, durOpt, (message) => problems.push({ line: at, message }));
+        entries.push({ url: line.url, title: line.title, startS, endS, view, line: i, ownAds: [], ownShow: [] });
         block = null;
+        if (loopAt !== null) {
+          problems.push({ line: loopAt, message: '[loop] goes after the last entry (ignored)' });
+          loopAt = null;
+        }
         break;
       }
       case 'ads':
@@ -226,6 +262,13 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
         } else {
           defaultView = line.mode;
         }
+        break;
+      case 'shuffle':
+        if (last) problems.push({ line: at, message: '[shuffle] goes before the first entry (ignored)' });
+        else shuffle = true;
+        break;
+      case 'loop':
+        loopAt ??= at;
         break;
       case 'quote':
       case 'img': {
@@ -261,8 +304,35 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
     defaultAds: ads,
     defaultShow: show,
     defaultView,
+    shuffle,
+    loop: loopAt !== null && entries.length > 0,
     problems,
   };
+}
+
+/** `end=` (an absolute time) or `dur=` (a length from the start), in seconds. */
+function entryEnd(
+  startS: number | null,
+  endOpt: EntryOption | null,
+  durOpt: EntryOption | null,
+  problem: (message: string) => void,
+): number | null {
+  if (endOpt && durOpt) problem(`end= and dur= both given; using end=${endOpt.value}`);
+  const from = startS ?? 0;
+  if (endOpt) {
+    const endS = parseTimestamp(endOpt.value);
+    if (endS === null) problem(`end=${endOpt.value} is not a timestamp`);
+    else if (endS <= from) problem(`end=${endOpt.value} is not after the start time (ignored)`);
+    else return endS;
+    return null;
+  }
+  if (durOpt) {
+    const durS = parseTimestamp(durOpt.value);
+    if (durS === null) problem(`dur=${durOpt.value} is not a duration`);
+    else if (durS <= 0) problem(`dur=${durOpt.value} must be more than 0 seconds (ignored)`);
+    else return from + durS;
+  }
+  return null;
 }
 
 // --- edits ---------------------------------------------------------------------------

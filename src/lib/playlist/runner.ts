@@ -15,6 +15,12 @@
  * Navigating off the entry *before* near-end is the user doing something else: the
  * runner detaches and waits for Resume instead of hijacking the tab.
  *
+ * An entry with an end time (`end=` / `dur=`) reports `ended` when the media reaches it.
+ *
+ * Order (order.ts): entries play in `order`, which is shuffled once at start when
+ * shuffling, so Previous retraces it. Looping: past the last entry, a new lap starts
+ * (reshuffled when shuffling); otherwise the run finishes.
+ *
  * The playlist is snapshotted when it starts; edits apply the next time it's played.
  */
 import { browser } from 'wxt/browser';
@@ -25,6 +31,7 @@ import { setTvMode } from '../view/controller';
 import { compilePlaylist, parsePlaylist, type ViewMode } from './format';
 import { withWtvHash } from './hash';
 import { sameEntryUrl } from './match';
+import { nextLap, reshuffle, startOrder, validOrder } from './order';
 import {
   PL_APPLY,
   PL_COMMAND,
@@ -45,6 +52,8 @@ interface RunEntry {
   url: string;
   title: string | null;
   startS: number | null;
+  /** Missing in runs started before end times existed. */
+  endS?: number | null;
   ads: ProgramItem[] | null;
   /** Missing in runs started before views existed: video. */
   view?: ViewMode;
@@ -54,8 +63,16 @@ interface RunEntry {
 export interface RunnerState {
   playlistId: string;
   name: string;
+  /** In playlist order. */
   entries: RunEntry[];
+  /** Entry indexes in play order (missing in runs started before shuffle: in order). */
+  order?: number[];
+  /** Position in the play order. */
   index: number;
+  shuffle?: boolean;
+  loop?: boolean;
+  /** Laps started so far, from 1. */
+  lap?: number;
   gen: number;
   /** navigating: waiting for the entry's page. playing: on it. detached: user went elsewhere. */
   phase: 'navigating' | 'playing' | 'detached';
@@ -87,6 +104,16 @@ async function put(tabId: number, state: RunnerState | null): Promise<void> {
   await browser.storage.session.set({ [KEYS.runner]: store });
 }
 
+/** The play order (validated) and the entry at `position` in it. */
+function playOrder(state: RunnerState): number[] {
+  return validOrder(state.order, state.entries.length);
+}
+
+function entryAt(state: RunnerState, position = state.index): RunEntry | undefined {
+  const i = playOrder(state)[position];
+  return i === undefined ? undefined : state.entries[i];
+}
+
 function displayTitle(entry: RunEntry): string {
   if (entry.title) return entry.title;
   try {
@@ -105,24 +132,44 @@ function withoutHash(url: string): string {
 }
 
 async function goTo(tabId: number, state: RunnerState, index: number): Promise<void> {
-  if (index >= state.entries.length) {
-    console.info(`[wtv] playlist "${state.name}" finished in tab ${tabId}`);
-    await put(tabId, null);
-    await toTop(tabId, { type: PL_APPLY, op: 'lift' });
-    return;
+  let from = state;
+  let position = index;
+  if (position >= state.entries.length) {
+    if (!state.loop) {
+      console.info(`[wtv] playlist "${state.name}" finished in tab ${tabId}`);
+      await put(tabId, null);
+      await toTop(tabId, { type: PL_APPLY, op: 'lift' });
+      return;
+    }
+    const lap = (state.lap ?? 1) + 1;
+    console.info(`[wtv] playlist "${state.name}" looping in tab ${tabId}: lap ${lap}`);
+    from = { ...state, order: nextLap(playOrder(state), state.shuffle ?? false), lap };
+    position = 0;
   }
-  const i = Math.max(0, index);
-  const entry = state.entries[i]!;
-  const next: RunnerState = { ...state, index: i, gen: state.gen + 1, phase: 'navigating', currentUrl: null, nearEnd: false };
+  position = Math.max(0, position);
+  const next: RunnerState = {
+    ...from,
+    index: position,
+    gen: state.gen + 1,
+    phase: 'navigating',
+    currentUrl: null,
+    nearEnd: false,
+  };
+  const entry = entryAt(next)!;
   await put(tabId, next);
   // Go dark on the page we're leaving, so its end screen / autoplay never shows.
   await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry) });
-  // The #wtv: hash lets the new page black out (and know its start time) before it
+  // The #wtv: hash lets the new page black out (and know its start / end time) before it
   // paints, without waiting for the hello round trip.
-  await browser.tabs.update(tabId, { url: withWtvHash(entry.url, { t: entry.startS, title: entry.title }) });
+  const hash = { t: entry.startS, end: entry.endS ?? null, title: entry.title };
+  await browser.tabs.update(tabId, { url: withWtvHash(entry.url, hash) });
 }
 
-async function start(playlistId: string, index: number, tv: boolean): Promise<void> {
+async function start(
+  playlistId: string,
+  from: number | null,
+  options: { tv: boolean; shuffle: boolean; loop: boolean },
+): Promise<void> {
   const playlist = await getPlaylist(browserAreas().local, playlistId);
   if (!playlist) throw new Error(`no playlist ${playlistId}`);
   const { entries } = compilePlaylist(parsePlaylist(playlist.text));
@@ -132,19 +179,24 @@ async function start(playlistId: string, index: number, tv: boolean): Promise<vo
   // finds it.
   const tab = await browser.tabs.create({ url: 'about:blank', active: true });
   if (tab.id === undefined) throw new Error('could not open a tab');
+  const { order, index } = startOrder(entries.length, from, options.shuffle);
   const state: RunnerState = {
     playlistId,
     name: playlist.name,
-    entries: entries.map(({ url, title, startS, ads, view, show }) => ({ url, title, startS, ads, view, show })),
-    index: 0,
+    entries: entries.map(({ url, title, startS, endS, ads, view, show }) => ({ url, title, startS, endS, ads, view, show })),
+    order,
+    index,
+    shuffle: options.shuffle,
+    loop: options.loop,
+    lap: 1,
     gen: 0,
     phase: 'navigating',
     currentUrl: null,
     nearEnd: false,
   };
   await put(tab.id, state);
-  if (tv) await setTvMode(tab.id, true);
-  await goTo(tab.id, state, Math.min(index, entries.length - 1));
+  if (options.tv) await setTvMode(tab.id, true);
+  await goTo(tab.id, state, index);
 }
 
 async function step(tabId: number, op: StepOp): Promise<void> {
@@ -157,6 +209,13 @@ async function step(tabId: number, op: StepOp): Promise<void> {
       return goTo(tabId, state, state.index - 1);
     case 'resume':
       return goTo(tabId, state, state.index);
+    case 'reshuffle': {
+      // The current entry keeps playing; what comes after it is new.
+      if (!state.shuffle) return;
+      const play = reshuffle({ order: playOrder(state), index: state.index });
+      await put(tabId, { ...state, ...play });
+      return;
+    }
     case 'stop':
       await put(tabId, null);
       await toTop(tabId, { type: PL_APPLY, op: 'lift' });
@@ -165,7 +224,7 @@ async function step(tabId: number, op: StepOp): Promise<void> {
 }
 
 function onEntry(state: RunnerState, url: string): boolean {
-  const entry = state.entries[state.index];
+  const entry = entryAt(state);
   if (!entry) return false;
   return sameEntryUrl(url, entry.url) || (state.currentUrl !== null && sameEntryUrl(url, state.currentUrl));
 }
@@ -173,7 +232,7 @@ function onEntry(state: RunnerState, url: string): boolean {
 async function hello(tabId: number, frameId: number, url: string): Promise<EntryInfo | null> {
   const state = (await load())[tabId];
   if (!state || state.phase === 'detached') return null;
-  const entry = state.entries[state.index];
+  const entry = entryAt(state);
   if (!entry) return null;
 
   if (frameId === 0) {
@@ -190,6 +249,7 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
     playlist: state.name,
     title: entry.title,
     startS: entry.startS,
+    endS: entry.endS ?? null,
     ads: entry.ads,
     view: entry.view ?? 'video',
     show: entry.show ?? null,
@@ -239,7 +299,7 @@ async function tabUpdated(tabId: number, url: string | undefined, complete: bool
 
 async function summary(tabId: number): Promise<RunnerSummary | null> {
   const state = (await load())[tabId];
-  const entry = state?.entries[state.index];
+  const entry = state && entryAt(state);
   if (!state || !entry) return null;
   return {
     playlistId: state.playlistId,
@@ -249,6 +309,9 @@ async function summary(tabId: number): Promise<RunnerSummary | null> {
     title: entry.title,
     url: entry.url,
     detached: state.phase === 'detached',
+    shuffle: state.shuffle ?? false,
+    loop: state.loop ?? false,
+    lap: state.lap ?? 1,
   };
 }
 
@@ -279,7 +342,10 @@ export function startPlaylistRunner(): void {
         return tabId === null ? undefined : reply(() => summary(tabId));
       }
       case PL_COMMAND: {
-        if (msg.op === 'start') return reply(() => start(msg.playlistId, msg.index, msg.tv).then(() => true));
+        if (msg.op === 'start') {
+          const { playlistId, index, tv, shuffle, loop } = msg;
+          return reply(() => start(playlistId, index, { tv, shuffle, loop }).then(() => true));
+        }
         const tabId = senderTab ?? msg.tabId;
         return tabId === null ? undefined : reply(() => step(tabId, msg.op).then(() => true));
       }

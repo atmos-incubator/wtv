@@ -90,8 +90,19 @@ describe('playlist messages', () => {
       playlistId: 'p',
       index: 0,
       tv: true,
+      // From a page built before shuffle / loop.
+      shuffle: false,
+      loop: false,
     });
+    expect(
+      parsePlaylistRequest({ type: PL_COMMAND, op: 'start', playlistId: 'p', index: null, tv: false, shuffle: true, loop: true }),
+    ).toMatchObject({ index: null, shuffle: true, loop: true });
     expect(parsePlaylistRequest({ type: PL_COMMAND, op: 'start', playlistId: 'p', index: -1, tv: true })).toBeNull();
+    expect(parsePlaylistRequest({ type: PL_COMMAND, op: 'reshuffle', tabId: 2 })).toEqual({
+      type: PL_COMMAND,
+      op: 'reshuffle',
+      tabId: 2,
+    });
     expect(parsePlaylistRequest({ type: PL_COMMAND, op: 'next' })).toEqual({ type: PL_COMMAND, op: 'next', tabId: null });
     expect(parsePlaylistRequest({ type: PL_STATE, tabId: 4 })).toEqual({ type: PL_STATE, tabId: 4 });
     expect(parsePlaylistRequest({ type: 'wtv/view/state' })).toBeNull();
@@ -122,6 +133,8 @@ describe('playlist messages', () => {
       playlist: 'P',
       title: null,
       startS: 97,
+      // From a runner started before end times existed.
+      endS: null,
       ads: [{ kind: 'img', keyword: 'cats', durationS: null }],
       // From a runner started before views existed.
       view: 'video',
@@ -138,6 +151,8 @@ describe('playlist messages', () => {
       }),
     ).toMatchObject({ view: 'pictures', show: [{ kind: 'text', text: 'Now playing', durationS: 10 }] });
     expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', view: 'tv' })?.view).toBe('video');
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', endS: 187 })?.endS).toBe(187);
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', endS: -1 })?.endS).toBeNull();
     expect(parseEntryInfo(null)).toBeNull();
   });
 });

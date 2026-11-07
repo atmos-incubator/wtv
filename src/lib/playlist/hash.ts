@@ -1,16 +1,17 @@
 /**
  * The `#wtv:` hash. Pure.
  *
- *   https://www.youtube.com/watch?v=abc#wtv:t=97&d=Some%20Title
+ *   https://www.youtube.com/watch?v=abc#wtv:t=97&e=187&d=Some%20Title
  *
  *   t   start time (any parseTimestamp format; written as seconds)
+ *   e   end time, same format: the media pauses there (in a playlist, the next entry starts)
  *   d   display title for the blackout (encodeURIComponent, so underscores etc. survive)
  *
  * Namespaced so it can't collide with a site's own hash routing or `t` parameter. The
  * background runner's state is the source of truth for playlists; the hash is the
  * synchronous fast path that lets the top frame black out at document_start, before
  * the background has answered (and before the page paints). It also works on its own:
- * a link with `#wtv:t=…` opens like a TV channel (blackout, start, seek).
+ * a link with `#wtv:t=…` opens like a TV channel (blackout, start, seek, stop at the end).
  *
  * The content script removes it from the address bar once read, so it's one-shot: a
  * reload or a copied URL is the plain page.
@@ -23,6 +24,8 @@ const MAX_TITLE = 500;
 export interface WtvHash {
   /** Seconds. */
   t: number | null;
+  /** Seconds. */
+  end: number | null;
   title: string | null;
 }
 
@@ -37,23 +40,28 @@ function decode(value: string): string {
 /** `location.hash` → params, or null if it isn't a Wtv hash. */
 export function parseWtvHash(hash: string): WtvHash | null {
   if (!hash.startsWith(HASH_PREFIX)) return null;
-  const out: WtvHash = { t: null, title: null };
+  const out: WtvHash = { t: null, end: null, title: null };
   for (const part of hash.slice(HASH_PREFIX.length).split('&')) {
     const eq = part.indexOf('=');
     if (eq <= 0) continue;
     const key = part.slice(0, eq);
     const value = decode(part.slice(eq + 1));
     if (key === 't') out.t = parseTimestamp(value);
+    else if (key === 'e') out.end = parseTimestamp(value);
     else if (key === 'd') out.title = value.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE) || null;
   }
   return out;
 }
 
+const seconds = (s: number | null): string | null =>
+  s !== null && Number.isFinite(s) && s > 0 ? String(Number(s.toFixed(3))) : null;
+
 export function formatWtvHash(params: WtvHash): string {
   const parts: string[] = [];
-  if (params.t !== null && Number.isFinite(params.t) && params.t > 0) {
-    parts.push(`t=${Number(params.t.toFixed(3))}`);
-  }
+  const t = seconds(params.t);
+  const end = seconds(params.end);
+  if (t) parts.push(`t=${t}`);
+  if (end) parts.push(`e=${end}`);
   if (params.title) parts.push(`d=${encodeURIComponent(params.title)}`);
   return HASH_PREFIX + parts.join('&');
 }

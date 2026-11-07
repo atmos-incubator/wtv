@@ -168,7 +168,11 @@ function playlistRow(
   const nodes: Node[] = [];
 
   if (runner) {
-    nodes.push(el('div', { text: `${runner.name} · ${runner.index + 1} / ${runner.total}` }));
+    const mode = [runner.shuffle && 'shuffled', runner.loop && `looping${runner.lap > 1 ? `, lap ${runner.lap}` : ''}`];
+    const modeText = mode.filter(Boolean).join(' · ');
+    nodes.push(
+      el('div', { text: `${runner.name} · ${runner.index + 1} / ${runner.total}${modeText ? ` · ${modeText}` : ''}` }),
+    );
     nodes.push(note(runner.title ?? runner.url));
     const controls = el('div', { className: 'actions' });
     const step = (text: string, op: StepOp, primary = false) => {
@@ -187,7 +191,8 @@ function playlistRow(
       step('Resume', 'resume', true);
     } else {
       if (runner.index > 0) step('⏮ Previous', 'previous');
-      step(runner.index + 1 < runner.total ? 'Next ⏭' : 'Finish', 'next', true);
+      step(runner.loop || runner.index + 1 < runner.total ? 'Next ⏭' : 'Finish', 'next', true);
+      if (runner.shuffle && runner.total > 1) step('Reshuffle', 'reshuffle');
     }
     step('Stop', 'stop');
     nodes.push(controls);

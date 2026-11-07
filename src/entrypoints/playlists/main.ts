@@ -25,6 +25,8 @@ const statusLine = $('status');
 const problemsList = $<HTMLUListElement>('problems');
 const entriesList = $<HTMLOListElement>('entries');
 const tvBox = $<HTMLInputElement>('tv');
+const shuffleBox = $<HTMLInputElement>('shuffle');
+const loopBox = $<HTMLInputElement>('loop');
 
 textInput.placeholder = 'Paste URLs here, one per line.\n\nhttps://www.youtube.com/watch?v=… | Title | t=1:37';
 
@@ -32,6 +34,8 @@ let playlists: StoredPlaylist[] = [];
 let currentId: string | null = new URLSearchParams(location.search).get('id');
 let dirty = false;
 let compiled: CompiledPlaylist = compilePlaylist(parsePlaylist(''));
+/** The text's [shuffle] / [loop] as last seen: the checkboxes follow them when they change. */
+let lines = { shuffle: false, loop: false };
 
 function current(): StoredPlaylist | null {
   return playlists.find((p) => p.id === currentId) ?? null;
@@ -95,6 +99,9 @@ function renderList(): void {
 
 function renderPreview(): void {
   compiled = compilePlaylist(parsePlaylist(textInput.value));
+  if (compiled.shuffle !== lines.shuffle) shuffleBox.checked = compiled.shuffle;
+  if (compiled.loop !== lines.loop) loopBox.checked = compiled.loop;
+  lines = { shuffle: compiled.shuffle, loop: compiled.loop };
   problemsList.replaceChildren(...compiled.problems.map((p) => el('li', '', `Line ${p.line}: ${p.message}`)));
 
   if (compiled.entries.length === 0) {
@@ -109,7 +116,9 @@ function renderPreview(): void {
           // Shown as-is.
         }
         const meta = [host];
-        if (e.startS !== null) meta.push(`from ${formatTime(e.startS)}`);
+        if (e.startS !== null && e.endS !== null) meta.push(`${formatTime(e.startS)}–${formatTime(e.endS)}`);
+        else if (e.startS !== null) meta.push(`from ${formatTime(e.startS)}`);
+        else if (e.endS !== null) meta.push(`until ${formatTime(e.endS)}`);
         if (e.view === 'pictures') {
           // The show's pictures fall back to the ads program; say which one it is.
           const label = e.show !== null && e.show === e.ads ? 'shown as pictures, from its ads' : 'shown as pictures';
@@ -139,6 +148,9 @@ function renderEditor(): void {
   setDirty(false);
   setStatus('');
   renderPreview();
+  // A playlist just opened: its lines decide, whatever was ticked for the last one.
+  shuffleBox.checked = compiled.shuffle;
+  loopBox.checked = compiled.loop;
 }
 
 // --- actions -----------------------------------------------------------------------
@@ -167,7 +179,8 @@ async function save(): Promise<StoredPlaylist | null> {
   return saved;
 }
 
-async function playFrom(index: number): Promise<void> {
+/** `index`: an entry's ▶ (it plays first); null: ▶ Play (from the top, or anywhere when shuffling). */
+async function playFrom(index: number | null): Promise<void> {
   const p = dirty ? await save() : current();
   if (!p) return;
   const { entries } = compilePlaylist(parsePlaylist(p.text));
@@ -185,6 +198,8 @@ async function playFrom(index: number): Promise<void> {
     playlistId: p.id,
     index,
     tv: tvBox.checked,
+    shuffle: shuffleBox.checked,
+    loop: loopBox.checked,
   });
   const error = (result as { error?: unknown } | null)?.error;
   if (typeof error === 'string') setStatus(`Couldn’t start: ${error}`, true);
@@ -208,7 +223,7 @@ $('save').addEventListener('click', () => {
   void save().then((p) => p && setStatus('Saved.'));
 });
 
-$('play').addEventListener('click', () => void playFrom(0));
+$('play').addEventListener('click', () => void playFrom(null));
 
 $('copy').addEventListener('click', () => {
   navigator.clipboard

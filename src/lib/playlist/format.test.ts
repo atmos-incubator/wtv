@@ -174,6 +174,73 @@ https://radio.example/d
   });
 });
 
+describe('end times, [shuffle] and [loop]', () => {
+  const MIX = [
+    '[shuffle]',
+    'https://a.com/1 | One | t=1:00 | end=2:30',
+    'https://a.com/2 | Two | t=30 | dur=45s',
+    'https://a.com/3 | Three | dur=1m',
+    'https://a.com/4 | Four',
+    '[ads]',
+    '  [img cats]',
+    '[loop]',
+    '',
+  ].join('\n');
+
+  it('round-trips and compiles', () => {
+    expect(serializePlaylist(parsePlaylist(MIX))).toBe(MIX);
+    const r = compilePlaylist(parsePlaylist(MIX));
+    expect(r.problems).toEqual([]);
+    expect(r.shuffle).toBe(true);
+    expect(r.loop).toBe(true);
+    expect(r.entries.map((e) => [e.startS, e.endS])).toEqual([
+      [60, 150],
+      [30, 75],
+      [null, 60],
+      [null, null],
+    ]);
+    // [loop] doesn't close the last entry's [ads] block.
+    expect(r.entries[3]!.ads).toEqual([{ kind: 'img', keyword: 'cats', durationS: null }]);
+  });
+
+  it('is off without the lines', () => {
+    const r = compilePlaylist(parsePlaylist('https://a.com/1'));
+    expect([r.shuffle, r.loop]).toEqual([false, false]);
+    expect(compilePlaylist(parsePlaylist('[loop]')).loop).toBe(false);
+  });
+
+  it('flags end= with dur=, bad times and ends before the start', () => {
+    const r = compilePlaylist(
+      parsePlaylist(
+        [
+          'https://a.com/1 | end=2:00 | dur=10',
+          'https://a.com/2 | t=90 | end=1:00',
+          'https://a.com/3 | end=soon',
+          'https://a.com/4 | dur=0',
+          'https://a.com/5 | dur=later',
+        ].join('\n'),
+      ),
+    );
+    expect(r.entries.map((e) => e.endS)).toEqual([120, null, null, null, null]);
+    expect(r.problems).toEqual([
+      { line: 1, message: 'end= and dur= both given; using end=2:00' },
+      { line: 2, message: 'end=1:00 is not after the start time (ignored)' },
+      { line: 3, message: 'end=soon is not a timestamp' },
+      { line: 4, message: 'dur=0 must be more than 0 seconds (ignored)' },
+      { line: 5, message: 'dur=later is not a duration' },
+    ]);
+  });
+
+  it('flags [shuffle] after the first entry and [loop] before the last', () => {
+    const r = compilePlaylist(parsePlaylist('https://a.com/1\n[SHUFFLE]\n[Loop]\nhttps://a.com/2'));
+    expect(r.problems).toEqual([
+      { line: 2, message: '[shuffle] goes before the first entry (ignored)' },
+      { line: 3, message: '[loop] goes after the last entry (ignored)' },
+    ]);
+    expect([r.shuffle, r.loop]).toEqual([false, false]);
+  });
+});
+
 describe('edits', () => {
   it('retitles one entry and leaves every other line untouched', () => {
     const doc = withEntryTitle(parsePlaylist(SAMPLE), 1, 'Renamed');

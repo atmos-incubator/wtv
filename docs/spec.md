@@ -270,22 +270,27 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 ### Playlists
 
 - Load a playlist of URLs (by pasting), play through, and jump to the next entry when a video finishes. Jump back to a previous entry.
-- **Playlists page** (`playlists.html`, from the popup's **Playlists…**): list + **New**; editor with name, the playlist **text** (the source of truth, so comments and layout survive), live problems ("Line 4: …"), and an entries preview (title, host, start time, which ads program applies, ▶ play from here). **Save** (also Cmd/Ctrl+S), **Copy text** (export to clipboard), **Delete**, **▶ Play** with an "in TV mode" option. Edits happen in the text; structured edits (`withEntryTitle`, `appendEntry`) exist for code paths and re-render only the touched line.
+- **Playlists page** (`playlists.html`, from the popup's **Playlists…**): list + **New**; editor with name, the playlist **text** (the source of truth, so comments and layout survive), live problems ("Line 4: …"), and an entries preview (title, host, start time, which ads program applies, ▶ play from here). **Save** (also Cmd/Ctrl+S), **Copy text** (export to clipboard), **Delete**, **▶ Play** with "in TV mode", **Shuffle** and **Loop** options (Shuffle / Loop are ticked when the playlist has `[shuffle]` / `[loop]`, when it's opened and whenever those lines are added or removed). Edits happen in the text; structured edits (`withEntryTitle`, `appendEntry`) exist for code paths and re-render only the touched line.
 - **Storage:** `wtv.playlists` in `chrome.storage.local`: `{ id, name, text, createdAt, updatedAt }` per playlist (`src/lib/playlist/store.ts`, tested). The name is metadata, not part of the text.
 - **Adding pages** to any playlist, not just the running one: popup **Add this page** (playlist picker, remembers the last one, or "New playlist"), and the context menu **Add to Wtv playlist ▸** (each playlist + "New playlist"; a link adds its target, anywhere else adds the page with the tab title). The menu is rebuilt whenever playlists change.
 - **Play** opens a new tab. First it requests host access for every entry's site in one prompt (Wtv only runs where it has access, and it needs to be there to see a video end). Declined sites still play, but need **Next** by hand.
 - **Runner** (`src/lib/playlist/runner.ts`) lives in the background; per-tab state in `storage.session`; all operations go through one queue. The playlist is snapshotted at start (edits apply next time).
     - Moving to an entry: the current page blacks out with the next title (so end screens / autoplay never show), `gen` is bumped, the tab navigates.
-    - Each frame says hello at start; the runner answers with the entry (title, `t=`, ads program) if the page is that entry (`sameEntryUrl`: ignores www./m., extra query params, hash; also compared with the URL the tab actually landed on, so redirects count).
+    - Each frame says hello at start; the runner answers with the entry (title, `t=`, end time, ads program) if the page is that entry (`sameEntryUrl`: ignores www./m., extra query params, hash; also compared with the URL the tab actually landed on, so redirects count).
 - **Blackout** (top frame, over the whole tab): the entry title (else the page title / host) until anything plays.
     - **Wtv starts playback itself** (it's a TV; many sites never autoplay): once the primary video has data (`loadeddata` / `canplay`), the site gets 2 s to start it, then Wtv calls `play()` up to 3 times (immediately, +1.5 s, +3 s). No ads in progress, and only on the entry page (not the blackout shown while leaving a page).
     - Each try pulses the status line ("Starting the video… (1 of 3)"), or the Start button once it's showing; the result is shown ("Chrome blocked autoplay" / "No video on the page yet" / "The video didn't start") and logged to the console.
     - **Start / Next** appear when Chrome refuses autoplay, when Wtv's own tries fail, or after a 15 s fallback with no video at all. Refusals are detected exactly: the MAIN-world hook observes every page `play()` promise (a side branch, so the page sees exactly what it would without us) and reports `NotAllowedError` (`EVT_BLOCKED`); embedded frames forward it via the runner. A click on Start is a user gesture that reaches the page, so `play()` is allowed then. Embedded players can't be retried from the top frame: the status says to click Start, then the player.
     - To skip the prompt on a dedicated TV machine: launch Chrome with `--autoplay-policy=no-user-gesture-required`.
-- **End detection:** `ended`, or playback within 0.25 s of the end → next entry. A frame also reports **near-end** (last 20 s, media ≥ 30 s). Navigating off the entry *after* near-end counts as the end (YouTube autoplay / end screens can pre-empt `ended`); navigating off *before* it is the user doing something else, so the runner **detaches** and the popup offers **Resume** instead of hijacking the tab. Everything is ignored while an ad is playing (YouTube ads play in the same `<video>`), and `gen` stops late events from a page being left from skipping twice.
+- **End detection:** `ended`, or playback within 0.25 s of the end → next entry. An entry with an **end time** (`end=` / `dur=`) pauses there and moves on (`endState` in `seek.ts`, pure + tested). It's measured in the media's own time, so ads don't count, and only once the start-time seek has settled. An end time without a start time starts from 0, so a site resuming where the viewer left off can't skip past it. Near-end is then measured to the end time. A frame also reports **near-end** (last 20 s, media ≥ 30 s). Navigating off the entry *after* near-end counts as the end (YouTube autoplay / end screens can pre-empt `ended`); navigating off *before* it is the user doing something else, so the runner **detaches** and the popup offers **Resume** instead of hijacking the tab. Everything is ignored while an ad is playing (YouTube ads play in the same `<video>`), and `gen` stops late events from a page being left from skipping twice.
 - **Ads program:** the entry's `[ads]` block (else the playlist default, else site pictures) drives the ad overlay on that page.
 - **View:** an entry's `view=pictures` (or the playlist's `[view pictures]`) covers the media with its `[show]` program the whole time (see Overlay iframe → Pictures outside ads). Runner state from before views existed reads as `video`.
-- **Popup:** playlist name, `3 / 10` and the entry title, **⏮ Previous**, **Next ⏭** / **Finish**, **Stop**; **Resume** when detached. Shortcuts: next `Alt+Shift+N`, previous unbound.
+- **Order** (`src/lib/playlist/order.ts`, pure + tested): the runner keeps a play `order` (entry indexes) and a position in it.
+    - In order, playing from an entry starts there. **Shuffle** shuffles once at start (from an entry's ▶, that entry first; from **▶ Play**, any) and keeps the order in the runner's state, so **Previous** retraces it.
+    - **Loop:** past the last entry a new lap starts from the top, with the usual blackout and title. Shuffled, each lap is reshuffled and the entry that just played never comes first (unless it's the only one). Previous doesn't cross back into the last lap.
+    - **Reshuffle** (popup): the current entry keeps playing; everything else comes after it in a new order.
+    - Runner state from before shuffle existed plays in order, without looping.
+- **Popup:** playlist name, `3 / 10` (position in the play order), "shuffled" / "looping, lap 2", and the entry title; **⏮ Previous**, **Next ⏭** / **Finish** (always Next while looping), **Reshuffle** when shuffled, **Stop**; **Resume** when detached. Shortcuts: next `Alt+Shift+N`, previous unbound.
 - `t=` is parsed and stored with each entry; the page seeks to it (see Hash params + seeking).
 
 #### Playlist format
@@ -321,30 +326,42 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
     https://www.youtube.com/watch?v=xyz | A video after all | view=video
     ```
 
-- One construct per line: URL entry, `[ads]`, `[show]`, `[view …]`, quote, `[img …]`, comment (`#` or `//`), blank. Anything else is kept as an invalid line and reported, never dropped.
+    Clips, shuffled, round and round:
+
+    ```
+    [shuffle]
+    https://www.youtube.com/watch?v=abc | Chorus | t=1:00 | end=2:30
+    https://www.youtube.com/watch?v=def | Intro | t=30 | dur=45s
+    [loop]
+    ```
+
+- One construct per line: URL entry, `[ads]`, `[show]`, `[view …]`, `[shuffle]`, `[loop]`, quote, `[img …]`, comment (`#` or `//`), blank. Anything else is kept as an invalid line and reported, never dropped.
 - `[ads]` before the first URL is the **playlist-wide default**. An `[ads]` block after a URL (and before the next URL) **overrides** it for that entry. Quote / img lines outside a block are reported and ignored.
 - `N: text` — quote displayed for N seconds (only the first `N:` is a prefix; colons later in the text are fine).
 - `[img]` — images for the current site (see `[img ...]` resolution under Overlay iframe).
 - `[img <keyword>]` — images matching that keyword (may be several words), using filename durations or 5s default. `[img <keyword> N]` forces N seconds.
 - `url | title | t=…` — optional title and options. Fields shaped `key=value` are options (unknown keys are kept and reported); the first other field is the title. Titles are written so they can't read back as options.
 - `[show]` blocks scope like `[ads]` and pick the pictures for `view=pictures` entries: the entry's own `[show]`, else the playlist's, else the entry's ads program, else site pictures.
+- `end=` stops the entry at that time; `dur=` plays it that long from its start (`t=`, else 0). Same formats as `t=`. Both given: `end=` wins, reported. An end at or before the start, or `dur=0`, is reported and ignored.
+- `[shuffle]` before the first URL and `[loop]` after the last are defaults for the Play options; anywhere else they're reported and ignored. `[loop]` doesn't end the last entry's `[ads]` / `[show]` block.
 - `[view pictures]` before the first URL makes every entry pictures; `view=video` / `view=pictures` on an entry overrides it. A `[view …]` after the first URL, or an unknown view, is reported and ignored.
 - Indentation is **not** significant. An `[ads]` or `[show]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
 
 ### Hash params + seeking
 
 - Jump to a specific video location with a timestamp hash (`src/lib/playlist/hash.ts`, tested).
-- **Namespaced** to avoid colliding with sites' own hash routing / `t` params: `#wtv:t=97&d=Title`.
+- **Namespaced** to avoid colliding with sites' own hash routing / `t` params: `#wtv:t=97&e=187&d=Title` (`e`: end time in seconds, from `end=` or `dur=`).
 - **Timestamp formats:** `200`, `200s`, `1:37`, `1:02:03`, `1h2m3s` (`parseTimestamp`, tested). Written back as seconds.
 - Title uses `encodeURIComponent`, not underscore escaping (titles with real underscores would be lost).
 - The background playlist state is the source of truth. The hash is the synchronous fast path that lets the `document_start` content script show the blackout before first paint:
-    - The runner navigates to `entry URL + #wtv:t=…&d=…`. Entries with a hash of their own (hash-routed sites) are left alone and fall back to the hello round trip.
+    - The runner navigates to `entry URL + #wtv:t=…&e=…&d=…`. Entries with a hash of their own (hash-routed sites) are left alone and fall back to the hello round trip.
     - The top frame reads it at `document_start`, blacks out immediately (the overlay host is painted black until its iframe has loaded), then removes it with `history.replaceState`, before the page's own scripts run. One-shot: reloads and copied links are the plain page.
     - A hash arriving later (`hashchange`) starts over. That covers the runner moving to an entry whose URL only differs by hash from the current page (same video twice, Resume), which is a same-document navigation with no reload.
-    - A `#wtv:` link outside any playlist works on its own: blackout (no Next), start, seek.
+    - A `#wtv:` link outside any playlist works on its own: blackout (no Next), start, seek, and pause at `e=` (once: playing on is fine).
 - **Seek only after `loadedmetadata` and after any pre-roll ad clears** (`src/lib/playlist/seek.ts`, pure + tested). Never while an ad is showing.
     - On `quirks.adsInMainVideo` sites (YouTube plays ads in the same `<video>`, and ad detection can lag the ad's first frames), also only after 750 ms of ad-free playback, so a pre-roll is never the thing seeked.
     - Elsewhere it seeks as soon as metadata arrives, before the first frame: no visible jump.
+    - A start of 0 (an entry with an end time and no `t=`) still seeks if the player resumed elsewhere.
     - Skipped for live streams, start times past the end, or when the player is already there (the site honoured its own parameter). Once per entry; every frame seeks its own primary (embedded players get the start time from the runner's hello).
 
 ### Site health checks

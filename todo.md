@@ -159,7 +159,9 @@ for the whole entry. For music, radio, podcasts.
 - Playlist-wide line `[shuffle]` before the first URL. The playlist page's **▶ Play** gets a
   **Shuffle** checkbox, ticked by default when the playlist has the line.
 - The order is shuffled once at start and kept in the runner's session state, so **Previous**
-  goes back through the same order. **Reshuffle** in the popup.
+  goes back through the same order. **Reshuffle** in the popup: the current entry keeps
+  playing and everything else comes after it in a new order. **▶ Play** starts anywhere when
+  shuffled; an entry's own ▶ plays that entry first.
 
 **Loop**:
 

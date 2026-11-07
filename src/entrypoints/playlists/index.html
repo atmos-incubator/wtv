@@ -26,6 +26,8 @@
         <div class="actions">
           <button id="play" type="button" class="primary">▶ Play</button>
           <label class="check"><input id="tv" type="checkbox" /> in TV mode</label>
+          <label class="check"><input id="shuffle" type="checkbox" /> Shuffle</label>
+          <label class="check"><input id="loop" type="checkbox" /> Loop</label>
           <span class="spacer"></span>
           <button id="save" type="button">Save</button>
           <button id="copy" type="button">Copy text</button>
@@ -54,7 +56,12 @@ https://www.youtube.com/watch?v=abc | Some Title | t=1:37
 [view pictures]            ← before the first URL: pictures cover every entry
 [show]                     ← the pictures to show (like [ads])
   [img beach]
-https://radio.example/live | Radio | view=pictures</pre>
+https://radio.example/live | Radio | view=pictures
+
+[shuffle]                  ← before the first URL: random order
+https://www.youtube.com/watch?v=abc | t=1:00 | end=2:30
+https://www.youtube.com/watch?v=def | t=30 | dur=45s
+[loop]                     ← after the last URL: start again</pre>
               <p class="note">
                 Each line is a URL (with an optional <code>| title</code> and <code>| t=1:37</code> start time), an
                 <code>[ads]</code> block, a quote (<code>N: text</code>), a picture item (<code>[img keyword N]</code>), or a
@@ -65,6 +72,11 @@ https://radio.example/live | Radio | view=pictures</pre>
                 unseen behind pictures, for music, radio and podcasts. The pictures come from a <code>[show]</code> block
                 (the entry's, else the playlist's), else its <code>[ads]</code>, else the site's pictures.
                 <code>view=video</code> turns it off for one entry.
+              </p>
+              <p class="note">
+                <code>end=2:30</code> stops an entry at that time; <code>dur=45s</code> plays it that long from its start.
+                Ads don't count towards either. <code>[shuffle]</code> and <code>[loop]</code> tick the Shuffle and Loop
+                boxes by default; a shuffled loop reshuffles every lap.
               </p>
             </details>
           </section>
