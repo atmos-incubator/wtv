@@ -72,6 +72,11 @@ https://www.youtube.com/watch?v=abc | Some Title | t=1:37
   [img beach]
 https://radio.example/live | Radio | view=pictures
 
+https://example.com/story | view=read    ← the article, read out on screen
+https://example.com/page  | view=scroll  ← the page itself, scrolled
+https://x.com/someone/status/123 | view=card | dur=20s   ← a post, on a title card
+[speed 200 wpm]            ← before the first URL: reading pace (also [speed 40 px/s])
+
 [shuffle]                  ← before the first URL: random order
 https://www.youtube.com/watch?v=abc | t=1:00 | end=2:30
 https://www.youtube.com/watch?v=def | t=30 | dur=45s
@@ -86,6 +91,14 @@ https://www.youtube.com/watch?v=def | t=30 | dur=45s
                 unseen behind pictures, for music, radio and podcasts. The pictures come from a <code>[show]</code> block
                 (the entry's, else the playlist's), else its <code>[ads]</code>, else the site's pictures.
                 <code>view=video</code> turns it off for one entry.
+              </p>
+              <p class="note">
+                Pages and posts: <code>view=read</code> shows a page's article as large text, scrolled at a reading pace
+                (<code>speed=200</code> words per minute); if there's no article it scrolls the page instead.
+                <code>view=scroll</code> scrolls the page itself to the bottom (<code>speed=40</code> pixels a second).
+                <code>view=card</code> shows a post (X only, so far) on a title card. They end at the bottom (or the
+                card's time), or after <code>dur=</code>. <code>[speed 200 wpm]</code> / <code>[speed 40 px/s]</code> before
+                the first URL set the playlist's pace.
               </p>
               <p class="note">
                 <code>end=2:30</code> stops an entry at that time; <code>dur=45s</code> plays it that long from its start.

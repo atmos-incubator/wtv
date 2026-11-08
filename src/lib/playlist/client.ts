@@ -34,6 +34,16 @@
  *     reports `gone` if it shows (the runner shows "Unavailable" and moves on);
  *   - the entry's `[ads]` program replaces the default for the ad overlay, and
  *     `view=pictures` entries have their `[show]` program cover the media throughout.
+ *
+ * A page shown as a page (`view=read` / `view=scroll`, or a hash with `v=`) has no media
+ * to wait for: the top frame keeps the blackout up until the page has loaded, pauses any
+ * media on it, then
+ *   - read: hands a snapshot of the page to the overlay, which finds the article and
+ *     scrolls it at a reading pace (overlay/, Readability), or says there's none, and
+ *     then the page is scrolled instead;
+ *   - scroll: scrolls the page itself (page-show/scroller.ts).
+ * Either way the frame reports `playing`, the page's metadata with the show's length,
+ * and `ended` when it's done. Media events are ignored in every frame meanwhile.
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
@@ -46,7 +56,11 @@ import { parseWtvHash, stripWtvHash, type WtvHash } from './hash';
 import { endState, seekDecision } from './seek';
 import type { PlayResult } from '../media/registry';
 import type { ProgramItem } from '../overlay/program';
-import type { ViewMode } from './format';
+import { isPageView, type ViewMode } from './format';
+import type { HashView } from './hash';
+import { DEFAULT_SCROLL_PX_S, DEFAULT_WPM, scrollDurationS } from '../page-show/pace';
+import { startScroller, type Scroller } from '../page-show/scroller';
+import { MAX_READ_HTML } from '../overlay/program';
 import {
   PL_COMMAND,
   PL_HELLO,
@@ -71,6 +85,10 @@ const BRIDGED_CHECK_MS = 600;
 const INFO_AFTER_MS = 3000;
 /** Top frame with no player of its own (the player is embedded): send the page metadata after this. */
 const INFO_FALLBACK_MS = 8000;
+/** A page show starts once the page has loaded, or after this at most. */
+const PAGE_LOAD_MAX_MS = 12_000;
+/** Then this long more, for late content (lazy images, web fonts, client-side rendering). */
+const PAGE_SETTLE_MS = 1200;
 /** Look for the `unavailable` role this often, for this long after the entry starts (until it plays). */
 const GONE_POLL_MS = 1000;
 const GONE_WATCH_MS = 60_000;
@@ -98,6 +116,19 @@ export interface Blackout {
 
 type Trigger = 'blocked' | 'blocked-in-frame' | 'timeout' | 'ready';
 
+/** A page show in progress (top frame): what the overlay should do about it. */
+export type PageShow =
+  /** The overlay shows the article (or says there's none). */
+  | { kind: 'read'; id: number; url: string; html: string; wpm: number; durS: number | null }
+  /** The page itself is the show: nothing over it. */
+  | { kind: 'scroll'; id: number };
+
+/** From the overlay, about a `read` page show. */
+export type PageEvent =
+  | { type: 'started'; id: number; durationS: number }
+  | { type: 'failed'; id: number }
+  | { type: 'done'; id: number };
+
 export interface PlaylistClient {
   /** The current entry's ad program; null = default. */
   ads(): ProgramItem[] | null;
@@ -107,6 +138,9 @@ export interface PlaylistClient {
   show(): ProgramItem[] | null;
   /** Top frame only. */
   blackout(): Blackout | null;
+  /** Top frame only: a page shown as a page, once it's loaded. */
+  page(): PageShow | null;
+  pageEvent(e: PageEvent): void;
   onChange(cb: () => void): () => void;
   /** "Start" on the blackout (inside a user gesture). */
   start(): void;
@@ -141,6 +175,12 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   let infoTimer: ReturnType<typeof setTimeout> | undefined;
   let gonePoll: ReturnType<typeof setInterval> | undefined;
   const sent = new Set<MediaEvent>();
+  /** This page is shown as a page (no media to wait for); null: the usual. */
+  let pageView: HashView | null = null;
+  let page: PageShow | null = null;
+  /** Bumped per page show, so late steps of an earlier one stop. */
+  let pageRun = 0;
+  let scroller: Scroller | null = null;
   const adActive = () => ads.status()?.active ?? false;
   const listeners = new Set<() => void>();
 
@@ -244,7 +284,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
    * Start / Next show right away.
    */
   function trigger(why: Trigger): void {
-    if (!blackout || !awaitingStart) return;
+    if (!blackout || !awaitingStart || pageView) return;
     if (promptTimer !== undefined) clearTimeout(promptTimer);
     if (graceTimer !== undefined) clearTimeout(graceTimer);
     promptTimer = graceTimer = undefined;
@@ -262,7 +302,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
 
   /** The primary has data but isn't playing: start the grace period before we start it. */
   function considerStarting(): void {
-    if (!isTop || !blackout || !awaitingStart || attempting || graceTimer !== undefined) return;
+    if (!isTop || !blackout || !awaitingStart || attempting || graceTimer !== undefined || pageView) return;
     if (adActive()) return; // The site's ad flow decides what plays now.
     const primary = agent.primary();
     if (!primary) return;
@@ -370,7 +410,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   }
 
   function onMediaEvent(el: HTMLMediaElement, type: string): void {
-    if (!active()) return;
+    if (!active() || pageView) return;
     trySeek(el);
     maybeSendInfo(el);
     if (type === 'playing') {
@@ -419,6 +459,74 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
 
   const offPrimary = agent.onPrimaryChange(watchPrimary);
 
+  // --- pages as shows ------------------------------------------------------------------
+
+  function whenLoaded(): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => setTimeout(resolve, PAGE_SETTLE_MS);
+      if (document.readyState === 'complete') return done();
+      const timer = setTimeout(done, PAGE_LOAD_MAX_MS);
+      window.addEventListener(
+        'load',
+        () => {
+          clearTimeout(timer);
+          done();
+        },
+        { once: true, signal },
+      );
+    });
+  }
+
+  /** Nothing on the page plays over the show (in this frame; embedded players are left alone). */
+  function pausePageMedia(): void {
+    for (const m of document.querySelectorAll<HTMLMediaElement>('video, audio')) {
+      if (!m.paused) m.pause();
+    }
+  }
+
+  function stopPageShow(): void {
+    pageRun++;
+    scroller?.stop();
+    scroller = null;
+    page = null;
+  }
+
+  async function runPageShow(view: HashView, speed: number | null, durS: number | null): Promise<void> {
+    const run = ++pageRun;
+    await whenLoaded();
+    if (run !== pageRun || signal.aborted) return;
+    pausePageMedia();
+    if (view === 'read') {
+      const html = document.documentElement.outerHTML.slice(0, MAX_READ_HTML);
+      page = { kind: 'read', id: run, url: location.href, html, wpm: speed ?? DEFAULT_WPM, durS };
+      lift(); // Notifies: the overlay takes it from here.
+      return;
+    }
+    startScroll(run, speed ?? DEFAULT_SCROLL_PX_S, durS);
+  }
+
+  function startScroll(run: number, pxPerS: number, durS: number | null): void {
+    page = { kind: 'scroll', id: run };
+    lift();
+    notify();
+    scroller = startScroller({ pxPerS, durS, onDone: () => finishPage(run) });
+    report('playing');
+    if (entry) sendInfo({ ...pageInfo(), durationS: scrollDurationS(scroller.remainingPx(), pxPerS, durS) });
+  }
+
+  function finishPage(run: number): void {
+    if (run !== pageRun) return;
+    console.info('[wtv] page show finished');
+    scroller = null;
+    if (entry) {
+      report('ended');
+      return;
+    }
+    // A stand-alone #wtv:v= link: back to the page.
+    page = null;
+    notify();
+  }
+
   const onMessage = (raw: unknown) => {
     const msg = parsePlaylistApply(raw);
     if (!msg || !isTop) return undefined;
@@ -446,6 +554,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     primaryCleanup?.();
     clearTimers();
     stopWatching();
+    stopPageShow();
   });
 
   // An ad starting or ending changes whether it's safe to seek.
@@ -480,15 +589,30 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     infoSent = false;
     stopWatching();
     sent.clear();
+    stopPageShow();
+    pageView = hash?.view ?? null;
     if (hash) {
-      showBlackout(hash.title ?? location.hostname, true);
+      // A page show has nothing to start: no Start prompt, no autoplay attempts.
+      showBlackout(hash.title ?? location.hostname, !pageView);
       watchPrimary();
     }
     browser.runtime
       .sendMessage({ type: PL_HELLO })
       .then((raw: unknown) => {
         entry = parseEntryInfo(raw);
-        if (!entry) return;
+        if (!entry) {
+          if (pageView && isTop) void runPageShow(pageView, null, hash?.end ?? null);
+          return;
+        }
+        if (isPageView(entry.view)) {
+          pageView = entry.view;
+          if (!isTop) return;
+          if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });
+          else showBlackout(entry.title ?? (document.title || location.hostname), false);
+          void runPageShow(entry.view, entry.speed, entry.endS);
+          return;
+        }
+        pageView = null;
         endS = entry.endS;
         startS = entry.startS ?? (endS !== null ? 0 : null);
         watchEntry();
@@ -516,6 +640,19 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     view: () => entry?.view ?? 'video',
     show: () => entry?.show ?? null,
     blackout: () => blackout,
+    page: () => page,
+    pageEvent(e) {
+      if (!page || page.id !== e.id || e.id !== pageRun) return;
+      if (e.type === 'started') {
+        report('playing');
+        if (entry) sendInfo({ ...pageInfo(), durationS: e.durationS });
+      } else if (e.type === 'failed') {
+        console.info('[wtv] no article found on this page; scrolling it instead');
+        startScroll(e.id, DEFAULT_SCROLL_PX_S, page.kind === 'read' ? page.durS : null);
+      } else {
+        finishPage(e.id);
+      }
+    },
     onChange(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);

@@ -3,18 +3,21 @@
  * Wtv holds host permission for: bundled sites (required host_permissions) plus any site
  * the user enabled (optional_host_permissions). Re-run whenever permissions change.
  *
- * Thumbnail hosts (`thumbnailHosts` in site configs, e.g. i.ytimg.com) are granted only so
- * the background can cache thumbnails: they never get content scripts.
+ * Thumbnail hosts (`thumbnailHosts` in site configs, e.g. i.ytimg.com) and post fetch
+ * hosts (posts/adapters.ts, e.g. publish.x.com) are granted only so the background can
+ * fetch from them: they never get content scripts.
  */
 import { browser } from 'wxt/browser';
 import { allThumbnailOrigins } from './media-library/record';
-import { webMatchPatterns } from './permissions';
+import { originPatternForHost, webMatchPatterns } from './permissions';
+import { ALL_POST_FETCH_HOSTS } from './posts/adapters';
 import { BUNDLED_SITES } from './sites/bundled';
 
 /** The http(s) patterns that get content scripts. */
 export function contentScriptPatterns(origins: readonly string[]): string[] {
-  const thumbnails = allThumbnailOrigins(BUNDLED_SITES);
-  return webMatchPatterns(origins).filter((o) => !thumbnails.has(o));
+  const fetchOnly = allThumbnailOrigins(BUNDLED_SITES);
+  for (const host of ALL_POST_FETCH_HOSTS) fetchOnly.add(originPatternForHost(host));
+  return webMatchPatterns(origins).filter((o) => !fetchOnly.has(o));
 }
 
 /** Must match WXT's generated PublicPath type (.wxt/types/paths.d.ts, refreshed by `wxt prepare`). */

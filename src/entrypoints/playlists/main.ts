@@ -26,8 +26,10 @@ import {
 } from '../../lib/media-library/record';
 import { LibraryView } from '../../lib/media-library/thumbs';
 import type { ProgramItem } from '../../lib/overlay/program';
+import { DEFAULT_SCROLL_PX_S, DEFAULT_WPM } from '../../lib/page-show/pace';
 import {
   compilePlaylist,
+  isMediaView,
   parsePlaylist,
   serializePlaylist,
   withoutEntries,
@@ -199,13 +201,16 @@ function renderPreview(): void {
         meta.push(host);
         if (e.startS !== null && e.endS !== null) meta.push(`${formatTime(e.startS)}–${formatTime(e.endS)}`);
         else if (e.startS !== null) meta.push(`from ${formatTime(e.startS)}`);
-        else if (e.endS !== null) meta.push(`until ${formatTime(e.endS)}`);
+        else if (e.endS !== null) meta.push(isMediaView(e.view) ? `until ${formatTime(e.endS)}` : `for ${formatTime(e.endS)}`);
+        if (e.view === 'read') meta.push(`read as an article, ${e.speed ?? DEFAULT_WPM} wpm`);
+        else if (e.view === 'scroll') meta.push(`the page, scrolled ${e.speed ?? DEFAULT_SCROLL_PX_S} px/s`);
+        else if (e.view === 'card') meta.push('a post, on a title card');
         if (e.view === 'pictures') {
           // The show's pictures fall back to the ads program; say which one it is.
           const label = e.show !== null && e.show === e.ads ? 'shown as pictures, from its ads' : 'shown as pictures';
           meta.push(describeProgram(label, e.show, e.show !== null && e.show === compiled.defaultShow));
         }
-        meta.push(describeProgram('ads', e.ads, e.ads !== null && e.ads === compiled.defaultAds));
+        if (isMediaView(e.view)) meta.push(describeProgram('ads', e.ads, e.ads !== null && e.ads === compiled.defaultAds));
         const li = el('li');
         li.classList.toggle('gone', record?.status === 'gone');
         const play = el('button', '', '▶');

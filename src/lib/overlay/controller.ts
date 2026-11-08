@@ -4,6 +4,8 @@
  *   1. Selector picker running         → nothing (suspend)
  *   2. Playlist entry loading          → blackout with the title over the whole tab
  *                                        (top frame), then Start / Next if nothing plays
+ *   2b. Page shown as a page: view=read → the article over the whole tab (top frame);
+ *                             view=scroll → nothing (the page is the show)
  *   3. Dev preview                     → ad slideshow
  *   4. Ad playing, pictures on         → ad slideshow (also the ad click shield)
  *   5. Playlist entry with view=pictures → its [show] slideshow over the media for the
@@ -74,6 +76,7 @@ export interface OverlayStatus {
 
 type Mode =
   | 'blackout'
+  | 'read'
   | 'ad'
   | 'pill'
   | 'preview'
@@ -201,6 +204,8 @@ export function startOverlay(
     if (suspended) return null;
     const blackout = playlist.blackout();
     if (blackout) return 'blackout';
+    const page = playlist.page();
+    if (page) return page.kind === 'read' ? 'read' : null;
     if (previewing) return 'preview';
     const settings = ads.settings();
     const ad = adActive();
@@ -244,7 +249,14 @@ export function startOverlay(
     if (!adActive()) dismissed = false;
     const next = nextMode();
     const blackout = next === 'blackout' ? playlist.blackout() : null;
-    const signature = blackout ? JSON.stringify(blackout) : next === 'show-pictures' ? String(showPaused()) : '';
+    const page = next === 'read' ? playlist.page() : null;
+    const signature = blackout
+      ? JSON.stringify(blackout)
+      : next === 'show-pictures'
+        ? String(showPaused())
+        : page
+          ? String(page.id)
+          : '';
     if (next === mode && signature === shownSignature && !force) return;
     if (DEV_TOOLS && next !== mode) noteModeChange(mode, next);
     mode = next;
@@ -262,6 +274,12 @@ export function startOverlay(
           },
           () => 'viewport',
         );
+        break;
+      case 'read':
+        if (page?.kind === 'read') {
+          const { id, url, html, wpm, durS } = page;
+          overlay.show({ type: 'read', id, url, html, wpm, durS }, () => 'viewport');
+        }
         break;
       case 'ad':
       case 'preview':
@@ -413,6 +431,15 @@ export function startOverlay(
         break;
       case 'key':
         forwardKey(event);
+        break;
+      case 'read-started':
+        playlist.pageEvent({ type: 'started', id: event.id, durationS: event.durationS });
+        break;
+      case 'read-failed':
+        playlist.pageEvent({ type: 'failed', id: event.id });
+        break;
+      case 'read-done':
+        playlist.pageEvent({ type: 'done', id: event.id });
         break;
     }
   });

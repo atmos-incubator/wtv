@@ -8,10 +8,14 @@ describe('#wtv: hash', () => {
       t: 97,
       end: 187,
       title: 'Some Title_with_underscores',
+      view: null,
     });
-    expect(parseWtvHash('#wtv:t=1:02:03')).toEqual({ t: 3723, end: null, title: null });
-    expect(parseWtvHash('#wtv:e=1:30')).toEqual({ t: null, end: 90, title: null });
-    expect(parseWtvHash('#wtv:')).toEqual({ t: null, end: null, title: null });
+    expect(parseWtvHash('#wtv:t=1:02:03')).toEqual({ t: 3723, end: null, title: null, view: null });
+    expect(parseWtvHash('#wtv:e=1:30')).toEqual({ t: null, end: 90, title: null, view: null });
+    expect(parseWtvHash('#wtv:')).toEqual({ t: null, end: null, title: null, view: null });
+    expect(parseWtvHash('#wtv:v=read&d=Story')).toEqual({ t: null, end: null, title: 'Story', view: 'read' });
+    expect(parseWtvHash('#wtv:v=scroll')?.view).toBe('scroll');
+    expect(parseWtvHash('#wtv:v=card')?.view).toBeNull();
   });
 
   it('tolerates junk', () => {
@@ -19,6 +23,7 @@ describe('#wtv: hash', () => {
       t: null,
       end: null,
       title: '%E0%A4%A',
+      view: null,
     });
   });
 
@@ -29,7 +34,7 @@ describe('#wtv: hash', () => {
   });
 
   it('round-trips', () => {
-    const params = { t: 97.5, end: 120.25, title: 'A & B = C #1' };
+    const params = { t: 97.5, end: 120.25, title: 'A & B = C #1', view: 'scroll' as const };
     expect(parseWtvHash(formatWtvHash(params))).toEqual(params);
     expect(formatWtvHash({ t: null, end: null, title: null })).toBe('#wtv:');
     expect(formatWtvHash({ t: 0, end: 45, title: null })).toBe('#wtv:e=45');

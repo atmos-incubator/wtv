@@ -29,6 +29,13 @@
  * shuffling, so Previous retraces it. Looping: past the last entry, a new lap starts
  * (reshuffled when shuffling); otherwise the run finishes.
  *
+ * Pages and posts (`view=read` / `scroll` / `card`): a read / scroll entry is its own
+ * page, shown by the content script there (page-show/), which reports `ended` when it's
+ * done; the hash says so (`v=`), so the page doesn't wait for a video. A card entry
+ * navigates the tab to the extension's card page instead (never the post's site), which
+ * says hello like a page, asks for the post (PL_POST: fetched here, posts/), and reports
+ * `ended` when its time is up.
+ *
  * The playlist is snapshotted when it starts; edits apply the next time it's played.
  * Starting one also records when it last played, for the explorer's order (explore.ts).
  */
@@ -37,7 +44,7 @@ import { browserAreas } from '../browser-storage';
 import { isWebUrl } from '../permissions';
 import { KEYS } from '../storage';
 import { setTvMode } from '../view/controller';
-import { compilePlaylist, parsePlaylist, type ViewMode } from './format';
+import { compilePlaylist, isPageView, parsePlaylist, type ViewMode } from './format';
 import { withWtvHash } from './hash';
 import { sameEntryUrl } from './match';
 import { nextLap, reshuffle, startOrder, validOrder } from './order';
@@ -47,6 +54,7 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_POST,
   PL_RUNS,
   PL_STATE,
   parsePlaylistRequest,
@@ -54,6 +62,7 @@ import {
   type MediaEvent,
   type MediaInfo,
   type PlaylistApply,
+  type PostResult,
   type RunnerSummary,
   type RunSummary,
   type StepOp,
@@ -64,6 +73,8 @@ import { getPlaylist } from './store';
 import { getRecord } from '../media-library/db';
 import { libraryKey } from '../media-library/record';
 import { updateMedia } from '../media-library/service';
+import { cardDurationS, postTitle } from '../posts/adapters';
+import { fetchPost } from '../posts/fetch';
 import type { ProgramItem } from '../overlay/program';
 
 interface RunEntry {
@@ -76,6 +87,8 @@ interface RunEntry {
   /** Missing in runs started before views existed: video. */
   view?: ViewMode;
   show?: ProgramItem[] | null;
+  /** Missing in runs started before page views: the default. */
+  speed?: number | null;
 }
 
 export interface RunnerState {
@@ -180,10 +193,19 @@ async function goTo(tabId: number, state: RunnerState, index: number): Promise<v
   await put(tabId, next);
   // Go dark on the page we're leaving, so its end screen / autoplay never shows.
   await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry) });
-  // The #wtv: hash lets the new page black out (and know its start / end time) before it
-  // paints, without waiting for the hello round trip.
-  const hash = { t: entry.startS, end: entry.endS ?? null, title: entry.title };
-  await browser.tabs.update(tabId, { url: withWtvHash(entry.url, hash) });
+  await browser.tabs.update(tabId, { url: entryPageUrl(entry, next.gen) });
+}
+
+/**
+ * Where the tab goes for an entry. Posts: the card page (`gen` makes each visit a new
+ * page). Otherwise the entry itself, with a #wtv: hash that lets the new page black out
+ * (and know its start / end time, or that it's a page show) before it paints, without
+ * waiting for the hello round trip.
+ */
+function entryPageUrl(entry: RunEntry, gen: number): string {
+  if (entry.view === 'card') return browser.runtime.getURL(`/card.html?gen=${gen}`);
+  const view = entry.view && isPageView(entry.view) ? entry.view : null;
+  return withWtvHash(entry.url, { t: entry.startS, end: entry.endS ?? null, title: entry.title, view });
 }
 
 async function start(
@@ -204,7 +226,16 @@ async function start(
   const state: RunnerState = {
     playlistId,
     name: playlist.name,
-    entries: entries.map(({ url, title, startS, endS, ads, view, show }) => ({ url, title, startS, endS, ads, view, show })),
+    entries: entries.map(({ url, title, startS, endS, ads, view, show, speed }) => ({
+      url,
+      title,
+      startS,
+      endS,
+      ads,
+      view,
+      show,
+      speed,
+    })),
     order,
     index,
     shuffle: options.shuffle,
@@ -281,7 +312,25 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
     ads: entry.ads,
     view: entry.view ?? 'video',
     show: entry.show ?? null,
+    speed: entry.speed ?? null,
   };
+}
+
+/** The card page asks for its post. Not queued: the fetch can take seconds. */
+async function post(tabId: number, gen: number): Promise<PostResult> {
+  const state = (await load())[tabId];
+  const entry = state && state.gen === gen ? entryAt(state) : undefined;
+  if (!entry || entry.view !== 'card') return { ok: false, gone: false, error: 'not a post entry any more' };
+  const result = await fetchPost(entry.url);
+  if (result.ok) {
+    void updateMedia({
+      url: entry.url,
+      title: postTitle(result.post),
+      creator: result.post.author,
+      durationS: entry.endS ?? cardDurationS(result.post.text),
+    });
+  }
+  return result;
 }
 
 async function media(tabId: number, frameId: number, gen: number, event: MediaEvent): Promise<void> {
@@ -403,6 +452,12 @@ export function startPlaylistRunner(): void {
         if (senderTab === undefined) return undefined;
         void serial(() => media(senderTab, sender.frameId ?? 0, msg.gen, msg.event));
         return undefined;
+      case PL_POST:
+        if (senderTab === undefined) return undefined;
+        post(senderTab, msg.gen).then(sendResponse, (err: unknown) =>
+          sendResponse({ ok: false, gone: false, error: err instanceof Error ? err.message : String(err) }),
+        );
+        return true;
       case PL_INFO:
         if (senderTab === undefined) return undefined;
         void serial(() => info(senderTab, msg.gen, msg.info));

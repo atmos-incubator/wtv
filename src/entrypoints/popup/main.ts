@@ -259,7 +259,9 @@ function playlistRow(
       result,
     );
   } else {
-    nodes.push(el('div', { className: 'actions' }, playlistsButton(runner?.playlistId)));
+    nodes.push(
+      el('div', { className: 'actions' }, playlistsButton(runner?.playlistId), sidePanelButton('Explore…', 'playlists', tab.windowId)),
+    );
   }
   return row('Playlist', ...nodes);
 }
@@ -348,10 +350,16 @@ async function render(): Promise<void> {
   );
 
   if (!tab?.id || !isWebUrl(tab.url)) {
+    // A playlist can be on one of Wtv's own pages (a post's card): its controls still apply.
+    const runner = tab?.id ? await runnerState(tab.id) : null;
     app.replaceChildren(
       el('h1', { text: 'Wtv' }),
-      note('Wtv only runs on web pages.'),
-      row('Playlist', el('div', { className: 'actions' }, playlistsButton(), sidePanelButton('Explore…', 'playlists', tab?.windowId))),
+      ...(runner && tab?.id
+        ? [playlistRow({ id: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId }, runner, [])]
+        : [
+            note('Wtv only runs on web pages.'),
+            row('Playlist', el('div', { className: 'actions' }, playlistsButton(), sidePanelButton('Explore…', 'playlists', tab?.windowId))),
+          ]),
       settingsRow,
     );
     return;

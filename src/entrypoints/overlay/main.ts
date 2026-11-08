@@ -1,8 +1,9 @@
 /**
  * Overlay page: an extension page framed into sites by the content script (see
  * lib/overlay/host.ts). Plays the ad slideshow / quotes, pictures over a paused show or
- * as the show itself, shows a blackout title, or is a transparent click shield. Runs in the extension origin, so it reads the image library
- * from IndexedDB.
+ * as the show itself, shows a blackout title, reads a page's article out at a reading
+ * pace (reader.ts), or is a transparent click shield. Runs in the extension origin, so it
+ * reads the image library from IndexedDB.
  */
 import './style.css';
 import { getImageBlob } from '../../lib/images/db';
@@ -18,6 +19,7 @@ import {
   type ProgramItem,
   type Slide,
 } from '../../lib/overlay/program';
+import { startReader, type Reader } from './reader';
 
 const ACTIVITY_THROTTLE_MS = 150;
 const IDLE_CURSOR_MS = 2500;
@@ -33,6 +35,7 @@ const promptStart = document.getElementById('prompt-start') as HTMLButtonElement
 const promptStatus = document.getElementById('prompt-status') as HTMLElement;
 const promptButtons = document.getElementById('prompt-buttons') as HTMLElement;
 const promptNext = document.getElementById('prompt-next') as HTMLButtonElement;
+const readerBox = document.getElementById('reader') as HTMLElement;
 let front = document.getElementById('layer-a') as HTMLElement;
 let back = document.getElementById('layer-b') as HTMLElement;
 
@@ -48,6 +51,7 @@ let interactive = false;
 /** Pictures as the show, paused: hold the current slide until it plays again. */
 let frozen = false;
 let resumeSlides: (() => void) | null = null;
+let reader: { id: number; handle: Reader } | null = null;
 let lastActivity = 0;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 const layerUrls = new Map<HTMLElement, string[]>();
@@ -95,6 +99,9 @@ function reset(): void {
   prompt.hidden = true;
   pill.hidden = true;
   root.classList.remove('pill');
+  reader?.handle.stop();
+  reader = null;
+  readerBox.classList.remove('paused');
   setShield(false, false);
 }
 
@@ -308,6 +315,11 @@ function handle(cmd: OverlayCommand | null): void {
       root.classList.add('pill');
       pill.hidden = false;
       break;
+    case 'read':
+      if (reader?.id === cmd.id) break;
+      reset();
+      reader = { id: cmd.id, handle: startReader(cmd, readerBox, emit) };
+      break;
     case 'hide':
       reset();
       break;
@@ -342,7 +354,8 @@ document.getElementById('prompt-next')!.addEventListener('click', (e) => {
 });
 
 document.addEventListener('click', (e) => {
-  if (shield || interactive) emit({ type: 'click', ...where(e) });
+  if (reader) reader.handle.togglePause();
+  else if (shield || interactive) emit({ type: 'click', ...where(e) });
 });
 
 document.addEventListener('dblclick', (e) => {
@@ -365,6 +378,12 @@ document.addEventListener(
 // Focus lands in this frame after a click; hand keys back to the page.
 document.addEventListener('keydown', (e) => {
   if (e.key.length === 0 || e.key.length > 32) return;
+  // Reading: Space pauses here, like the card page.
+  if (reader && e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    if (!e.repeat) reader.handle.togglePause();
+    return;
+  }
   // Plain keys only: Space / arrows would otherwise scroll the page behind us. Browser
   // shortcuts (Cmd/Ctrl/Alt + key) keep their default.
   if (!e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();

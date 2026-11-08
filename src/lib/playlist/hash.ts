@@ -6,6 +6,7 @@
  *   t   start time (any parseTimestamp format; written as seconds)
  *   e   end time, same format: the media pauses there (in a playlist, the next entry starts)
  *   d   display title for the blackout (encodeURIComponent, so underscores etc. survive)
+ *   v   `read` or `scroll`: the page is the show (page-show/), so don't wait for a video
  *
  * Namespaced so it can't collide with a site's own hash routing or `t` parameter. The
  * background runner's state is the source of truth for playlists; the hash is the
@@ -27,7 +28,11 @@ export interface WtvHash {
   /** Seconds. */
   end: number | null;
   title: string | null;
+  /** A page shown as a page (`read` / `scroll`); null: the usual (media). */
+  view?: HashView | null;
 }
+
+export type HashView = 'read' | 'scroll';
 
 function decode(value: string): string {
   try {
@@ -40,7 +45,7 @@ function decode(value: string): string {
 /** `location.hash` → params, or null if it isn't a Wtv hash. */
 export function parseWtvHash(hash: string): WtvHash | null {
   if (!hash.startsWith(HASH_PREFIX)) return null;
-  const out: WtvHash = { t: null, end: null, title: null };
+  const out: WtvHash = { t: null, end: null, title: null, view: null };
   for (const part of hash.slice(HASH_PREFIX.length).split('&')) {
     const eq = part.indexOf('=');
     if (eq <= 0) continue;
@@ -49,6 +54,7 @@ export function parseWtvHash(hash: string): WtvHash | null {
     if (key === 't') out.t = parseTimestamp(value);
     else if (key === 'e') out.end = parseTimestamp(value);
     else if (key === 'd') out.title = value.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE) || null;
+    else if (key === 'v' && (value === 'read' || value === 'scroll')) out.view = value;
   }
   return out;
 }
@@ -63,6 +69,7 @@ export function formatWtvHash(params: WtvHash): string {
   if (t) parts.push(`t=${t}`);
   if (end) parts.push(`e=${end}`);
   if (params.title) parts.push(`d=${encodeURIComponent(params.title)}`);
+  if (params.view) parts.push(`v=${params.view}`);
   return HASH_PREFIX + parts.join('&');
 }
 

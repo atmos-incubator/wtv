@@ -40,7 +40,26 @@ export type OverlayCommand =
   | { type: 'pictures'; purpose: PicturesPurpose; host: string; items: ProgramItem[]; paused: boolean }
   /** A small "Show pictures" button in a corner of the player, after ✕ during an ad. */
   | { type: 'pill' }
+  /**
+   * A page shown as an article (`view=read`): the overlay finds the article in `html` (a
+   * snapshot of the page, `url` its address) with Readability and scrolls it at `wpm`, or
+   * fits it into `durS`. It answers with read-started / read-failed, then read-done. `id`
+   * changes per showing.
+   */
+  | ReadCommand
   | { type: 'hide' };
+
+export interface ReadCommand {
+  type: 'read';
+  id: number;
+  url: string;
+  html: string;
+  wpm: number;
+  durS: number | null;
+}
+
+/** Page snapshots bigger than this are cut (Readability copes with the rest). */
+export const MAX_READ_HTML = 8 * 1024 * 1024;
 
 export const PICTURES_PURPOSES = ['pause', 'show'] as const;
 export type PicturesPurpose = (typeof PICTURES_PURPOSES)[number];
@@ -70,6 +89,12 @@ export type OverlayEvent =
   | { type: 'click' | 'dblclick'; x: number; y: number }
   /** Pointer moved over the shield; x / y are fractions (0–1) of the overlay box. */
   | { type: 'activity'; x: number; y: number }
+  /** `read`: the article is showing, for `durationS` in all (paused time not counted). */
+  | { type: 'read-started'; id: number; durationS: number }
+  /** `read`: no article on the page (show the page itself instead). */
+  | { type: 'read-failed'; id: number }
+  /** `read`: finished. */
+  | { type: 'read-done'; id: number }
   | ForwardedKey;
 
 /**
@@ -133,6 +158,19 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
       if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.muted !== 'boolean') return null;
       return { type: 'ad', host: raw.host, items: parseItems(raw.items), muted: raw.muted };
     }
+    case 'read': {
+      const { id, url, html, wpm, durS } = raw;
+      if (!Number.isInteger(id) || typeof url !== 'string' || !/^https?:\/\//i.test(url) || typeof html !== 'string') return null;
+      if (!isPositive(wpm)) return null;
+      return {
+        type: 'read',
+        id: id as number,
+        url,
+        html: html.slice(0, MAX_READ_HTML),
+        wpm,
+        durS: isPositive(durS) ? durS : null,
+      };
+    }
     case 'pictures': {
       if (typeof raw.host !== 'string' || !Array.isArray(raw.items) || typeof raw.paused !== 'boolean') return null;
       if (!(PICTURES_PURPOSES as readonly unknown[]).includes(raw.purpose)) return null;
@@ -160,6 +198,13 @@ export function parseOverlayEvent(raw: unknown): OverlayEvent | null {
     case 'start':
     case 'next':
       return { type: raw.type };
+    case 'read-started':
+      return Number.isInteger(raw.id) && isPositive(raw.durationS)
+        ? { type: 'read-started', id: raw.id as number, durationS: raw.durationS }
+        : null;
+    case 'read-failed':
+    case 'read-done':
+      return Number.isInteger(raw.id) ? { type: raw.type, id: raw.id as number } : null;
     case 'click':
     case 'dblclick':
     case 'activity':

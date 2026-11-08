@@ -268,3 +268,158 @@ body {
     --fade: 0ms;
   }
 }
+
+/* --- Reading a page's article (view=read, reader.ts) --- */
+
+#reader {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #0d0d10;
+  color: var(--fg);
+  cursor: default;
+  --progress: 0;
+}
+
+#reader[hidden] {
+  display: none;
+}
+
+#reader::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: #8c76ff;
+  opacity: 0.7;
+  transform: scaleX(var(--progress));
+  transform-origin: left;
+}
+
+#reader.paused .read-column {
+  opacity: 0.4;
+}
+
+#reader.paused::before {
+  content: '⏸';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  font-size: clamp(32px, 9vw, 110px);
+  text-shadow: 0 2px 18px rgb(0 0 0 / 0.6);
+}
+
+.read-column {
+  width: min(92%, 34em);
+  margin: 0 auto;
+  padding: 14vh 0 50vh;
+  font-size: clamp(18px, 2.3vw, 40px);
+  line-height: 1.55;
+  will-change: transform;
+  transition: opacity 300ms ease;
+  animation: read-in 900ms ease-out;
+}
+
+.read-head {
+  margin-bottom: 1.6em;
+}
+
+.read-column .site {
+  margin: 0 0 0.4em;
+  color: #a6a3ad;
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.read-column h1 {
+  margin: 0;
+  font-size: 1.9em;
+  line-height: 1.15;
+  font-weight: 750;
+  text-wrap: balance;
+}
+
+.read-column .byline {
+  margin: 0.8em 0 0;
+  color: #a6a3ad;
+  font-size: 0.75em;
+}
+
+.read-column h2,
+.read-column h3 {
+  margin: 1.4em 0 0.4em;
+  line-height: 1.25;
+}
+
+.read-column h2 {
+  font-size: 1.3em;
+}
+
+.read-column h3 {
+  font-size: 1.1em;
+}
+
+.read-column p {
+  margin: 0 0 0.9em;
+  text-wrap: pretty;
+}
+
+.read-column p.item {
+  padding-left: 1.2em;
+  text-indent: -0.8em;
+}
+
+.read-column p.item::before {
+  content: '•';
+  display: inline-block;
+  width: 0.8em;
+  text-indent: 0;
+}
+
+.read-column p.caption {
+  color: #a6a3ad;
+  font-size: 0.7em;
+  text-align: center;
+}
+
+.read-column blockquote {
+  margin: 0 0 0.9em;
+  padding-left: 0.8em;
+  border-left: 0.15em solid #8c76ff;
+  font-style: italic;
+}
+
+.read-column pre {
+  margin: 0 0 0.9em;
+  font-size: 0.6em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.read-column .pic {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 60vh;
+  margin: 0.4em auto 1em;
+  border-radius: 0.3em;
+}
+
+@keyframes read-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .read-column {
+    animation: none;
+  }
+}

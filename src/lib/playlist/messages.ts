@@ -6,6 +6,10 @@
  *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked / gone, from frames that got an EntryInfo
  *     PL_INFO   { gen, info }                              what the page says about the entry (title, duration…), for the media library
  *
+ *   card page (card.html, in the playlist's tab: `view=card` entries) → background
+ *     PL_HELLO / PL_MEDIA as above (the card page is the entry's page)
+ *     PL_POST   { gen }      → PostResult   the post, fetched by the background (posts/)
+ *
  *   background → content, top frame only (tabs.sendMessage, frameId 0)
  *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
  *
@@ -20,6 +24,7 @@
  * being left can't skip the next entry too.
  */
 import { parseProgramItem, type ProgramItem } from '../overlay/program';
+import { parsePost, type Post } from '../posts/adapters';
 import { isViewMode, type ViewMode } from './format';
 
 export const PL_HELLO = 'wtv/playlist/hello';
@@ -29,6 +34,7 @@ export const PL_COMMAND = 'wtv/playlist/command';
 export const PL_STATE = 'wtv/playlist/state';
 export const PL_INFO = 'wtv/playlist/info';
 export const PL_RUNS = 'wtv/playlist/runs';
+export const PL_POST = 'wtv/playlist/post';
 
 /** `gone`: the site says the media is unavailable (the `unavailable` role). */
 export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked', 'gone'] as const;
@@ -53,7 +59,12 @@ export interface EntryInfo {
   view: ViewMode;
   /** The slideshow for `view: pictures`; null = the site's images. */
   show: ProgramItem[] | null;
+  /** `view: read`: words per minute; `scroll`: pixels a second; null: the default. */
+  speed: number | null;
 }
+
+/** A `view=card` entry's post. `gone`: the site says it doesn't exist (any more). */
+export type PostResult = { ok: true; post: Post } | { ok: false; gone: boolean; error: string };
 
 export interface RunnerSummary {
   playlistId: string;
@@ -89,7 +100,8 @@ export interface MediaInfo {
 export type ContentRequest =
   | { type: typeof PL_HELLO }
   | { type: typeof PL_MEDIA; gen: number; event: MediaEvent }
-  | { type: typeof PL_INFO; gen: number; info: MediaInfo };
+  | { type: typeof PL_INFO; gen: number; info: MediaInfo }
+  | { type: typeof PL_POST; gen: number };
 
 export type PageRequest =
   | {
@@ -127,6 +139,8 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
       return { type: PL_STATE, tabId };
     case PL_RUNS:
       return { type: PL_RUNS };
+    case PL_POST:
+      return isIndex(raw.gen) ? { type: PL_POST, gen: raw.gen } : null;
     case PL_INFO:
       return isIndex(raw.gen) && isObj(raw.info) ? { type: PL_INFO, gen: raw.gen, info: parseMediaInfo(raw.info) } : null;
     case PL_COMMAND:
@@ -178,7 +192,7 @@ export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
 
 export function parseEntryInfo(raw: unknown): EntryInfo | null {
   if (!isObj(raw)) return null;
-  const { gen, index, total, playlist, title, startS, endS, ads, view, show } = raw;
+  const { gen, index, total, playlist, title, startS, endS, ads, view, show, speed } = raw;
   const seconds = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
   const program = (v: unknown) =>
     Array.isArray(v) ? v.map(parseProgramItem).filter((i): i is ProgramItem => i !== null) : null;
@@ -194,5 +208,18 @@ export function parseEntryInfo(raw: unknown): EntryInfo | null {
     ads: program(ads),
     view: isViewMode(view) ? view : 'video',
     show: program(show),
+    speed: typeof speed === 'number' && Number.isFinite(speed) && speed > 0 ? speed : null,
   };
+}
+
+export function parsePostResult(raw: unknown): PostResult | null {
+  if (!isObj(raw)) return null;
+  if (raw.ok === true) {
+    const post = parsePost(raw.post);
+    return post ? { ok: true, post } : null;
+  }
+  if (raw.ok === false) {
+    return { ok: false, gone: raw.gone === true, error: typeof raw.error === 'string' ? raw.error.slice(0, 300) : 'failed' };
+  }
+  return null;
 }

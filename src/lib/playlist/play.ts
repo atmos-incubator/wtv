@@ -4,12 +4,16 @@
  * user's gesture.
  *
  * Wtv only runs where it has host access, so it asks for every entry's site up front, so
- * the runner can detect each video's end; and for those sites' thumbnail hosts, so the
- * media library can cache thumbnails, unless the user said no to those before
- * (remembered in this origin's localStorage, shared by every Wtv page).
+ * the runner can detect each video's end (or show the page, for `view=read` / `scroll`);
+ * for the post sites' fetch hosts (`view=card`: the post's own site is never visited);
+ * and for the sites' thumbnail hosts, so the media library can cache thumbnails, unless
+ * the user said no to those before (remembered in this origin's localStorage, shared by
+ * every Wtv page).
  */
 import { browser } from 'wxt/browser';
 import { thumbnailOriginsFor } from '../media-library/record';
+import { originPatternForHost } from '../permissions';
+import { postFetchHosts } from '../posts/adapters';
 import { BUNDLED_SITES } from '../sites/bundled';
 import { compilePlaylist, parsePlaylist } from './format';
 import { originPatternsFor } from './match';
@@ -35,8 +39,9 @@ export async function playPlaylist(p: { id: string; text: string }, o: PlayOptio
   const compiled = compilePlaylist(parsePlaylist(p.text));
   if (compiled.entries.length === 0) return { ok: false, error: 'it has no entries' };
 
-  const urls = compiled.entries.map((e) => e.url);
-  const origins = originPatternsFor(urls);
+  const urls = compiled.entries.filter((e) => e.view !== 'card').map((e) => e.url);
+  const posts = compiled.entries.filter((e) => e.view === 'card').map((e) => e.url);
+  const origins = [...originPatternsFor(urls), ...postFetchHosts(posts).map(originPatternForHost)];
   const declined = declinedThumbnails();
   const thumbnailOrigins = thumbnailOriginsFor(urls, BUNDLED_SITES).filter((o) => !declined.has(o));
   let granted = await browser.permissions.contains({ origins });

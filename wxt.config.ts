@@ -9,6 +9,8 @@ import { hostPermissionPatterns } from './src/lib/sites/match';
 
 const SITES_DIR = fileURLToPath(new URL('./src/sites/', import.meta.url));
 const PLAYLISTS_DIR = fileURLToPath(new URL('./src/playlists/', import.meta.url));
+/** Apache-2.0: Readability's license ships with the code that includes it (the overlay page). */
+const READABILITY_LICENSE = fileURLToPath(new URL('./node_modules/@mozilla/readability/LICENSE.md', import.meta.url));
 
 /** Validate bundled site configs at build time; any error fails the build. */
 function bundledSitesForBuild() {
@@ -51,6 +53,11 @@ function checkBuiltinPlaylists(): void {
 
 export default defineConfig({
   srcDir: 'src',
+  hooks: {
+    'build:publicAssets': (_wxt, files) => {
+      files.push({ absoluteSrc: READABILITY_LICENSE, relativeDest: 'licenses/readability-LICENSE.md' });
+    },
+  },
   manifest: ({ mode }) => {
     const dev = isDevToolsMode(mode);
     checkBuiltinPlaylists();

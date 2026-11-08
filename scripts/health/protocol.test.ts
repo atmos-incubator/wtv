@@ -11,7 +11,9 @@ import {
   MSG_STATUS,
   PICK_ROLES,
   evaluateRun,
+  cardCheckUrl,
   judgeEntry,
+  judgeHttp,
   parseBuiltinFile,
   parseTargets,
   summarize,
@@ -115,15 +117,46 @@ describe('built-in playlist check', () => {
 
   it('reads the same entries as the real parser', () => {
     const file = parseBuiltinFile('cats', text);
-    expect(file).toEqual({ id: 'cats', name: 'Cat videos', urls: ['https://www.youtube.com/watch?v=aaa', 'https://youtu.be/bbb'] });
+    expect(file).toEqual({
+      id: 'cats',
+      name: 'Cat videos',
+      urls: ['https://www.youtube.com/watch?v=aaa', 'https://youtu.be/bbb'],
+      views: ['video', 'video'],
+    });
     expect(file.urls).toEqual(compilePlaylist(parsePlaylist(text)).entries.map((e) => e.url));
+  });
+
+  it('reads views like the real parser', () => {
+    const mixed = [
+      '# name: Mixed',
+      '[view read]',
+      'https://a.com/story',
+      'https://x.com/a/status/1 | view=Card | dur=20',
+      'https://www.youtube.com/watch?v=a | Title | view=video',
+    ].join('\n');
+    expect(parseBuiltinFile('mixed', mixed).views).toEqual(compilePlaylist(parsePlaylist(mixed)).entries.map((e) => e.view));
+  });
+
+  it('judges pages and posts by their HTTP status', () => {
+    expect(cardCheckUrl('https://twitter.com/a/status/1')).toBe(
+      'https://publish.x.com/oembed?url=https%3A%2F%2Ftwitter.com%2Fa%2Fstatus%2F1&omit_script=1&dnt=true',
+    );
+    expect(cardCheckUrl('https://a.com/')).toBeNull();
+    expect(judgeHttp('u', 200, null, false)).toEqual({ url: 'u', verdict: 'ok', detail: null });
+    expect(judgeHttp('u', 404, null, false).verdict).toBe('gone');
+    expect(judgeHttp('u', 403, null, false).verdict).toBe('unknown');
+    expect(judgeHttp('u', 403, null, true).verdict).toBe('gone');
+    expect(judgeHttp('u', 500, null, false)).toEqual({ url: 'u', verdict: 'unknown', detail: 'HTTP 500' });
+    expect(judgeHttp('u', null, 'timeout', true)).toEqual({ url: 'u', verdict: 'unknown', detail: 'timeout' });
   });
 
   it('reads every shipped file the same way the extension does', () => {
     const dir = fileURLToPath(new URL('../../src/playlists/', import.meta.url));
     for (const f of readdirSync(dir).filter((n) => n.endsWith('.txt'))) {
       const t = readFileSync(dir + f, 'utf8');
-      expect(parseBuiltinFile(f, t).urls, f).toEqual(compilePlaylist(parsePlaylist(t)).entries.map((e) => e.url));
+      const compiled = compilePlaylist(parsePlaylist(t)).entries;
+      expect(parseBuiltinFile(f, t).urls, f).toEqual(compiled.map((e) => e.url));
+      expect(parseBuiltinFile(f, t).views, f).toEqual(compiled.map((e) => e.view));
     }
   });
 

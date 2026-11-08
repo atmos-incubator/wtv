@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wtv</title>
+  </head>
+  <body>
+    <main id="stage">
+      <p id="status" class="status" aria-live="polite"></p>
+      <article id="card" class="card" hidden>
+        <header>
+          <span id="author" class="author"></span>
+          <span id="handle" class="handle"></span>
+        </header>
+        <blockquote id="text" class="text"></blockquote>
+        <footer>
+          <span id="site" class="site"></span>
+          <time id="time"></time>
+        </footer>
+      </article>
+    </main>
+    <div id="paused" hidden aria-hidden="true">⏸</div>
+    <div id="progress" class="progress" aria-hidden="true"><span></span></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

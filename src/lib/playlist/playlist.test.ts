@@ -8,11 +8,13 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_POST,
   PL_RUNS,
   PL_STATE,
   parseEntryInfo,
   parsePlaylistApply,
   parsePlaylistRequest,
+  parsePostResult,
 } from './messages';
 import { addToPlaylist, deletePlaylist, getPlaylist, listPlaylists, nextPlaylistName, savePlaylist } from './store';
 
@@ -151,6 +153,7 @@ describe('playlist messages', () => {
       // From a runner started before views existed.
       view: 'video',
       show: null,
+      speed: null,
     });
     expect(
       parseEntryInfo({
@@ -166,5 +169,24 @@ describe('playlist messages', () => {
     expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', endS: 187 })?.endS).toBe(187);
     expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', endS: -1 })?.endS).toBeNull();
     expect(parseEntryInfo(null)).toBeNull();
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', view: 'read', speed: 200 })).toMatchObject({
+      view: 'read',
+      speed: 200,
+    });
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', view: 'card', speed: -1 })).toMatchObject({
+      view: 'card',
+      speed: null,
+    });
+  });
+
+  it('parses post requests and results', () => {
+    expect(parsePlaylistRequest({ type: PL_POST, gen: 3 })).toEqual({ type: PL_POST, gen: 3 });
+    expect(parsePlaylistRequest({ type: PL_POST })).toBeNull();
+    const post = { site: 'X', author: 'A', handle: '@a', text: 'Hi', time: null, url: 'https://x.com/a/status/1', images: [] };
+    expect(parsePostResult({ ok: true, post })).toEqual({ ok: true, post });
+    expect(parsePostResult({ ok: true, post: { ...post, url: 'javascript:alert(1)' } })).toBeNull();
+    expect(parsePostResult({ ok: false, gone: true, error: 'gone' })).toEqual({ ok: false, gone: true, error: 'gone' });
+    expect(parsePostResult({ ok: false })).toEqual({ ok: false, gone: false, error: 'failed' });
+    expect(parsePostResult('nope')).toBeNull();
   });
 });

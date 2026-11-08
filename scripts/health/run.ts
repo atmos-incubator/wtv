@@ -37,13 +37,16 @@ import { chromium, type BrowserContext, type Page, type Worker } from 'playwrigh
 import {
   MSG_STATUS,
   PICK_ROLES,
+  cardCheckUrl,
   evaluateRun,
   judgeEntry,
+  judgeHttp,
   parseBuiltinFile,
   parseTargets,
   summarize,
   summarizePlaylists,
   type EntryObservation,
+  type EntryResult,
   type Observation,
   type Playability,
   type PlaylistResult,
@@ -283,6 +286,28 @@ async function checkEntry(ext: Extension, page: Page, playlist: string, url: str
   return obs;
 }
 
+/** `view=card`: does the site's endpoint still know the post? */
+async function checkPost(url: string): Promise<EntryResult> {
+  const endpoint = cardCheckUrl(url);
+  if (!endpoint) return { url, verdict: 'unknown', detail: 'not a post Wtv can read' };
+  try {
+    const res = await fetch(endpoint, { signal: AbortSignal.timeout(15_000) });
+    return judgeHttp(url, res.status, null, true);
+  } catch (err) {
+    return judgeHttp(url, null, err instanceof Error ? err.message : String(err), true);
+  }
+}
+
+/** `view=read` / `scroll`: does the page still load? */
+async function checkPage(page: Page, url: string): Promise<EntryResult> {
+  try {
+    const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    return judgeHttp(url, res?.status() ?? null, null, false);
+  } catch (err) {
+    return judgeHttp(url, null, err instanceof Error ? err.message.split('\n')[0]! : String(err), false);
+  }
+}
+
 async function checkPlaylists(ext: Extension, context: BrowserContext): Promise<PlaylistResult[]> {
   const files = readdirSync(PLAYLISTS)
     .filter((f) => f.endsWith('.txt'))
@@ -294,8 +319,14 @@ async function checkPlaylists(ext: Extension, context: BrowserContext): Promise<
   for (const file of files) {
     console.info(`[health] playlist ${file.id}: ${file.urls.length} entries`);
     const entries = [];
-    for (const url of file.urls) {
-      const result = judgeEntry(await checkEntry(ext, page, file.id, url));
+    for (const [i, url] of file.urls.entries()) {
+      const view = file.views[i] ?? 'video';
+      const result =
+        view === 'card'
+          ? await checkPost(url)
+          : view === 'read' || view === 'scroll'
+            ? await checkPage(page, url)
+            : judgeEntry(await checkEntry(ext, page, file.id, url));
       if (result.verdict !== 'ok') console.info(`[health]   ${result.verdict}: ${url}${result.detail ? ` (${result.detail})` : ''}`);
       entries.push(result);
     }

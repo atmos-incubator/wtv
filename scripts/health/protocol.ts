@@ -154,21 +154,53 @@ export interface BuiltinFile {
   id: string;
   name: string;
   urls: string[];
+  /** Each entry's view (`view=`, else the playlist's `[view …]`, else video), lowercase. */
+  views: string[];
 }
 
 /**
  * The entry URLs of a built-in playlist. A deliberately small reading of the format
  * (src/lib/playlist/format.ts): entry lines are the ones starting with http(s)://, the URL
- * is everything before the first `|`. protocol.test.ts checks it against the real parser.
+ * is everything before the first `|`, and its view is a `view=` field, else a `[view …]`
+ * line before the first entry. protocol.test.ts checks it against the real parser.
  */
 export function parseBuiltinFile(id: string, text: string): BuiltinFile {
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
   const name = /^#\s*name:\s*(.+?)\s*$/i.exec(lines[0] ?? '')?.[1] ?? id;
-  const urls = lines
-    .map((l) => l.trim())
-    .filter((l) => /^https?:\/\//i.test(l))
-    .map((l) => l.split('|')[0]!.trim());
-  return { id, name, urls };
+  const first = lines.findIndex((l) => /^https?:\/\//i.test(l));
+  const defaultView =
+    lines
+      .slice(0, first < 0 ? lines.length : first)
+      .map((l) => /^\[view\s+([^\]\s]+)\s*\]$/i.exec(l)?.[1])
+      .filter(Boolean)
+      .pop()
+      ?.toLowerCase() ?? 'video';
+  const entries = lines.filter((l) => /^https?:\/\//i.test(l)).map((l) => l.split('|').map((f) => f.trim()));
+  return {
+    id,
+    name,
+    urls: entries.map((fields) => fields[0]!),
+    views: entries.map(
+      (fields) => fields.find((f) => /^view=/i.test(f))?.slice('view='.length).toLowerCase() ?? defaultView,
+    ),
+  };
+}
+
+/**
+ * Pages and posts (`view=read` / `scroll` / `card`) have no player to ask: the check is
+ * the HTTP status of the page, or of the post's oEmbed (X).
+ */
+export function cardCheckUrl(url: string): string | null {
+  return /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^/]+\/status(?:es)?\/\d+/i.test(url)
+    ? `https://publish.x.com/oembed?url=${encodeURIComponent(url)}&omit_script=1&dnt=true`
+    : null;
+}
+
+export function judgeHttp(url: string, status: number | null, error: string | null, post: boolean): EntryResult {
+  if (error) return { url, verdict: 'unknown', detail: error };
+  if (status === 404 || status === 410 || (post && status === 403)) return { url, verdict: 'gone', detail: `HTTP ${status}` };
+  if (status === null || status >= 400) return { url, verdict: 'unknown', detail: status === null ? 'no answer' : `HTTP ${status}` };
+  return { url, verdict: 'ok', detail: null };
 }
 
 /** YouTube's own verdict, from the watch page's `ytInitialPlayerResponse.playabilityStatus`. */

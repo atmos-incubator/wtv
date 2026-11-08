@@ -167,11 +167,72 @@ https://radio.example/d
   it('reports bad views and a [view] after the first entry', () => {
     const r = compilePlaylist(parsePlaylist('[view radio]\nhttps://a.com/1 | view=Pictures\n[view pictures]\nhttps://a.com/2 | view=tv'));
     expect(r.problems).toEqual([
-      { line: 1, message: '[view radio]: expected video or pictures' },
+      { line: 1, message: '[view radio]: expected video, pictures, read, scroll, card' },
       { line: 3, message: '[view …] goes before the first entry; use view= on an entry (ignored)' },
-      { line: 4, message: 'view=tv: expected video or pictures' },
+      { line: 4, message: 'view=tv: expected video, pictures, read, scroll, card' },
     ]);
     expect(r.entries.map((e) => e.view)).toEqual(['pictures', 'video']);
+  });
+});
+
+describe('pages and posts', () => {
+  const compile = (text: string) => compilePlaylist(parsePlaylist(text));
+
+  it('reads view=read / scroll / card, with speeds', () => {
+    const r = compile(
+      [
+        '[speed 220 wpm]',
+        '[speed 45 px/s]',
+        'https://a.com/story | Story | view=read',
+        'https://a.com/story2 | view=read | speed=150',
+        'https://a.com/page | view=scroll',
+        'https://a.com/page2 | view=scroll | speed=12px/s | dur=1:00',
+        'https://x.com/someone/status/123 | view=card | dur=20s',
+        'https://www.youtube.com/watch?v=a',
+      ].join('\n'),
+    );
+    expect(r.problems).toEqual([]);
+    expect(r.defaultSpeed).toEqual({ wpm: 220, pxPerS: 45 });
+    expect(r.entries.map((e) => [e.view, e.speed, e.endS])).toEqual([
+      ['read', 220, null],
+      ['read', 150, null],
+      ['scroll', 45, null],
+      ['scroll', 12, 60],
+      ['card', null, 20],
+      ['video', null, null],
+    ]);
+  });
+
+  it('flags speeds that don\'t fit, t= on a page, and posts it can\'t read', () => {
+    const r = compile(
+      [
+        '[speed 200]',
+        'https://a.com/1 | view=read | speed=40px/s | t=1:00',
+        'https://a.com/2 | speed=200',
+        'https://a.com/3 | view=scroll | speed=5000',
+        'https://a.com/4 | view=read | speed=fast',
+        'https://bsky.app/profile/a/post/1 | view=card',
+        '[speed 200 wpm]',
+      ].join('\n'),
+    );
+    expect(r.problems.map((p) => [p.line, p.message])).toEqual([
+      [1, '[speed 200]: expected a number and wpm or px/s, like [speed 200 wpm]'],
+      [2, "t= doesn't apply to view=read (ignored)"],
+      [2, 'speed=: view=read takes words per minute (wpm) (ignored)'],
+      [3, 'speed= only applies to view=read and view=scroll (ignored)'],
+      [4, 'speed=5000: expected between 1 and 2000 px/s (ignored)'],
+      [5, 'speed=fast: expected a number, like speed=200 (wpm) or speed=40 (px/s)'],
+      [6, 'view=card: not a post Wtv can read (so far: X (x.com) posts)'],
+      [7, '[speed …] goes before the first entry; use speed= on an entry (ignored)'],
+    ]);
+    expect(r.entries[0]!.startS).toBeNull();
+    expect(r.entries.map((e) => e.speed)).toEqual([null, null, null, null, null]);
+  });
+
+  it('takes a playlist-wide [view read]', () => {
+    const r = compile('[view read]\nhttps://a.com/1\nhttps://www.youtube.com/watch?v=a | view=video');
+    expect(r.entries.map((e) => e.view)).toEqual(['read', 'video']);
+    expect(parseLine('[Speed 40 px/s]')).toEqual({ kind: 'speed', raw: '[Speed 40 px/s]', value: '40 px/s' });
   });
 });
 

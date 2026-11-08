@@ -114,6 +114,31 @@ describe('shield command', () => {
   });
 });
 
+describe('read command', () => {
+  it('parses a page snapshot to read', () => {
+    const cmd = { type: 'read', id: 3, url: 'https://a.com/story', html: '<p>hi</p>', wpm: 200, durS: null };
+    expect(parseOverlayCommand(cmd)).toEqual(cmd);
+    expect(parseOverlayCommand({ ...cmd, durS: 90 })).toMatchObject({ durS: 90 });
+    expect(parseOverlayCommand({ ...cmd, durS: -1 })).toMatchObject({ durS: null });
+  });
+
+  it('rejects odd addresses and speeds', () => {
+    const cmd = { type: 'read', id: 3, url: 'https://a.com/story', html: '', wpm: 200, durS: null };
+    expect(parseOverlayCommand({ ...cmd, url: 'javascript:alert(1)' })).toBeNull();
+    expect(parseOverlayCommand({ ...cmd, wpm: 0 })).toBeNull();
+    expect(parseOverlayCommand({ ...cmd, id: 'x' })).toBeNull();
+    expect(parseOverlayCommand({ ...cmd, html: null })).toBeNull();
+  });
+
+  it('parses what the reader says back', () => {
+    expect(parseOverlayEvent({ type: 'read-started', id: 3, durationS: 120 })).toEqual({ type: 'read-started', id: 3, durationS: 120 });
+    expect(parseOverlayEvent({ type: 'read-started', id: 3 })).toBeNull();
+    expect(parseOverlayEvent({ type: 'read-failed', id: 3 })).toEqual({ type: 'read-failed', id: 3 });
+    expect(parseOverlayEvent({ type: 'read-done', id: 3 })).toEqual({ type: 'read-done', id: 3 });
+    expect(parseOverlayEvent({ type: 'read-done' })).toBeNull();
+  });
+});
+
 describe('parseOverlayEvent', () => {
   const key = { type: 'key', key: 'k', code: 'KeyK', shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false };
 
