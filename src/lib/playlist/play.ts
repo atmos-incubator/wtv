@@ -5,7 +5,8 @@
  *
  * Wtv only runs where it has host access, so it asks for every entry's site up front, so
  * the runner can detect each video's end (or show the page, for `view=read` / `scroll`);
- * for the post sites' fetch hosts (`view=card`: the post's own site is never visited);
+ * for the post adapters' fetch hosts, if they need any (`view=card`: the post's own page
+ * is never visited);
  * and for the sites' thumbnail hosts, so the media library can cache thumbnails, unless
  * the user said no to those before (remembered in this origin's localStorage, shared by
  * every Wtv page).

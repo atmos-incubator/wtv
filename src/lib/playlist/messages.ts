@@ -24,7 +24,7 @@
  * being left can't skip the next entry too.
  */
 import { parseProgramItem, type ProgramItem } from '../overlay/program';
-import { parsePost, type Post } from '../posts/adapters';
+import { parsePost, type PostResult } from '../posts/adapters';
 import { isViewMode, type ViewMode } from './format';
 
 export const PL_HELLO = 'wtv/playlist/hello';
@@ -63,8 +63,7 @@ export interface EntryInfo {
   speed: number | null;
 }
 
-/** A `view=card` entry's post. `gone`: the site says it doesn't exist (any more). */
-export type PostResult = { ok: true; post: Post } | { ok: false; gone: boolean; error: string };
+export type { PostResult } from '../posts/adapters';
 
 export interface RunnerSummary {
   playlistId: string;

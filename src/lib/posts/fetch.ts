@@ -1,12 +1,11 @@
 /**
  * Background: fetch a post for a `view=card` entry through its site's adapter. Needs host
- * access to the adapter's fetch host (asked for at Play): the endpoints don't allow
- * cross-origin requests otherwise.
+ * access to the adapter's fetch hosts, if it has any (asked for at Play): those endpoints
+ * don't allow cross-origin requests otherwise. Anonymous: never the user's cookies.
  */
 import { browser } from 'wxt/browser';
 import { originPatternForHost } from '../permissions';
-import type { PostResult } from '../playlist/messages';
-import { findPostAdapter, POST_SITES } from './adapters';
+import { findPostAdapter, POST_SITES, type PostResult } from './adapters';
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -31,11 +30,6 @@ export async function fetchPost(url: string): Promise<PostResult> {
   } catch (err) {
     return { ok: false, gone: false, error: `Couldn’t reach ${adapter.site}: ${err instanceof Error ? err.message : String(err)}` };
   }
-  // Deleted, or private (protected accounts): it won't play either way.
-  if (res.status === 404 || res.status === 410 || res.status === 403) {
-    return { ok: false, gone: true, error: `${adapter.site} says this post isn’t available` };
-  }
-  if (!res.ok) return { ok: false, gone: false, error: `${adapter.site} answered ${res.status}` };
-  const post = adapter.parse(await res.json().catch(() => null), canonical);
-  return post ? { ok: true, post } : { ok: false, gone: false, error: `Couldn’t read ${adapter.site}’s answer` };
+  const body = await res.text().catch(() => '');
+  return adapter.read(res.status, body, canonical);
 }

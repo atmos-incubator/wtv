@@ -281,8 +281,9 @@ full-screen card for `dur=` (default from text length).
   the background, rendered by the overlay page (never a site's embed script).
 - First adapter: X / Twitter, via the public oEmbed endpoint (`publish.twitter.com/oembed`), which
   returns a post's text without signing in.
-- More microblog sites follow, each one adapter: Bluesky (public API, no sign-in), Mastodon
-  (public statuses), Reddit (`.json`), and others later. Not all at once.
+- More microblog sites follow, each one adapter: Bluesky (public API, no sign-in) and Reddit
+  (the post's Atom feed: `.json` now asks for a login) are done; Mastodon (public statuses)
+  and others later. Not all at once.
 
 ---
 

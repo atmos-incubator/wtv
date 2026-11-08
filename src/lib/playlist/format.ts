@@ -277,7 +277,7 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
         }
         if (speed) speed = checkSpeed(speed, shown, (message) => problems.push({ line: at, message }));
         if (shown === 'card' && !findPostAdapter(line.url)) {
-          problems.push({ line: at, message: `view=card: not a post Wtv can read (so far: ${POST_SITES} posts)` });
+          problems.push({ line: at, message: `view=card: not a post Wtv can read (so far: posts on ${POST_SITES})` });
         }
         const endS = entryEnd(startS, endOpt, durOpt, (message) => problems.push({ line: at, message }));
         entries.push({ url: line.url, title: line.title, startS, endS, view, ownSpeed: speed, line: i, ownAds: [], ownShow: [] });

@@ -37,10 +37,10 @@ import { chromium, type BrowserContext, type Page, type Worker } from 'playwrigh
 import {
   MSG_STATUS,
   PICK_ROLES,
-  cardCheckUrl,
   evaluateRun,
   judgeEntry,
   judgeHttp,
+  judgePost,
   parseBuiltinFile,
   parseTargets,
   summarize,
@@ -54,6 +54,7 @@ import {
   type SiteResult,
   type Target,
 } from './protocol.ts';
+import { findPostAdapter } from '../../src/lib/posts/adapters.ts';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const EXTENSION = join(ROOT, '.output', 'chrome-mv3');
@@ -286,15 +287,15 @@ async function checkEntry(ext: Extension, page: Page, playlist: string, url: str
   return obs;
 }
 
-/** `view=card`: does the site's endpoint still know the post? */
+/** `view=card`: does the site's endpoint still know the post? Read as the extension reads it. */
 async function checkPost(url: string): Promise<EntryResult> {
-  const endpoint = cardCheckUrl(url);
-  if (!endpoint) return { url, verdict: 'unknown', detail: 'not a post Wtv can read' };
+  const found = findPostAdapter(url);
+  if (!found) return judgePost(url, null, null);
   try {
-    const res = await fetch(endpoint, { signal: AbortSignal.timeout(15_000) });
-    return judgeHttp(url, res.status, null, true);
+    const res = await fetch(found.adapter.endpoint(found.canonical), { signal: AbortSignal.timeout(15_000) });
+    return judgePost(url, found.adapter.read(res.status, await res.text(), found.canonical), null);
   } catch (err) {
-    return judgeHttp(url, null, err instanceof Error ? err.message : String(err), true);
+    return judgePost(url, null, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -302,9 +303,9 @@ async function checkPost(url: string): Promise<EntryResult> {
 async function checkPage(page: Page, url: string): Promise<EntryResult> {
   try {
     const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    return judgeHttp(url, res?.status() ?? null, null, false);
+    return judgeHttp(url, res?.status() ?? null, null);
   } catch (err) {
-    return judgeHttp(url, null, err instanceof Error ? err.message.split('\n')[0]! : String(err), false);
+    return judgeHttp(url, null, err instanceof Error ? err.message.split('\n')[0]! : String(err));
   }
 }
 

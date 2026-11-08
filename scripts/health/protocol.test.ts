@@ -11,9 +11,9 @@ import {
   MSG_STATUS,
   PICK_ROLES,
   evaluateRun,
-  cardCheckUrl,
   judgeEntry,
   judgeHttp,
+  judgePost,
   parseBuiltinFile,
   parseTargets,
   summarize,
@@ -137,17 +137,17 @@ describe('built-in playlist check', () => {
     expect(parseBuiltinFile('mixed', mixed).views).toEqual(compilePlaylist(parsePlaylist(mixed)).entries.map((e) => e.view));
   });
 
-  it('judges pages and posts by their HTTP status', () => {
-    expect(cardCheckUrl('https://twitter.com/a/status/1')).toBe(
-      'https://publish.x.com/oembed?url=https%3A%2F%2Ftwitter.com%2Fa%2Fstatus%2F1&omit_script=1&dnt=true',
-    );
-    expect(cardCheckUrl('https://a.com/')).toBeNull();
-    expect(judgeHttp('u', 200, null, false)).toEqual({ url: 'u', verdict: 'ok', detail: null });
-    expect(judgeHttp('u', 404, null, false).verdict).toBe('gone');
-    expect(judgeHttp('u', 403, null, false).verdict).toBe('unknown');
-    expect(judgeHttp('u', 403, null, true).verdict).toBe('gone');
-    expect(judgeHttp('u', 500, null, false)).toEqual({ url: 'u', verdict: 'unknown', detail: 'HTTP 500' });
-    expect(judgeHttp('u', null, 'timeout', true)).toEqual({ url: 'u', verdict: 'unknown', detail: 'timeout' });
+  it('judges pages by their HTTP status, posts by their adapter', () => {
+    expect(judgeHttp('u', 200, null)).toEqual({ url: 'u', verdict: 'ok', detail: null });
+    expect(judgeHttp('u', 404, null).verdict).toBe('gone');
+    expect(judgeHttp('u', 403, null).verdict).toBe('unknown');
+    expect(judgeHttp('u', 500, null)).toEqual({ url: 'u', verdict: 'unknown', detail: 'HTTP 500' });
+    expect(judgeHttp('u', null, 'timeout')).toEqual({ url: 'u', verdict: 'unknown', detail: 'timeout' });
+    expect(judgePost('u', { ok: true }, null)).toEqual({ url: 'u', verdict: 'ok', detail: null });
+    expect(judgePost('u', { ok: false, gone: true, error: 'deleted' }, null)).toEqual({ url: 'u', verdict: 'gone', detail: 'deleted' });
+    expect(judgePost('u', { ok: false, gone: false, error: 'HTTP 429' }, null).verdict).toBe('unknown');
+    expect(judgePost('u', null, null)).toEqual({ url: 'u', verdict: 'unknown', detail: 'not a post Wtv can read' });
+    expect(judgePost('u', null, 'timeout').detail).toBe('timeout');
   });
 
   it('reads every shipped file the same way the extension does', () => {

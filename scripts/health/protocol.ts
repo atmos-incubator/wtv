@@ -186,21 +186,26 @@ export function parseBuiltinFile(id: string, text: string): BuiltinFile {
   };
 }
 
-/**
- * Pages and posts (`view=read` / `scroll` / `card`) have no player to ask: the check is
- * the HTTP status of the page, or of the post's oEmbed (X).
- */
-export function cardCheckUrl(url: string): string | null {
-  return /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^/]+\/status(?:es)?\/\d+/i.test(url)
-    ? `https://publish.x.com/oembed?url=${encodeURIComponent(url)}&omit_script=1&dnt=true`
-    : null;
-}
-
-export function judgeHttp(url: string, status: number | null, error: string | null, post: boolean): EntryResult {
+/** Pages (`view=read` / `scroll`) have no player to ask: the check is the page's HTTP status. */
+export function judgeHttp(url: string, status: number | null, error: string | null): EntryResult {
   if (error) return { url, verdict: 'unknown', detail: error };
-  if (status === 404 || status === 410 || (post && status === 403)) return { url, verdict: 'gone', detail: `HTTP ${status}` };
+  if (status === 404 || status === 410) return { url, verdict: 'gone', detail: `HTTP ${status}` };
   if (status === null || status >= 400) return { url, verdict: 'unknown', detail: status === null ? 'no answer' : `HTTP ${status}` };
   return { url, verdict: 'ok', detail: null };
+}
+
+/**
+ * Posts (`view=card`): the post adapter's own reading of its endpoint's answer
+ * (src/lib/posts/adapters.ts, which run.ts imports directly: it has no imports).
+ */
+export function judgePost(
+  url: string,
+  result: { ok: true } | { ok: false; gone: boolean; error: string } | null,
+  error: string | null,
+): EntryResult {
+  if (error || !result) return { url, verdict: 'unknown', detail: error ?? 'not a post Wtv can read' };
+  if (result.ok) return { url, verdict: 'ok', detail: null };
+  return { url, verdict: result.gone ? 'gone' : 'unknown', detail: result.error };
 }
 
 /** YouTube's own verdict, from the watch page's `ytInitialPlayerResponse.playabilityStatus`. */

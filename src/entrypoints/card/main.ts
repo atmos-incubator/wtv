@@ -1,10 +1,12 @@
 /**
  * Card page: where a playlist entry with `view=card` plays. The runner navigates the
  * playlist's tab here (`card.html?gen=N`) instead of to the post's site. Shows the post
- * on a full-screen title card (author, text, time) for `dur=`, or a time from its length.
+ * on a full-screen title card (author, title, text, pictures, time) for `dur=`, or a time
+ * from its length.
  *
  * The post comes from the background (PL_POST, through the site's adapter in posts/),
- * never from the site's embed script, and only as text: nothing here is HTML.
+ * never from the site's embed script, and only as text and picture URLs: nothing here is
+ * HTML.
  *
  * Click or Space pauses (⏸); the playlist's Next / Previous work as anywhere. A post the
  * site says is gone is reported (the runner shows "Unavailable" and moves on); any other
@@ -84,19 +86,49 @@ function setPaused(paused: boolean): void {
   document.documentElement.classList.toggle('paused', paused);
 }
 
-function lengthClass(text: string): string {
-  if (text.length <= 80) return 'short';
-  if (text.length <= 200) return 'medium';
-  if (text.length <= 450) return 'long';
-  return 'longer';
+const SIZES = ['short', 'medium', 'long', 'longer'] as const;
+
+/** Type size by length; a step smaller when there's a title or pictures to fit too. */
+function lengthClass(text: string, crowded: number): string {
+  const step = text.length <= 80 ? 0 : text.length <= 200 ? 1 : text.length <= 450 ? 2 : 3;
+  return SIZES[Math.min(SIZES.length - 1, step + crowded)]!;
+}
+
+function renderPictures(urls: readonly string[]): void {
+  const box = $('pics');
+  box.replaceChildren(
+    ...urls.map((src) => {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.decoding = 'async';
+      img.src = src;
+      img.addEventListener(
+        'error',
+        () => {
+          img.remove();
+          box.hidden = box.childElementCount === 0;
+        },
+        { once: true },
+      );
+      return img;
+    }),
+  );
+  box.dataset.count = String(urls.length);
+  box.hidden = urls.length === 0;
 }
 
 function render(post: Post): void {
   $('author').textContent = post.author;
   $('handle').textContent = post.handle ?? '';
+  const title = $('title');
+  title.textContent = post.title ?? '';
+  title.hidden = !post.title;
   const text = $('text');
   text.textContent = post.text;
-  text.className = `text ${lengthClass(post.text)}`;
+  text.hidden = !post.text;
+  text.className = `text ${lengthClass(post.text, (post.title ? 1 : 0) + (post.images.length ? 1 : 0))}`;
+  renderPictures(post.images);
   $('site').textContent = post.site;
   $('time').textContent = post.time ?? '';
   document.title = post.author ? `${post.author} · Wtv` : 'Wtv';
@@ -135,7 +167,7 @@ async function main(): Promise<void> {
     return;
   }
   render(result.post);
-  start(entry.endS ?? cardDurationS(result.post.text));
+  start(entry.endS ?? cardDurationS(result.post));
 }
 
 document.addEventListener('click', () => setPaused(runningSince !== null));

@@ -327,7 +327,7 @@ async function post(tabId: number, gen: number): Promise<PostResult> {
       url: entry.url,
       title: postTitle(result.post),
       creator: result.post.author,
-      durationS: entry.endS ?? cardDurationS(result.post.text),
+      durationS: entry.endS ?? cardDurationS(result.post),
     });
   }
   return result;

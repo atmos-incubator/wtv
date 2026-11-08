@@ -182,7 +182,7 @@ describe('playlist messages', () => {
   it('parses post requests and results', () => {
     expect(parsePlaylistRequest({ type: PL_POST, gen: 3 })).toEqual({ type: PL_POST, gen: 3 });
     expect(parsePlaylistRequest({ type: PL_POST })).toBeNull();
-    const post = { site: 'X', author: 'A', handle: '@a', text: 'Hi', time: null, url: 'https://x.com/a/status/1', images: [] };
+    const post = { site: 'X', author: 'A', handle: '@a', title: null, text: 'Hi', time: null, url: 'https://x.com/a/status/1', images: [] };
     expect(parsePostResult({ ok: true, post })).toEqual({ ok: true, post });
     expect(parsePostResult({ ok: true, post: { ...post, url: 'javascript:alert(1)' } })).toBeNull();
     expect(parsePostResult({ ok: false, gone: true, error: 'gone' })).toEqual({ ok: false, gone: true, error: 'gone' });
