@@ -793,12 +793,15 @@ function renderCardPreview(): void {
         ...post.images.map((src) => Object.assign(el('img'), { src, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' })),
       )
     : null;
+  const embed = report?.fields.find((f) => f.role === 'postEmbed')?.value ?? null;
   const parts: (Node | null)[] = [
     el('p', { className: 'field-name', text: 'Card preview' }),
     head,
     post.title ? el('p', { className: 'card-title', text: post.title }) : null,
     post.text ? el('p', { className: 'card-text', text: post.text }) : null,
-    pics,
+    embed
+      ? el('p', { className: 'note', text: `▶ Plays ${embed} beside the card, on this page (no pictures then).` })
+      : pics,
   ];
   cardPreview.replaceChildren(...parts.filter((p): p is Node => p !== null));
 }
@@ -810,7 +813,7 @@ async function refreshPostPreview(): Promise<void> {
   } catch {
     state.post = null;
   }
-  const key = JSON.stringify(state.post?.post ?? null);
+  const key = JSON.stringify([state.post?.post ?? null, state.post?.fields.find((f) => f.role === 'postEmbed')?.value ?? null]);
   if (key === shownPost) return;
   shownPost = key;
   renderCardPreview();

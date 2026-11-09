@@ -4,6 +4,8 @@
  * panel's card preview while picking them.
  *
  * Only text and picture URLs come out, like the adapters; the card page renders them.
+ * The `postEmbed` role is different: it's the element itself (findPostEmbed), lifted in
+ * place over the card (posts/embed.ts), never copied out.
  */
 import { deepQueryAll, matchRole } from '../dom/query';
 import type { ResolvedSite } from '../sites/overrides';
@@ -87,7 +89,54 @@ export function postFieldValue(role: PostRoleName, el: Element): string {
         .map(httpsUrl)
         .filter((u): u is string => u !== null)
         .join('\n');
+    case 'postEmbed':
+      return describeEmbed(el);
   }
+}
+
+/** The first <iframe> in `el` or its open shadow roots. */
+function frameInside(el: Element): HTMLIFrameElement | null {
+  const roots: (Element | ShadowRoot)[] = [el];
+  for (let root = roots.shift(); root; root = roots.shift()) {
+    const found = root.querySelector('iframe');
+    if (found) return found;
+    if (root instanceof Element && root.shadowRoot) roots.push(root.shadowRoot);
+    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) roots.push(host.shadowRoot);
+  }
+  return null;
+}
+
+/**
+ * What to lift for a picked embed: the element if it's a player (<iframe>, <video>);
+ * else the <iframe> inside it (its size is the site's, in pixels, so lifting the box
+ * around it wouldn't make it bigger); else the element (a site's own player element).
+ */
+export function embedTarget(el: Element): HTMLElement | null {
+  if (el instanceof HTMLIFrameElement || el instanceof HTMLVideoElement) return el;
+  return frameInside(el) ?? (el instanceof HTMLElement ? el : null);
+}
+
+function describeEmbed(el: Element): string {
+  const target = embedTarget(el);
+  if (!target) return '';
+  if (target instanceof HTMLIFrameElement) {
+    try {
+      return `an embedded player from ${new URL(target.src).hostname}`;
+    } catch {
+      return 'an embedded player';
+    }
+  }
+  return target instanceof HTMLVideoElement ? 'a video' : `<${target.localName}>`;
+}
+
+/** The post's embedded player (the `postEmbed` role), in the post's box first. Null if none on screen. */
+export function findPostEmbed(site: ResolvedSite): HTMLElement | null {
+  const matchers = site.config.roles.postEmbed;
+  if (!matchers?.length) return null;
+  const roles = site.config.roles;
+  const box = roles.post?.length ? (matchRole('post', roles.post).match?.element ?? null) : null;
+  const el = (box ? matchRole('postEmbed', matchers, box).match?.element : null) ?? matchRole('postEmbed', matchers).match?.element;
+  return el ? embedTarget(el) : null;
 }
 
 export function readPagePost(site: ResolvedSite, pageUrl: string = location.href): { post: Post | null; fields: PostField[] } {
@@ -110,6 +159,7 @@ export function readPagePost(site: ResolvedSite, pageUrl: string = location.href
   const text = textEl ? textOf(textEl).slice(0, MAX_TEXT) : '';
   const time = timeEl ? timeOf(timeEl) : null;
   const images = postPictures(roles.postImage ?? [], box);
+  const embedEl = find('postEmbed');
 
   const fields: PostField[] = [
     { role: 'post', value: box ? oneLine(textOf(box)).slice(0, 120) || '(no text)' : null },
@@ -118,6 +168,7 @@ export function readPagePost(site: ResolvedSite, pageUrl: string = location.href
     { role: 'postText', value: text || null },
     { role: 'postTime', value: time },
     { role: 'postImage', value: images.length ? images.join('\n') : null },
+    { role: 'postEmbed', value: embedEl ? describeEmbed(embedEl) || null : null },
   ];
   if (!title && !text) return { post: null, fields };
   return {

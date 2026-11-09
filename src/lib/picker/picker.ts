@@ -6,6 +6,10 @@
  *   they go through the guard (guard.ts), whose listeners were added before the page's
  *   own, so a page that acts on pointerdown can't open things or eat the click. The pick
  *   is the element pressed on; if the click never arrives, it's taken at pointerup.
+ * - Frames Wtv doesn't run in (an embedded player from another site) would take the
+ *   pick's click themselves, and nothing here could stop them: while picking they're made
+ *   see-through to the pointer, so hover and click land on the element holding them. A
+ *   frame Wtv does run in has its own picker and says so (FRAME_LIVE), so it stays live.
  * - ↑ / ↓ walk to the parent / back down. P plays/pauses the primary media (freeze an
  *   ad to pick its parts). Esc cancels.
  * - Optional countdown first, for things that only appear on hover or mid-ad.
@@ -87,6 +91,81 @@ function div(className: string, text = ''): HTMLDivElement {
 
 /** After pointerup, how long to wait for the click before picking anyway. */
 const CLICK_WAIT_MS = 350;
+/** postMessage keys: child frame → parent "my picker is running"; parent → child "is yours?". */
+const FRAME_LIVE = 'wtv-picker-live';
+const FRAME_ASK = 'wtv-picker-ask';
+/** How often to look for iframes added while picking. */
+const FRAME_SCAN_MS = 1000;
+
+/** Every <iframe> in the document and its open shadow roots. */
+function allFrames(): HTMLIFrameElement[] {
+  const out: HTMLIFrameElement[] = [];
+  const roots: (Document | ShadowRoot)[] = [document];
+  for (let root = roots.pop(); root; root = roots.pop()) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n instanceof HTMLIFrameElement) out.push(n);
+      const shadow = (n as Element).shadowRoot;
+      if (shadow) roots.push(shadow);
+    }
+  }
+  return out;
+}
+
+/**
+ * While picking: iframes whose frame has no picker of its own get `pointer-events: none`
+ * (put back exactly as it was afterwards). Answers and asks parent / child frames which
+ * ones are live. Stops with `signal`.
+ */
+function shieldFrames(signal: AbortSignal): void {
+  const live = new WeakSet<object>();
+  const touched = new Map<HTMLIFrameElement, [string, string]>();
+
+  function restore(f: HTMLIFrameElement): void {
+    const before = touched.get(f);
+    if (!before) return;
+    touched.delete(f);
+    if (before[0]) f.style.setProperty('pointer-events', before[0], before[1]);
+    else f.style.removeProperty('pointer-events');
+  }
+
+  function scan(): void {
+    for (const f of allFrames()) {
+      const win = f.contentWindow;
+      if (win && live.has(win)) {
+        restore(f);
+        continue;
+      }
+      if (touched.has(f)) continue;
+      touched.set(f, [f.style.getPropertyValue('pointer-events'), f.style.getPropertyPriority('pointer-events')]);
+      f.style.setProperty('pointer-events', 'none', 'important');
+      win?.postMessage({ [FRAME_ASK]: true }, '*');
+    }
+  }
+
+  window.addEventListener(
+    'message',
+    (e: MessageEvent<unknown>) => {
+      const data = e.data as Record<string, unknown> | null;
+      if (typeof data !== 'object' || data === null || !e.source) return;
+      if (data[FRAME_LIVE] === true) {
+        // A page could send this too; all it gets is its own iframe left clickable.
+        live.add(e.source);
+        scan();
+      } else if (data[FRAME_ASK] === true && e.source === window.parent) {
+        window.parent.postMessage({ [FRAME_LIVE]: true }, '*');
+      }
+    },
+    { signal },
+  );
+  if (window !== window.top) window.parent.postMessage({ [FRAME_LIVE]: true }, '*');
+  scan();
+  const timer = setInterval(scan, FRAME_SCAN_MS);
+  signal.addEventListener('abort', () => {
+    clearInterval(timer);
+    for (const f of [...touched.keys()]) restore(f);
+  });
+}
 
 function targetOf(e: Event): Element | null {
   const t = e.composedPath()[0];
@@ -175,6 +254,7 @@ export function startPicker(options: PickerOptions): Picker {
   function activate(): void {
     active = true;
     const opts = { capture: true, signal } as const;
+    shieldFrames(signal);
     window.addEventListener(
       'pointermove',
       (e) => {

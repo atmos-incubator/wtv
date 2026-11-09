@@ -6,6 +6,7 @@
  *                                        (top frame), then Start / Next if nothing plays
  *   2b. Page shown as a page: view=read → the article over the whole tab (top frame);
  *                             view=scroll → nothing (the page is the show)
+ *   2c. A post's embedded player lifted (over its card, or filling the tab) → nothing
  *   3. Dev preview                     → ad slideshow
  *   4. Ad playing, pictures on         → ad slideshow (also the ad click shield)
  *   5. Playlist entry with view=pictures → its [show] slideshow over the media for the
@@ -206,6 +207,9 @@ export function startOverlay(
     if (blackout) return 'blackout';
     const page = playlist.page();
     if (page) return page.kind === 'read' ? 'read' : null;
+    // A post's embedded player is lifted (posts/embed.ts): showing anything would put the
+    // overlay back on top of it.
+    if (playlist.embedding()) return null;
     if (previewing) return 'preview';
     const settings = ads.settings();
     const ad = adActive();

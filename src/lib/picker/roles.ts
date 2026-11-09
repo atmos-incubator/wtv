@@ -19,6 +19,7 @@ export const ROLE_LABELS: Record<RoleName, string> = {
   postText: 'Post text',
   postTime: 'Post time',
   postImage: 'Post pictures',
+  postEmbed: 'Embed',
 };
 
 export const ROLE_HINTS: Record<RoleName, string> = {
@@ -42,6 +43,8 @@ export const ROLE_HINTS: Record<RoleName, string> = {
   postText: 'The post’s text. A post card needs this or the title.',
   postTime: 'When it was posted. A <time> element is read from its datetime.',
   postImage: 'The post’s pictures (up to 4): pick a picture, or the box they’re in.',
+  postEmbed:
+    'The post’s player, when it’s embedded from somewhere else (an <iframe>): pick it or the box it’s in. In a playlist it plays where it is, lifted over the card (view=card), or full screen when nothing else plays (view=video).',
 };
 
 /** How the side panel groups the roles. */
@@ -52,6 +55,6 @@ export const ROLE_GROUPS: readonly { title: string; note: string | null; roles: 
   {
     title: 'Posts',
     note: 'For playlist entries with view=card on this site: Wtv opens the post’s page (signed in, as you are) and reads the card from it with these. Pick them on a post’s own page.',
-    roles: ['post', 'postTitle', 'postAuthor', 'postText', 'postTime', 'postImage'],
+    roles: ['post', 'postTitle', 'postAuthor', 'postText', 'postTime', 'postImage', 'postEmbed'],
   },
 ];

@@ -49,6 +49,14 @@
  * hash with `v=card`): the blackout stays up while the top frame reads the post with the
  * site's post selectors (posts/page.ts), trying for a while (apps render late), and
  * sends it, or why not, to the runner (PL_PAGE_POST), which moves on to the card page.
+ * A post with an embedded player (the site's `postEmbed` role) stays: the card page is
+ * framed over it here, and the player lifted beside the post (posts/embed.ts).
+ *
+ * A `view=video` entry whose page has no player Wtv can see, but has the site's
+ * `postEmbed` (a player embedded from a site Wtv doesn't run on): once the page has
+ * loaded and nothing has played for a few seconds, the embed is lifted to fill the tab
+ * and the blackout goes. Nothing reports when it ends, so it plays for `dur=` (or a
+ * minute), unless Wtv turns out to run inside it after all and reports for itself.
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
@@ -79,7 +87,9 @@ import {
   type MediaInfo,
   type PostResult,
 } from './messages';
-import { readPagePost } from '../posts/page';
+import { findPostEmbed, readPagePost } from '../posts/page';
+import { showEmbed, type EmbedShow } from '../posts/embed';
+import { EMBED_DEFAULT_S } from '../posts/embed-layout';
 import { hasPostSelectors } from '../sites/schema';
 
 /** Offer "Start" if nothing has played (and nothing was refused) by then. */
@@ -106,6 +116,8 @@ const POST_POLL_MS = 500;
 /** Once found, read again after this, for what was still loading (pictures). */
 const POST_SETTLE_MS = 800;
 const GONE_WATCH_MS = 60_000;
+/** `view=video` with nothing playing this long after the page loaded: show the post's embed, if it has one. */
+const EMBED_WAIT_MS = 4000;
 const WATCH_EVENTS = [
   'playing',
   'ended',
@@ -154,6 +166,8 @@ export interface PlaylistClient {
   blackout(): Blackout | null;
   /** Top frame only: a page shown as a page, once it's loaded. */
   page(): PageShow | null;
+  /** Top frame only: the post's embedded player is lifted (over its card, or filling the tab). */
+  embedding(): boolean;
   pageEvent(e: PageEvent): void;
   onChange(cb: () => void): () => void;
   /** "Start" on the blackout (inside a user gesture). */
@@ -195,6 +209,11 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   /** Bumped per page show, so late steps of an earlier one stop. */
   let pageRun = 0;
   let scroller: Scroller | null = null;
+  /** The post's embedded player, lifted (with the card over its page, or filling the tab). */
+  let embed: EmbedShow | null = null;
+  /** `view=video` played as an embed: when it's over (nothing else will say). */
+  let embedEnd: ReturnType<typeof setTimeout> | undefined;
+  let embedWait: ReturnType<typeof setTimeout> | undefined;
   const adActive = () => ads.status()?.active ?? false;
   const listeners = new Set<() => void>();
 
@@ -503,6 +522,45 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     scroller?.stop();
     scroller = null;
     page = null;
+    stopEmbed();
+  }
+
+  function stopEmbed(): void {
+    clearTimeout(embedEnd);
+    clearTimeout(embedWait);
+    embedEnd = embedWait = undefined;
+    if (!embed) return;
+    embed.stop();
+    embed = null;
+    notify();
+  }
+
+  /**
+   * `view=video` and nothing has played: if the post has an embedded player, lift it to
+   * fill the tab and play for `dur=` (or a minute).
+   */
+  function watchForEmbed(run: number): void {
+    const site = agent.profile().site;
+    if (!isTop || !entry || !site?.config.roles.postEmbed?.length) return;
+    void whenLoaded().then(() => {
+      if (run !== pageRun || signal.aborted) return;
+      embedWait = setTimeout(() => {
+        embedWait = undefined;
+        if (run !== pageRun || !entry || !blackout || !awaitingStart || agent.primary()) return;
+        if (!findPostEmbed(site)) return;
+        console.info('[wtv] no player of its own here; showing the post’s embedded player');
+        embed = showEmbed(() => findPostEmbed(site), { kind: 'full' });
+        lift();
+        notify();
+        report('playing');
+        const durS = endS !== null ? Math.max(1, endS - (startS ?? 0)) : EMBED_DEFAULT_S;
+        sendInfo({ ...pageInfo(), durationS: durS });
+        embedEnd = setTimeout(() => {
+          embedEnd = undefined;
+          if (run === pageRun) report('ended');
+        }, durS * 1000);
+      }, EMBED_WAIT_MS);
+    });
   }
 
   async function runPageShow(view: HashView, speed: number | null, durS: number | null): Promise<void> {
@@ -560,7 +618,14 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     }
     console.info('[wtv] post read from the page:', result.ok ? result.post.title ?? result.post.text.slice(0, 60) : result.error);
     if (entry) {
-      browser.runtime.sendMessage({ type: PL_PAGE_POST, gen: entry.gen, result }).catch(() => undefined);
+      // An embedded player can't leave its page: the card comes here instead.
+      const inPage = result.ok && site !== null && findPostEmbed(site) !== null;
+      browser.runtime.sendMessage({ type: PL_PAGE_POST, gen: entry.gen, result, inPage }).catch(() => undefined);
+      if (inPage && site) {
+        console.info('[wtv] the post has an embedded player; showing its card on this page');
+        embed = showEmbed(() => findPostEmbed(site), { kind: 'card', gen: entry.gen });
+        notify();
+      }
       return;
     }
     // A stand-alone #wtv:v=card link: nothing to hand it to; back to the page.
@@ -592,8 +657,17 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   const onMessage = (raw: unknown) => {
     const msg = parsePlaylistApply(raw);
     if (!msg || !isTop) return undefined;
-    if (msg.op === 'lift') lift();
-    else if (msg.op === 'blocked') trigger('blocked-in-frame');
+    if (msg.op === 'lift') {
+      lift();
+      // A frame's own player started (Wtv runs in the embed after all): it reports its end.
+      if (embedEnd !== undefined && !pageView) {
+        clearTimeout(embedEnd);
+        embedEnd = undefined;
+      }
+    } else if (msg.op === 'release') {
+      lift();
+      stopEmbed();
+    } else if (msg.op === 'blocked') trigger('blocked-in-frame');
     else if (msg.op === 'blackout') showBlackout(msg.title, false);
     return undefined;
   };
@@ -681,6 +755,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
         if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });
         else showBlackout(entry.title ?? (document.title || location.hostname), true);
         watchPrimary();
+        watchForEmbed(pageRun);
         notify();
       })
       .catch(() => undefined);
@@ -703,6 +778,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     show: () => entry?.show ?? null,
     blackout: () => blackout,
     page: () => page,
+    embedding: () => embed !== null,
     pageEvent(e) {
       if (!page || page.id !== e.id || e.id !== pageRun) return;
       if (e.type === 'started') {

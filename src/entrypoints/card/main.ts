@@ -8,6 +8,10 @@
  * never from the site's embed script, and only as text and picture URLs: nothing here is
  * HTML.
  *
+ * `?embed`: framed over the post's own page instead (posts/embed.ts), whose embedded
+ * player is lifted into the slot this page leaves empty beside the post (embed-layout.ts).
+ * No pictures then (the player is the picture), and it shows for at least a minute.
+ *
  * Click or Space pauses (⏸); the playlist's Next / Previous work as anywhere. A post the
  * site says is gone is reported (the runner shows "Unavailable" and moves on); any other
  * failure is shown for a moment, then the playlist moves on.
@@ -15,6 +19,7 @@
 import './style.css';
 import { browser } from 'wxt/browser';
 import { cardDurationS, type Post } from '../../lib/posts/adapters';
+import { embedCardDurationS, embedLayout, type Box } from '../../lib/posts/embed-layout';
 import {
   PL_HELLO,
   PL_MEDIA,
@@ -33,6 +38,30 @@ const statusLine = $('status');
 const card = $('card');
 const pausedMark = $('paused');
 const progress = $('progress').firstElementChild as HTMLElement;
+/** Framed over the post's page, beside its embedded player. */
+const embedded = new URLSearchParams(location.search).has('embed');
+
+function put(el: HTMLElement, box: Box): void {
+  Object.assign(el.style, {
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+  });
+}
+
+function layOut(): void {
+  const { slot, text } = embedLayout(window.innerWidth, window.innerHeight);
+  put($('slot'), slot);
+  put(card, text);
+}
+
+if (embedded) {
+  document.documentElement.classList.add('embedded');
+  $('slot').hidden = false;
+  layOut();
+  window.addEventListener('resize', layOut, { passive: true });
+}
 
 let entry: EntryInfo | null = null;
 let totalMs = 0;
@@ -127,8 +156,9 @@ function render(post: Post): void {
   const text = $('text');
   text.textContent = post.text;
   text.hidden = !post.text;
-  text.className = `text ${lengthClass(post.text, (post.title ? 1 : 0) + (post.images.length ? 1 : 0))}`;
-  renderPictures(post.images);
+  const images = embedded ? [] : post.images;
+  text.className = `text ${lengthClass(post.text, (post.title ? 1 : 0) + (images.length || embedded ? 1 : 0))}`;
+  renderPictures(images);
   $('site').textContent = post.site;
   $('time').textContent = post.time ?? '';
   document.title = post.author ? `${post.author} · Wtv` : 'Wtv';
@@ -168,7 +198,7 @@ async function main(): Promise<void> {
     return;
   }
   render(result.post);
-  start(entry.endS ?? cardDurationS(result.post));
+  start(entry.endS ?? (embedded ? embedCardDurationS(result.post) : cardDurationS(result.post)));
 }
 
 document.addEventListener('click', () => setPaused(runningSince !== null));

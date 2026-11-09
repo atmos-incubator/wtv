@@ -5,14 +5,18 @@
  *     PL_HELLO                       → EntryInfo | null   "is this page a playlist entry?" (every frame, at start)
  *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked / gone, from frames that got an EntryInfo
  *     PL_INFO   { gen, info }                              what the page says about the entry (title, duration…), for the media library
- *     PL_PAGE_POST { gen, result }                         `view=card` read from the post's own page (top frame): the post, or why not
+ *     PL_PAGE_POST { gen, result, inPage }                 `view=card` read from the post's own page (top frame): the post, or why not.
+ *                                                          `inPage`: it has an embedded player, so the card shows on that page (posts/embed.ts)
  *
- *   card page (card.html, in the playlist's tab: `view=card` entries) → background
+ *   card page (card.html, in the playlist's tab: `view=card` entries; or framed into the
+ *   post's page over its embedded player) → background
  *     PL_HELLO / PL_MEDIA as above (the card page is the entry's page)
  *     PL_POST   { gen }      → PostResult   the post: read from its page (PL_PAGE_POST), else fetched by the background (posts/)
  *
  *   background → content, top frame only (tabs.sendMessage, frameId 0)
  *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
+ *               | { op: 'release' }   the playlist let go of the tab (stopped, or the user went elsewhere):
+ *                                     lift, and take down anything shown for the entry (an embed)
  *
  *   playlists page | popup → background
  *     PL_COMMAND { op: 'start', playlistId, index, tv, shuffle, loop }   plays in a new tab
@@ -103,7 +107,7 @@ export type ContentRequest =
   | { type: typeof PL_MEDIA; gen: number; event: MediaEvent }
   | { type: typeof PL_INFO; gen: number; info: MediaInfo }
   | { type: typeof PL_POST; gen: number }
-  | { type: typeof PL_PAGE_POST; gen: number; result: PostResult };
+  | { type: typeof PL_PAGE_POST; gen: number; result: PostResult; inPage: boolean };
 
 export type PageRequest =
   | {
@@ -122,7 +126,7 @@ export type PageRequest =
 
 export type PlaylistApply =
   | { type: typeof PL_APPLY; op: 'blackout'; title: string | null }
-  | { type: typeof PL_APPLY; op: 'lift' | 'blocked' };
+  | { type: typeof PL_APPLY; op: 'lift' | 'blocked' | 'release' };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
@@ -145,7 +149,7 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
       return isIndex(raw.gen) ? { type: PL_POST, gen: raw.gen } : null;
     case PL_PAGE_POST: {
       const result = isIndex(raw.gen) ? parsePostResult(raw.result) : null;
-      return result ? { type: PL_PAGE_POST, gen: raw.gen as number, result } : null;
+      return result ? { type: PL_PAGE_POST, gen: raw.gen as number, result, inPage: raw.inPage === true && result.ok } : null;
     }
     case PL_INFO:
       return isIndex(raw.gen) && isObj(raw.info) ? { type: PL_INFO, gen: raw.gen, info: parseMediaInfo(raw.info) } : null;
@@ -189,7 +193,7 @@ function parseMediaInfo(raw: Record<string, unknown>): MediaInfo {
 
 export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
   if (!isObj(raw) || raw.type !== PL_APPLY) return null;
-  if (raw.op === 'lift' || raw.op === 'blocked') return { type: PL_APPLY, op: raw.op };
+  if (raw.op === 'lift' || raw.op === 'blocked' || raw.op === 'release') return { type: PL_APPLY, op: raw.op };
   if (raw.op === 'blackout') {
     return { type: PL_APPLY, op: 'blackout', title: typeof raw.title === 'string' ? raw.title : null };
   }

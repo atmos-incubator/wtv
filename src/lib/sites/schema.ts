@@ -27,10 +27,11 @@ export const ROLE_NAMES = [
   'postText',
   'postTime',
   'postImage',
+  'postEmbed',
 ] as const;
 
 /** The roles a post card is read from (see posts/page.ts). */
-export const POST_ROLES = ['post', 'postTitle', 'postAuthor', 'postText', 'postTime', 'postImage'] as const;
+export const POST_ROLES = ['post', 'postTitle', 'postAuthor', 'postText', 'postTime', 'postImage', 'postEmbed'] as const;
 export type PostRoleName = (typeof POST_ROLES)[number];
 
 /** A site whose post can be read from the page: it has a selector for the text or the title. */
@@ -74,6 +75,7 @@ export const ROLE_DEFAULT_WHEN: Record<RoleName, Condition> = {
   postText: 'exists',
   postTime: 'exists',
   postImage: 'exists',
+  postEmbed: 'exists',
 };
 
 /**

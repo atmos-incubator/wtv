@@ -38,6 +38,9 @@
  *   - `page`: the site has post selectors (and Wtv has access to it). The tab goes to
  *     the post's own page first (`v=card`, behind the blackout), whose content script
  *     reads the post with them and sends it (PL_PAGE_POST); then on to the card page.
+ *     A post with an embedded player (the `postEmbed` role) stays on its page instead:
+ *     the content script frames the card page over it and lifts the player into a slot
+ *     beside the post (posts/embed.ts); the framed card page talks to the runner as usual.
  *     The page is the user's own session, so it works signed in. Its address may change
  *     while it's read (SPAs tidy their URLs); that doesn't count as leaving.
  *   - `api`: straight to the card page; the post is fetched here through the site's
@@ -83,6 +86,7 @@ import { libraryKey } from '../media-library/record';
 import { updateMedia } from '../media-library/service';
 import { cardDurationS, findPostAdapter, postTitle } from '../posts/adapters';
 import { fetchPost } from '../posts/fetch';
+import { embedCardDurationS } from '../posts/embed-layout';
 import { cardSource, type CardSource } from '../posts/source';
 import { originPatternsFor } from './match';
 import { BUNDLED_SITES } from '../sites/bundled';
@@ -123,7 +127,7 @@ export interface RunnerState {
   currentUrl: string | null;
   nearEnd: boolean;
   /** A `view=card` entry (this gen): where its post comes from, and what its page said. */
-  card?: { source: CardSource; result: PostResult | null } | null;
+  card?: { source: CardSource; result: PostResult | null; inPage?: boolean } | null;
 }
 
 type RunnerStore = Record<string, RunnerState>;
@@ -186,7 +190,7 @@ async function goTo(tabId: number, state: RunnerState, index: number): Promise<v
     if (!state.loop) {
       console.info(`[wtv] playlist "${state.name}" finished in tab ${tabId}`);
       await put(tabId, null);
-      await toTop(tabId, { type: PL_APPLY, op: 'lift' });
+      await toTop(tabId, { type: PL_APPLY, op: 'release' });
       return;
     }
     const lap = (state.lap ?? 1) + 1;
@@ -312,7 +316,7 @@ async function step(tabId: number, op: StepOp): Promise<void> {
     }
     case 'stop':
       await put(tabId, null);
-      await toTop(tabId, { type: PL_APPLY, op: 'lift' });
+      await toTop(tabId, { type: PL_APPLY, op: 'release' });
       return;
   }
 }
@@ -353,13 +357,18 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
 
 /**
  * The post's page read it (`page` source): keep what it said and move on to the card
- * page. Same gen: the card page belongs to this entry.
+ * page. Same gen: the card page belongs to this entry. `inPage` (it has an embedded
+ * player): the page frames the card page itself, so the tab stays.
  */
-async function pagePost(tabId: number, frameId: number, gen: number, result: PostResult): Promise<void> {
+async function pagePost(tabId: number, frameId: number, gen: number, result: PostResult, inPage: boolean): Promise<void> {
   const state = (await load())[tabId];
   if (frameId !== 0 || !state || state.gen !== gen || state.phase === 'detached') return;
   if (entryAt(state)?.view !== 'card' || state.card?.source !== 'page' || state.card.result) return;
   if (!result.ok) console.info(`[wtv] couldn't read the post from its page: ${result.error}`);
+  if (inPage && result.ok) {
+    await put(tabId, { ...state, card: { source: 'page', result, inPage: true } });
+    return;
+  }
   await put(tabId, { ...state, phase: 'navigating', currentUrl: null, card: { source: 'page', result } });
   await browser.tabs.update(tabId, { url: cardPageUrl(gen) });
 }
@@ -380,7 +389,7 @@ async function post(tabId: number, gen: number): Promise<PostResult> {
       url: entry.url,
       title: postTitle(result.post),
       creator: result.post.author,
-      durationS: entry.endS ?? cardDurationS(result.post),
+      durationS: entry.endS ?? (state?.card?.inPage ? embedCardDurationS(result.post) : cardDurationS(result.post)),
     });
   }
   return result;
@@ -445,13 +454,14 @@ async function tabUpdated(tabId: number, url: string | undefined, complete: bool
   if (!url || state.phase !== 'playing' || onEntry(state, url)) return;
   // A post's page being read for its card: SPAs tidy their address as they load. Same
   // site: still the post (somewhere else is the user leaving).
-  if (state.card?.source === 'page' && !state.card.result && sameHost(url, entryAt(state)?.url)) return;
+  // Same while its card shows on it (an embedded player).
+  if (state.card?.source === 'page' && (!state.card.result || state.card.inPage) && sameHost(url, entryAt(state)?.url)) return;
   if (state.nearEnd) {
     await goTo(tabId, state, state.index + 1);
   } else {
     console.info(`[wtv] tab ${tabId} left playlist entry ${state.index + 1}; waiting for Resume`);
     await put(tabId, { ...state, phase: 'detached' });
-    await toTop(tabId, { type: PL_APPLY, op: 'lift' });
+    await toTop(tabId, { type: PL_APPLY, op: 'release' });
   }
 }
 
@@ -516,7 +526,7 @@ export function startPlaylistRunner(): void {
         return true;
       case PL_PAGE_POST:
         if (senderTab === undefined) return undefined;
-        void serial(() => pagePost(senderTab, sender.frameId ?? 0, msg.gen, msg.result));
+        void serial(() => pagePost(senderTab, sender.frameId ?? 0, msg.gen, msg.result, msg.inPage));
         return undefined;
       case PL_INFO:
         if (senderTab === undefined) return undefined;

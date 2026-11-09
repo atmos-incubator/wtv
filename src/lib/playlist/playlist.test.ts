@@ -130,6 +130,7 @@ describe('playlist messages', () => {
       title: 'T',
     });
     expect(parsePlaylistApply({ type: PL_APPLY, op: 'blocked' })).toEqual({ type: PL_APPLY, op: 'blocked' });
+    expect(parsePlaylistApply({ type: PL_APPLY, op: 'release' })).toEqual({ type: PL_APPLY, op: 'release' });
     expect(parsePlaylistApply({ type: PL_APPLY, op: 'nope' })).toBeNull();
     expect(
       parseEntryInfo({
@@ -184,9 +185,17 @@ describe('playlist messages', () => {
     expect(parsePlaylistRequest({ type: PL_POST, gen: 3 })).toEqual({ type: PL_POST, gen: 3 });
     expect(parsePlaylistRequest({ type: PL_POST })).toBeNull();
     const read = { ok: true, post: { site: 'Forum', author: 'A', handle: null, title: 'T', text: '', time: null, url: 'https://f.example/t/1', images: [] } };
-    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: read })).toEqual({ type: PL_PAGE_POST, gen: 2, result: read });
-    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: { ok: false, gone: true, error: 'x' } })).toMatchObject({
+    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: read })).toEqual({
+      type: PL_PAGE_POST,
+      gen: 2,
+      result: read,
+      inPage: false,
+    });
+    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: read, inPage: true })).toMatchObject({ inPage: true });
+    // Only a post that was read can be shown on its page.
+    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: { ok: false, gone: true, error: 'x' }, inPage: true })).toMatchObject({
       result: { ok: false, gone: true },
+      inPage: false,
     });
     expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2 })).toBeNull();
     const post = { site: 'X', author: 'A', handle: '@a', title: null, text: 'Hi', time: null, url: 'https://x.com/a/status/1', images: [] };

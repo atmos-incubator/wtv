@@ -11,6 +11,9 @@
  * Styles are injected with !important (sites set inline sizes) on an attribute selector
  * padded with :not(#a#b) for ID-level specificity, so ordinary page rules can't win.
  * Elements inside open shadow roots get the stylesheet in their own root.
+ *
+ * `placeMaximized` puts it in a box instead of filling the tab (a post's embedded player
+ * over its card: posts/embed.ts); its backdrop is then see-through.
  */
 
 export const MAX_ATTR = 'data-wtv-maximized';
@@ -22,9 +25,11 @@ const SEL = `[${MAX_ATTR}]:not(#wtv-x#wtv-y)`;
 const CSS = `
 ${SEL} {
   position: fixed !important;
-  inset: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
+  inset: auto !important;
+  left: var(--wtv-max-left, 0px) !important;
+  top: var(--wtv-max-top, 0px) !important;
+  width: var(--wtv-max-width, 100%) !important;
+  height: var(--wtv-max-height, 100%) !important;
   min-width: 0 !important;
   min-height: 0 !important;
   max-width: none !important;
@@ -51,10 +56,31 @@ ${SEL} {
 ${SEL}::backdrop {
   background: #000 !important;
 }
+${SEL}[${MAX_ATTR}='box']::backdrop {
+  background: transparent !important;
+}
 html[${ACTIVE_ATTR}] {
   overflow: hidden !important;
 }
 `;
+
+const BOX_PROPS = ['--wtv-max-left', '--wtv-max-top', '--wtv-max-width', '--wtv-max-height'] as const;
+
+/** A maximized element: fill `box` (viewport px) instead of the tab; null fills the tab again. */
+export function placeMaximized(
+  el: HTMLElement,
+  box: { left: number; top: number; width: number; height: number } | null,
+): void {
+  if (!el.hasAttribute(MAX_ATTR)) return;
+  if (!box) {
+    for (const p of BOX_PROPS) el.style.removeProperty(p);
+    el.setAttribute(MAX_ATTR, '');
+    return;
+  }
+  const values = [box.left, box.top, box.width, box.height];
+  BOX_PROPS.forEach((p, i) => el.style.setProperty(p, `${Math.round(values[i]!)}px`, 'important'));
+  el.setAttribute(MAX_ATTR, 'box');
+}
 
 function ensureStyle(root: Document | ShadowRoot): void {
   const container = root instanceof Document ? (root.head ?? root.documentElement) : root;
@@ -103,6 +129,7 @@ export function maximizeElement(el: HTMLElement, onClosed: () => void): (() => v
     if (previousPopover === null) el.removeAttribute('popover');
     else el.setAttribute('popover', previousPopover);
     el.removeAttribute(MAX_ATTR);
+    for (const p of BOX_PROPS) el.style.removeProperty(p);
     document.documentElement.removeAttribute(ACTIVE_ATTR);
   }
 

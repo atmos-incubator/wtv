@@ -75,7 +75,8 @@ export default defineConfig({
       // The overlay page is framed into sites by the content script. Its own scripts,
       // styles and the cat pictures load from the extension origin, so only the page
       // itself must be web-accessible.
-      web_accessible_resources: [{ resources: ['overlay.html'], matches: ['*://*/*'] }],
+      // card.html: framed over a post's page beside its embedded player (posts/embed.ts).
+      web_accessible_resources: [{ resources: ['overlay.html', 'card.html'], matches: ['*://*/*'] }],
       // Chrome allows at most four suggested shortcuts; the rest can be bound at
       // chrome://extensions/shortcuts. Keep names in sync with COMMANDS in
       // src/lib/view/controller.ts and PLAYLIST_COMMANDS in src/lib/playlist/runner.ts.
