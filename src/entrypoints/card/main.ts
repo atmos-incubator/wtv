@@ -74,7 +74,9 @@ function layOut(): void {
 }
 
 window.addEventListener('resize', () => {
+  if (card.hidden) return;
   if (pictures.length) layOutPictures();
+  fitText();
 });
 
 if (embedded) {
@@ -161,6 +163,7 @@ function frame(): void {
   if (done || !totalMs) return;
   const ms = elapsed();
   progress.style.transform = `scaleX(${Math.min(1, ms / totalMs)})`;
+  scrollText();
   if (ms >= totalMs) {
     done = true;
     clearInterval(tick);
@@ -188,13 +191,76 @@ function setPaused(paused: boolean): void {
   document.documentElement.classList.toggle('paused', paused);
 }
 
-const SIZES = ['short', 'medium', 'long', 'longer'] as const;
+/** Text sizes, biggest first. By length up to `longer`; `longest` only to fit (fitText). */
+const SIZES = ['short', 'medium', 'long', 'longer', 'longest'] as const;
 
 /** Type size by length; a step smaller when there's a title or pictures to fit too. */
-function lengthClass(text: string, crowded: number): string {
+function lengthStep(text: string, crowded: number): number {
   const step = text.length <= 80 ? 0 : text.length <= 200 ? 1 : text.length <= 450 ? 2 : 3;
-  return SIZES[Math.min(SIZES.length - 1, step + crowded)]!;
+  return Math.min(3, step + crowded);
 }
+
+/** The size the text starts at (render); fitText may go smaller. */
+let textStep = 0;
+/** The text doesn't fit even at the smallest size: it scrolls (scrollText). */
+let scrolling = false;
+/** The viewer scrolled it (wheel): they're reading at their own pace now. */
+let scrolledByHand = false;
+/** Of the card's time, how long the text stays at the top first (and at the end, after). */
+const SCROLL_HOLD = 0.12;
+
+const overflows = (el: HTMLElement) => el.scrollHeight > el.clientHeight + 1;
+
+/**
+ * Nothing may run off the card: the text steps down a size at a time until it fits.
+ * Still too long at the smallest: it scrolls, by itself over the card's time.
+ */
+function fitText(): void {
+  const text = $('text');
+  text.classList.remove('scrolls', 'at-end');
+  scrolling = false;
+  if (text.hidden || card.hidden) return;
+  let step = textStep;
+  text.classList.remove(...SIZES);
+  text.classList.add(SIZES[step]!);
+  while (overflows(text) && step < SIZES.length - 1) {
+    text.classList.replace(SIZES[step]!, SIZES[step + 1]!);
+    step++;
+  }
+  scrolling = overflows(text);
+  text.classList.toggle('scrolls', scrolling);
+  scrollText();
+}
+
+/** Where the scrolling text should be by now: held at the top, then steadily to the end. */
+function scrollText(): void {
+  if (!scrolling || scrolledByHand) return;
+  const text = $('text');
+  const max = text.scrollHeight - text.clientHeight;
+  const t = totalMs ? (elapsed() / totalMs - SCROLL_HOLD) / (1 - 2 * SCROLL_HOLD) : 0;
+  text.scrollTop = Math.round(Math.min(1, Math.max(0, t)) * max);
+}
+
+$('text').addEventListener(
+  'scroll',
+  () => {
+    const text = $('text');
+    text.classList.toggle('at-end', text.scrollTop >= text.scrollHeight - text.clientHeight - 1);
+  },
+  { passive: true },
+);
+// The wheel anywhere on the card scrolls the text: the page itself never scrolls.
+document.addEventListener(
+  'wheel',
+  (e) => {
+    if (!scrolling) return;
+    scrolledByHand = true;
+    const text = $('text');
+    if (e.target instanceof Node && text.contains(e.target)) return; // It scrolls itself.
+    text.scrollBy({ top: e.deltaY });
+  },
+  { passive: true },
+);
 
 interface Picture {
   src: string;
@@ -216,7 +282,10 @@ async function loadPictures(urls: readonly string[]): Promise<Picture[]> {
         pic.aspect = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
         resolve();
         // Arrived after the card was laid out: again, with its real shape.
-        if (pictures.includes(pic)) layOutPictures();
+        if (pictures.includes(pic)) {
+          layOutPictures();
+          fitText();
+        }
       };
       img.onerror = () => {
         broken.add(pic);
@@ -224,6 +293,7 @@ async function loadPictures(urls: readonly string[]): Promise<Picture[]> {
         if (pictures.includes(pic)) {
           pictures = pictures.filter((p) => p !== pic);
           layOutPictures();
+          fitText();
         }
       };
     });
@@ -253,14 +323,15 @@ function layOutPictures(): void {
   const style = getComputedStyle(card);
   const pad = (a: string, b: string) => parseFloat(style.getPropertyValue(a)) + parseFloat(style.getPropertyValue(b));
   const aspects = pictures.map((p) => p.aspect ?? 1);
-  const hasText = Boolean($('title').textContent || $('text').textContent);
+  const textChars = ($('title').textContent ?? '').length + ($('text').textContent ?? '').length;
   const plan = planCard(
     { width: card.clientWidth - pad('padding-left', 'padding-right'), height: card.clientHeight - pad('padding-top', 'padding-bottom') },
     aspects,
-    hasText,
+    textChars,
   );
   if (!plan) return;
   card.classList.add(plan.layout);
+  card.style.setProperty('--pic-share', String(plan.share));
   const block = document.createElement('div');
   block.className = 'pics-block';
   block.style.setProperty('--ratio', String(plan.ratio));
@@ -292,7 +363,8 @@ function render(post: Post, pics: Picture[]): void {
   const text = $('text');
   text.textContent = post.text;
   text.hidden = !post.text;
-  text.className = `text ${lengthClass(post.text, (post.title ? 1 : 0) + (pics.length || embedded ? 1 : 0))}`;
+  textStep = lengthStep(post.text, (post.title ? 1 : 0) + (pics.length || embedded ? 1 : 0));
+  text.className = `text ${SIZES[textStep]}`;
   $('site').textContent = post.site;
   $('time').textContent = post.time ?? '';
   document.title = post.author ? `${post.author} · Wtv` : 'Wtv';
@@ -301,6 +373,7 @@ function render(post: Post, pics: Picture[]): void {
   // Measured now that it's on the page; before the next paint, so no jump.
   pictures = pics;
   layOutPictures();
+  fitText();
 }
 
 function start(durS: number): void {

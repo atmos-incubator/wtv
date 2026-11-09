@@ -12,13 +12,15 @@
  * has a known shape and fills its area with nothing cropped.
  *
  * The plan is whichever layout and rows show the pictures biggest, with the text keeping
- * its share of the card. `side` only on a card wider than tall: on a tall one it would
- * leave the text a narrow strip.
+ * its share of the card (pictureShare: less text, more picture). `side` only on a card
+ * wider than tall: on a tall one it would leave the text a narrow strip.
  */
 export type CardLayout = 'stack' | 'side';
 
 export interface CardPlan {
   layout: CardLayout;
+  /** The pictures' share of the card (pictureShare). */
+  share: number;
   /** Pictures per row. */
   perRow: number;
   /** The rows of pictures (indexes into the aspects given), top to bottom. */
@@ -29,8 +31,18 @@ export interface CardPlan {
 
 /** The pictures' share of the card's height (stack) or width (side), next to text. */
 export const PICTURE_SHARE = 0.55;
+/** Next to a line or two (a caption, a short title). */
+export const PICTURE_SHARE_CAPTION = 0.7;
 /** With no text (no title either): nearly all of it. */
 export const PICTURE_SHARE_ALONE = 0.85;
+/** Up to this many characters of title + text is a caption. */
+export const CAPTION_CHARS = 120;
+
+/** How much of the card the pictures get, by how much text is beside them. */
+export function pictureShare(textChars: number): number {
+  if (textChars <= 0) return PICTURE_SHARE_ALONE;
+  return textChars <= CAPTION_CHARS ? PICTURE_SHARE_CAPTION : PICTURE_SHARE;
+}
 
 /** Width ÷ height; anything unusable counts as square. */
 const sane = (a: number) => (Number.isFinite(a) && a > 0 ? Math.min(10, Math.max(0.1, a)) : 1);
@@ -54,10 +66,11 @@ export function fitArea(w: number, h: number, ratio: number): number {
   return w / h > ratio ? h * h * ratio : (w * w) / ratio;
 }
 
-export function planCard(box: { width: number; height: number }, aspects: readonly number[], hasText: boolean): CardPlan | null {
+/** `textChars`: title + text, for pictureShare. */
+export function planCard(box: { width: number; height: number }, aspects: readonly number[], textChars: number): CardPlan | null {
   const n = aspects.length;
   if (n === 0) return null;
-  const share = hasText ? PICTURE_SHARE : PICTURE_SHARE_ALONE;
+  const share = pictureShare(textChars);
   const regions: Record<CardLayout, [number, number]> = {
     stack: [box.width, box.height * share],
     side: [box.width * share, box.height],
@@ -73,7 +86,7 @@ export function planCard(box: { width: number; height: number }, aspects: readon
       const area = fitArea(...regions[layout], ratio);
       // Ties go to the first: stack, then fewer rows.
       if (area > bestArea * 1.0001) {
-        best = { layout, perRow, rows, ratio };
+        best = { layout, share, perRow, rows, ratio };
         bestArea = area;
       }
     }

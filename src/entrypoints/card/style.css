@@ -27,6 +27,8 @@ body {
 #stage {
   height: 100%;
   display: grid;
+  /* Definite tracks, so the card's max-height: 100% is the screen less the padding. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   padding: 5vh 6vw;
 }
@@ -46,7 +48,10 @@ body {
 .card {
   width: min(100%, 60em);
   max-height: 100%;
-  display: grid;
+  /* A column: header, title and footer keep their size, the text gives way (and fits
+     itself, or scrolls: fitText in main.ts). */
+  display: flex;
+  flex-direction: column;
   gap: 1.2em;
   padding: clamp(20px, 4vw, 64px);
   border-radius: clamp(12px, 1.6vw, 28px);
@@ -82,6 +87,10 @@ body {
   overflow-wrap: anywhere;
 }
 
+.card > * {
+  flex: none;
+}
+
 .text {
   margin: 0;
   font-weight: 550;
@@ -90,6 +99,23 @@ body {
   overflow-wrap: anywhere;
   text-wrap: pretty;
   overflow: hidden;
+}
+
+.card > .text {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+/* Too long even at the smallest size: it scrolls by itself while the card shows (and
+   with the wheel), fading out at the bottom while there's more. */
+.text.scrolls {
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(#000 calc(100% - 2.5em), transparent);
+}
+
+.text.scrolls.at-end {
+  mask-image: none;
 }
 
 .text.short {
@@ -109,6 +135,10 @@ body {
   font-size: 1.35em;
 }
 
+.text.longest {
+  font-size: 1.1em;
+}
+
 /* Pictures (main.ts, card-layout.ts). The card fills the screen and the pictures get an
    area of it: below the text (stack) or down the left beside it (side). In that area a
    block of rows, shaped like its pictures (--ratio, width ÷ height), as big as fits;
@@ -120,28 +150,16 @@ body {
   overflow: hidden;
 }
 
-.card.stack {
-  display: flex;
-  flex-direction: column;
-}
-
-.card.stack > * {
-  flex: none;
-}
-
 /* Long text gives way, down to what the pictures need. */
-.card.stack > .text {
-  flex: 0 1 auto;
-  min-height: 0;
-}
-
 .card.stack > .pics {
   flex: 1 1 0;
   min-height: 40%;
 }
 
 .card.side {
-  grid-template-columns: minmax(0, 55fr) minmax(0, 45fr);
+  display: grid;
+  /* --pic-share: the plan's (card-layout.ts pictureShare). */
+  grid-template-columns: minmax(0, calc(var(--pic-share, 0.55) * 100%)) minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     'pics header'
@@ -210,72 +228,6 @@ body {
   height: 100%;
   object-fit: cover;
   border-radius: 0.5em;
-}
-
-.card footer {
-  color: var(--muted);
-}
-
-.title {
-  margin: 0;
-  font-size: 2em;
-  line-height: 1.2;
-  font-weight: 750;
-  text-wrap: balance;
-  overflow-wrap: anywhere;
-}
-
-.text {
-  margin: 0;
-  font-weight: 550;
-  line-height: 1.35;
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-  text-wrap: pretty;
-  overflow: hidden;
-}
-
-.text.short {
-  font-size: 3em;
-  line-height: 1.2;
-}
-
-.text.medium {
-  font-size: 2.2em;
-}
-
-.text.long {
-  font-size: 1.7em;
-}
-
-.text.longer {
-  font-size: 1.35em;
-}
-
-.pics {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: 0.5em;
-  height: 42vh;
-  min-height: 0;
-}
-
-.pics[data-count='1'] {
-  justify-items: center;
-}
-
-.pics img {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  object-fit: contain;
-  border-radius: 0.5em;
-}
-
-.pics[data-count='1'] img {
-  width: auto;
-  max-width: 100%;
 }
 
 .card footer {
