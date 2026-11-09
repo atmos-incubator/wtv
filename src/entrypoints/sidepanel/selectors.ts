@@ -48,7 +48,7 @@ import {
   withoutRoleOverride,
   type SiteOverride,
 } from '../../lib/sites/overrides';
-import { CONDITIONS, ROLE_DEFAULT_WHEN, type Condition, type Matcher, type RoleName } from '../../lib/sites/schema';
+import { CONDITIONS, POST_ROLES, ROLE_DEFAULT_WHEN, type Condition, type Matcher, type RoleName } from '../../lib/sites/schema';
 import { validateMatchers } from '../../lib/sites/validate';
 
 const app = document.getElementById('selectors') as HTMLElement;
@@ -192,12 +192,19 @@ function testSoon(): void {
 async function runTest(): Promise<void> {
   const ed = state.editor;
   if (!ed || !ed.selector.trim()) return;
+  const { selector, when } = ed;
+  let test: TestResult;
   try {
-    ed.test = await toFrame<TestResult>({ type: PICK_TEST, role: ed.role, selector: ed.selector, when: ed.when });
+    test = await toFrame<TestResult>({ type: PICK_TEST, role: ed.role, selector, when });
   } catch {
-    ed.test = { count: 0, satisfied: false, error: 'Could not reach the page.' };
+    test = { count: 0, satisfied: false, error: 'Could not reach the page.' };
   }
-  render();
+  // Typed on since: that newer test is coming.
+  if (state.editor !== ed || ed.selector !== selector || ed.when !== when) return;
+  ed.test = test;
+  // In place: a full render rebuilds the input (losing its undo history) mid-typing.
+  if (testBox?.isConnected) fillTestResult(testBox, ed);
+  else render();
 }
 
 function siteIdentity(report: RolesReport): { siteId: string; bundled: (typeof BUNDLED_SITES)[number] | undefined } {
@@ -461,6 +468,39 @@ function confirmRemoveView(r: RoleReport): HTMLElement {
   );
 }
 
+/** The open editor's test result: filled in place as the selector is typed. */
+let testBox: HTMLElement | null = null;
+
+/**
+ * One line of result, plus a fixed-size "Reads" box for roles that read a value. Same
+ * size whatever the result, so the panel doesn't jump while a selector is half typed
+ * (`div.` is invalid, `div.a` isn't).
+ */
+function fillTestResult(box: HTMLElement, ed: Editor): void {
+  const t = ed.test;
+  const line = el('p', { className: 'test-line' });
+  if (!ed.selector.trim()) {
+    line.textContent = 'Type a selector to test it.';
+  } else if (!t) {
+    line.textContent = 'Testing…';
+  } else if (t.error) {
+    line.classList.add('bad');
+    line.textContent = t.error.startsWith('invalid selector') ? 'Not a valid selector (yet).' : t.error;
+  } else {
+    line.textContent = `${t.count} match${t.count === 1 ? '' : 'es'} on the page (outlined in green)${t.satisfied ? '' : ' · condition not met right now'}.`;
+  }
+  line.title = t?.error ?? line.textContent;
+
+  const readsValue = isMetaRole(ed.role) || (POST_ROLES as readonly RoleName[]).includes(ed.role);
+  const reads = readsValue
+    ? el('p', {
+        className: 'reads',
+        text: !t || t.error ? 'Reads: —' : t.value ? `Reads: “${t.value.slice(0, 240)}”` : 'Reads: nothing (no text).',
+      })
+    : null;
+  box.replaceChildren(...(reads ? [line, reads] : [line]));
+}
+
 function editorView(ed: Editor): HTMLElement {
   const input = el('input');
   input.type = 'text';
@@ -470,6 +510,10 @@ function editorView(ed: Editor): HTMLElement {
   input.setAttribute('aria-label', 'Selector');
   input.addEventListener('input', () => {
     ed.selector = input.value;
+    if (!ed.selector.trim()) {
+      ed.test = null;
+      if (testBox) fillTestResult(testBox, ed);
+    }
     testSoon();
   });
 
@@ -517,19 +561,8 @@ function editorView(ed: Editor): HTMLElement {
         )
       : null;
 
-  const t = ed.test;
-  const testLine = t
-    ? el('p', {
-        className: t.error ? 'warn' : 'note',
-        text: t.error
-          ? t.error
-          : `${t.count} match${t.count === 1 ? '' : 'es'} on the page${t.satisfied ? '' : ' · condition not met right now'} (outlined in green).`,
-      })
-    : null;
-  const reads =
-    t && !t.error && t.value !== undefined
-      ? el('p', { className: 'reads', text: t.value ? `Reads: “${t.value.slice(0, 240)}”` : 'Reads: nothing (no text).' })
-      : null;
+  testBox = el('div', { className: 'test-result' });
+  fillTestResult(testBox, ed);
   const metaNote = isMetaRole(ed.role)
     ? el('p', {
         className: 'note',
@@ -544,8 +577,7 @@ function editorView(ed: Editor): HTMLElement {
     candidates,
     input,
     el('div', { className: 'row' }, when, el('label', { className: 'check' }, keep, document.createTextNode('Keep the current selectors as fallbacks'))),
-    testLine,
-    reads,
+    testBox,
     metaNote,
     el(
       'div',
@@ -574,6 +606,7 @@ function roleView(r: RoleReport): HTMLElement {
       state.confirmRemove = null;
       state.editor = { role: r.role, element: null, candidates: [], selector: '', when: null, keepExisting: true, test: null };
       state.frameId = 0;
+      focusNext = 'selector';
       render();
     });
     for (const b of [pick, later, type]) b.disabled = busy;
@@ -831,21 +864,31 @@ setInterval(() => {
 
 // --- rendering ---------------------------------------------------------------------------
 
-/** Re-rendering replaces the inputs; put the caret back where it was. */
-function keepingFocus(draw: () => void): void {
+/** Focus this (a `data-key`) after the next render, scrolling it into view if needed. */
+let focusNext: string | null = null;
+
+/**
+ * Re-rendering replaces everything: keep the scroll position (Chrome loses it when the
+ * whole panel is swapped, jumping to the top), and the focus and caret where they were.
+ */
+function render(): void {
+  const scroller = document.scrollingElement ?? document.documentElement;
+  const top = scroller.scrollTop;
   const active = document.activeElement;
-  const key = active instanceof HTMLElement ? active.dataset.key : undefined;
-  const input = active instanceof HTMLInputElement ? active : null;
+  const key = focusNext ?? (active instanceof HTMLElement ? active.dataset.key : undefined);
+  const input = !focusNext && active instanceof HTMLInputElement ? active : null;
   const range = input ? ([input.selectionStart, input.selectionEnd] as const) : null;
+  const reveal = focusNext !== null;
+  focusNext = null;
+
   draw();
+  scroller.scrollTop = top;
   if (!key) return;
   const next = app.querySelector<HTMLElement>(`[data-key="${key}"]`);
-  next?.focus();
+  if (!next) return;
+  next.focus({ preventScroll: true });
   if (next instanceof HTMLInputElement && range) next.setSelectionRange(range[0], range[1]);
-}
-
-function render(): void {
-  keepingFocus(draw);
+  if (reveal) next.scrollIntoView({ block: 'nearest' });
 }
 
 function draw(): void {
