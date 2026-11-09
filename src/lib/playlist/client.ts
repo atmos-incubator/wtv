@@ -91,6 +91,7 @@ import { findPostEmbed, readPagePost } from '../posts/page';
 import { showEmbed, type EmbedShow } from '../posts/embed';
 import { EMBED_DEFAULT_S } from '../posts/embed-layout';
 import { hasPostSelectors } from '../sites/schema';
+import { unavailableMatchers } from '../sites/gone-markers';
 
 /** Offer "Start" if nothing has played (and nothing was refused) by then. */
 const FALLBACK_PROMPT_MS = 15_000;
@@ -440,8 +441,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
         gonePoll = undefined;
         return;
       }
-      const matchers = agent.profile().site?.config.roles.unavailable;
-      if (!matchers?.length) return;
+      const matchers = unavailableMatchers(location.hostname, agent.profile().site?.config.roles.unavailable);
+      if (!matchers.length) return;
       const found = matchRole('unavailable', matchers).match?.element;
       if (found && isElementVisible(found)) {
         console.info('[wtv] the site says this entry is unavailable');
@@ -594,25 +595,27 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   /** `v=card`: read the post with the site's post selectors, and hand it to the runner. */
   async function readPost(run: number): Promise<void> {
     const site = agent.profile().site;
+    const unavailable = unavailableMatchers(location.hostname, site?.config.roles.unavailable);
+    const saysGone = () => unavailable.length > 0 && matchRole('unavailable', unavailable).match !== null;
     const until = performance.now() + POST_WAIT_MS;
     let result: PostResult;
     for (;;) {
       if (run !== pageRun || signal.aborted) return;
       // Apps start their videos late; nothing should play behind the blackout.
       pausePageMedia();
-      if (!site || !hasPostSelectors(site.config.roles)) {
-        result = { ok: false, gone: false, error: `No post selectors for ${location.hostname} (Fix selectors → Posts)` };
+      if (saysGone()) {
+        result = { ok: false, gone: true, error: `${site?.config.name ?? location.hostname} says this post isn’t available` };
         break;
       }
-      const unavailable = site.config.roles.unavailable;
-      if (unavailable?.length && matchRole('unavailable', unavailable).match) {
-        result = { ok: false, gone: true, error: `${site.config.name} says this post isn’t available` };
+      if (!site || !hasPostSelectors(site.config.roles)) {
+        result = { ok: false, gone: false, error: `No post selectors for ${location.hostname} (Fix selectors → Posts)` };
         break;
       }
       if (readPagePost(site).post) {
         await sleep(POST_SETTLE_MS);
         if (run !== pageRun || signal.aborted) return;
-        const post = readPagePost(site).post;
+        // A removed post keeps its title; the banner saying so can come in after it.
+        const post = saysGone() ? null : readPagePost(site).post;
         if (post) {
           result = { ok: true, post };
           break;

@@ -35,7 +35,8 @@
     ],
     "unavailable": [
       "#movie_player .ytp-error",
-      "ytd-watch-flexy yt-playability-error-supported-renderers"
+      "ytd-watch-flexy yt-playability-error-supported-renderers",
+      "ytd-watch-flexy[player-unavailable] #single-column-container ytd-background-promo-renderer"
     ],
     "playButton": [
       {
