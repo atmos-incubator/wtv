@@ -31,7 +31,8 @@ export type PickRequest =
   | { type: typeof PICK_START; role: RoleName; delayMs: number }
   | { type: typeof PICK_CANCEL }
   | { type: typeof PICK_KEY; key: PickKey }
-  | { type: typeof PICK_TEST; role: RoleName; selector: string; when: Condition | null }
+  /** `reveal`: scroll the match into view if none is on screen (a listed selector clicked). */
+  | { type: typeof PICK_TEST; role: RoleName; selector: string; when: Condition | null; reveal: boolean }
   | { type: typeof PICK_ROLES }
   | { type: typeof PICK_METADATA }
   | { type: typeof PICK_POST }
@@ -127,7 +128,7 @@ export function parsePickRequest(raw: unknown): PickRequest | null {
     case PICK_TEST: {
       if (!isRole(m.role) || typeof m.selector !== 'string') return null;
       const when = (CONDITIONS as readonly unknown[]).includes(m.when) ? (m.when as Condition) : null;
-      return { type: PICK_TEST, role: m.role, selector: m.selector, when };
+      return { type: PICK_TEST, role: m.role, selector: m.selector, when, reveal: m.reveal === true };
     }
     default:
       return null;

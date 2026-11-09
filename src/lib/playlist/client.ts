@@ -409,10 +409,14 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   function pageInfo(): MediaInfo {
     const info: MediaInfo = {};
     try {
-      const m = pageMetadata(agent.profile().site);
+      const site = agent.profile().site;
+      const m = pageMetadata(site);
       if (m.title) info.title = m.title;
       if (m.creator) info.creator = m.creator;
-      if (m.thumbnail) info.thumbnailUrl = m.thumbnail;
+      // A post's own picture (its image selectors) over the page's (often the site's logo).
+      const picture = site?.config.roles.postImage?.length ? readPagePost(site).post?.images[0] : undefined;
+      const thumbnail = picture ?? m.thumbnail;
+      if (thumbnail) info.thumbnailUrl = thumbnail;
       if (m.duration) info.durationS = m.duration;
     } catch (err) {
       console.warn('[wtv] reading the page metadata failed:', err);

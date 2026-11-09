@@ -389,6 +389,8 @@ async function post(tabId: number, gen: number): Promise<PostResult> {
       url: entry.url,
       title: postTitle(result.post),
       creator: result.post.author,
+      // Its first picture, as the entry's thumbnail (the page's og:image is often the site's).
+      ...(result.post.images[0] ? { thumbnailUrl: result.post.images[0] } : {}),
       durationS: entry.endS ?? (state?.card?.inPage ? embedCardDurationS(result.post) : cardDurationS(result.post)),
     });
   }

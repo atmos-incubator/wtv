@@ -34,6 +34,12 @@ function evaluate(selector: string, when: Condition): Omit<MatcherReport, 'selec
   return { elements, count: elements.length, satisfied, error: error ?? null };
 }
 
+/** Some of it is inside the window. */
+function inViewport(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+}
+
 function notifyPanel(message: unknown): void {
   // The panel may have been closed; nothing to do then.
   browser.runtime.sendMessage(message).catch(() => undefined);
@@ -113,10 +119,11 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
       case 'wtv/pick/test': {
         const when = msg.when ?? ROLE_DEFAULT_WHEN[msg.role];
         const { elements, ...rest } = evaluate(msg.selector, when);
-        flashMatches(elements);
         const result: TestResult = rest;
         // What a post would read: the one on screen (apps keep earlier screens, hidden).
         const hit = when === 'visible' ? elements.find(isElementVisible) : (elements.find(isShown) ?? elements[0]);
+        if (msg.reveal && hit && !elements.some(inViewport)) hit.scrollIntoView({ block: 'center', behavior: 'instant' });
+        flashMatches(elements);
         if ((META_ROLES as readonly string[]).includes(msg.role)) {
           result.value = hit ? readRoleValue(hit) : null;
         } else if ((POST_ROLES as readonly string[]).includes(msg.role)) {

@@ -163,6 +163,29 @@ h1 {
   background: var(--panel);
 }
 
+/* A listed selector: click to outline its matches on the page. */
+.selectors .show {
+  flex: 1;
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.selectors .show:hover:not(:disabled) code {
+  color: var(--ok);
+  text-decoration: underline;
+}
+
+.selectors .show:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 code {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 11.5px;

@@ -204,7 +204,7 @@ async function runTest(): Promise<void> {
   const { selector, when } = ed;
   let test: TestResult;
   try {
-    test = await toFrame<TestResult>({ type: PICK_TEST, role: ed.role, selector, when });
+    test = await toFrame<TestResult>({ type: PICK_TEST, role: ed.role, selector, when, reveal: false });
   } catch {
     test = { count: 0, satisfied: false, error: 'Could not reach the page.' };
   }
@@ -482,11 +482,19 @@ function selectorList(r: RoleReport): HTMLElement | null {
       remove.title = 'Remove this selector';
       remove.setAttribute('aria-label', `Remove selector ${m.selector}`);
       remove.disabled = state.picking !== null;
+      // Click a selector: its matches outlined in green on the page (scrolled to if need be).
+      const show = el('button', { className: 'show' }, el('code', { text: m.selector }));
+      show.type = 'button';
+      show.title = m.count > 0 ? 'Outline its matches on the page' : 'It matches nothing on the page right now';
+      show.disabled = m.count === 0 || m.error !== null;
+      show.addEventListener('click', () => {
+        void toFrame({ type: PICK_TEST, role: r.role, selector: m.selector, when: m.when, reveal: true }).catch(() => undefined);
+      });
       return el(
         'li',
         {},
         el('span', { className: i === r.matchedIndex ? 'hit' : m.satisfied ? '' : 'miss', text: m.satisfied ? '✓' : '✗' }),
-        el('code', { text: m.selector }),
+        show,
         el('span', { className: 'count', text: m.error ? 'invalid' : `${m.count} · ${m.when}` }),
         remove,
       );
