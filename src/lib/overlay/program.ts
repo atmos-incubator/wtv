@@ -17,12 +17,13 @@ export type OverlayCommand =
    * program, or the site's images) until the entry is ready; or, for a notice
    ("Unavailable: …"), black with `title`. `prompt`: offer Start / Next. `attempt`
    * counts automatic start attempts (each new one pulses the Start button); `status`
-   * says how the last one went.
+   * says how the last one went. `pictures.gen`: the playlist's move to an entry it's for
+   * (one picture carries across its pages; a new move, a new picture).
    */
   | {
       type: 'blackout';
       title: string | null;
-      pictures: { host: string; items: ProgramItem[] } | null;
+      pictures: { host: string; items: ProgramItem[]; gen: number | null } | null;
       prompt: boolean;
       attempt: number;
       status: string | null;
@@ -151,7 +152,11 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
         title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim().slice(0, MAX_TEXT) : null,
         pictures:
           isObj(raw.pictures) && typeof raw.pictures.host === 'string' && Array.isArray(raw.pictures.items)
-            ? { host: raw.pictures.host, items: parseItems(raw.pictures.items) }
+            ? {
+                host: raw.pictures.host,
+                items: parseItems(raw.pictures.items),
+                gen: Number.isInteger(raw.pictures.gen) && (raw.pictures.gen as number) >= 0 ? (raw.pictures.gen as number) : null,
+              }
             : null,
         prompt: raw.prompt === true,
         attempt: Number.isInteger(raw.attempt) && (raw.attempt as number) > 0 ? (raw.attempt as number) : 0,

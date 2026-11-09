@@ -275,7 +275,7 @@ export function startOverlay(
             title: blackout?.title ?? null,
             pictures:
               blackout && !blackout.notice
-                ? { host: location.hostname, items: [...(playlist.ads() ?? DEFAULT_AD_ITEMS)] }
+                ? { host: location.hostname, items: [...(playlist.ads() ?? DEFAULT_AD_ITEMS)], gen: blackout.gen }
                 : null,
             prompt: blackout?.prompt ?? false,
             attempt: blackout?.attempt ?? 0,

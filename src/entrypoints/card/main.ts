@@ -25,7 +25,7 @@ import { browser } from 'wxt/browser';
 import { cardDurationS, parsePost, type Post } from '../../lib/posts/adapters';
 import { CARD_PAUSED, CARD_POINTER, CARD_PREVIEW_CLOSE, CARD_PREVIEW_POST } from '../../lib/posts/preview-messages';
 import { getImageBlob } from '../../lib/images/db';
-import { loadingPicture, rememberLoadingPicture } from '../../lib/images/loading-picture';
+import { loadingPicture, orderLoadingSlides, rememberLoadingPicture } from '../../lib/images/loading-picture';
 import { createImageResolver } from '../../lib/images/resolver';
 import { fitMode } from '../../lib/overlay/fit';
 import { DEFAULT_AD_ITEMS, buildSlides, type ProgramItem } from '../../lib/overlay/program';
@@ -116,18 +116,22 @@ let posterUrl: string | null = null;
 
 /**
  * One ad picture over the whole page until the post (or why not) is ready: the one the
- * loading screen before this page showed, if that was moments ago (images/loading-picture.ts).
+ * loading screen before this page showed for the same move (`gen`), else a different one
+ * from the last move's (images/loading-picture.ts).
  */
-async function showPoster(items: readonly ProgramItem[]): Promise<void> {
+async function showPoster(items: readonly ProgramItem[], gen: number): Promise<void> {
   try {
-    let slide = loadingPicture();
+    const last = loadingPicture(gen);
+    let slide = last?.carry ? last.slide : null;
     if (!slide) {
       const resolve = await createImageResolver('');
-      const first = buildSlides(items, resolve).find((s) => s.kind === 'img') ?? buildSlides(DEFAULT_AD_ITEMS, resolve)[0];
+      let slides = buildSlides(items, resolve);
+      if (!slides.some((s) => s.kind === 'img')) slides = buildSlides(DEFAULT_AD_ITEMS, resolve);
+      const first = orderLoadingSlides(slides, last).slides.find((s) => s.kind === 'img');
       slide = first?.kind === 'img' ? first : null;
     }
     if (!slide || posterDone) return;
-    rememberLoadingPicture(slide);
+    rememberLoadingPicture(slide, gen);
     let url: string;
     if (slide.src.type === 'url') {
       url = slide.src.url;
@@ -434,7 +438,7 @@ async function main(): Promise<void> {
       browser.runtime.sendMessage({ type: PL_COMMAND, op: step }).catch(() => undefined);
     }).update(entry.index > 0);
   }
-  void showPoster(entry.ads ?? DEFAULT_AD_ITEMS);
+  void showPoster(entry.ads ?? DEFAULT_AD_ITEMS, entry.gen);
   const result = parsePostResult(await browser.runtime.sendMessage({ type: PL_POST, gen: entry.gen }).catch(() => null));
   if (!result) {
     say('Couldn’t load the post.');

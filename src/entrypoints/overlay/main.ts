@@ -20,7 +20,7 @@ import {
   type ProgramItem,
   type Slide,
 } from '../../lib/overlay/program';
-import { loadingPicture, rememberLoadingPicture, sameSource } from '../../lib/images/loading-picture';
+import { loadingPicture, orderLoadingSlides, rememberLoadingPicture } from '../../lib/images/loading-picture';
 import { startReader, type Reader } from './reader';
 
 const ACTIVITY_THROTTLE_MS = 150;
@@ -241,15 +241,17 @@ function showPictures(cmd: Extract<OverlayCommand, { type: 'pictures' }>): void 
 
 /**
  * Loop the program's slides until the next command. `loading`: the playlist's loading
- * screen. It starts with the picture the last loading screen showed if that was moments
- * ago (on the page being left, or before this page knew its entry), so moving between
- * entries doesn't flash one picture and then another; and remembers what it shows.
+ * screen for move `loading.gen` (images/loading-picture.ts). It starts with the picture
+ * that move's last loading screen showed (on the page being left, or before this page knew
+ * its entry), so one move doesn't flash one picture and then another; a new move starts
+ * with a different one. It remembers what it shows.
  */
-async function playProgram(host: string, items: readonly ProgramItem[], loading = false): Promise<void> {
+async function playProgram(host: string, items: readonly ProgramItem[], loading: { gen: number | null } | null = null): Promise<void> {
   const gen = generation;
   const resolve = await createImageResolver(host);
   let slides: Slide[] = [];
   let index = 0;
+  let first = true;
 
   const advance = async (): Promise<void> => {
     if (gen !== generation) return;
@@ -260,16 +262,17 @@ async function playProgram(host: string, items: readonly ProgramItem[], loading 
     if (index >= slides.length) {
       slides = buildSlides(items, resolve);
       if (slides.length === 0) slides = buildSlides(DEFAULT_AD_ITEMS, bundledResolved);
-      const carried = loading && index === 0 ? loadingPicture() : null;
-      if (carried) {
-        slides = [carried, ...slides.filter((s) => s.kind !== 'img' || !sameSource(s.src, carried.src))];
-        instantNext = true;
+      if (loading && first) {
+        const ordered = orderLoadingSlides(slides, loadingPicture(loading.gen));
+        slides = ordered.slides;
+        if (ordered.carried) instantNext = true;
       }
+      first = false;
       index = 0;
     }
     const slide = slides[index++];
     if (!slide) return;
-    if (loading && slide.kind === 'img') rememberLoadingPicture(slide);
+    if (loading && slide.kind === 'img') rememberLoadingPicture(slide, loading.gen);
     try {
       await renderSlide(slide, gen);
     } catch (err) {
@@ -297,11 +300,12 @@ function showBlackout(cmd: Extract<OverlayCommand, { type: 'blackout' }>): void 
   if (pictures) {
     // Loading: the ad pictures, kept going while the prompt and status change, and when
     // the page learns its entry's own [ads] (a new program then would swap the picture).
-    const key = 'blackout-pictures';
+    // A new move (Next / Previous while it loads): a new program, so a new picture.
+    const key = `blackout-pictures:${pictures.gen ?? ''}`;
     if (programKey !== key) {
       reset();
       programKey = key;
-      void playProgram(pictures.host, pictures.items, true);
+      void playProgram(pictures.host, pictures.items, { gen: pictures.gen });
     }
     lastBlackoutTitle = null;
   } else {

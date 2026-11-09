@@ -42,6 +42,12 @@ describe('parseOverlayCommand', () => {
       pictures: { host: 'a.example', items: [{ kind: 'img', keyword: null, durationS: null }] },
     });
     expect(parseOverlayCommand({ type: 'blackout', pictures: { host: 1, items: [] } })).toMatchObject({ pictures: null });
+    expect(parseOverlayCommand({ type: 'blackout', pictures: { host: 'a.example', items: [], gen: 5 } })).toMatchObject({
+      pictures: { gen: 5 },
+    });
+    expect(parseOverlayCommand({ type: 'blackout', pictures: { host: 'a.example', items: [], gen: -1 } })).toMatchObject({
+      pictures: { gen: null },
+    });
   });
 
   it('parses an ad program and drops invalid items', () => {

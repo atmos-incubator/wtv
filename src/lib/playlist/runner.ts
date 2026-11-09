@@ -212,7 +212,8 @@ async function goTo(tabId: number, state: RunnerState, index: number): Promise<v
   if (entry.view === 'card') next.card = { source: await postSource(entry.url), result: null };
   await put(tabId, next);
   // Go dark on the page we're leaving, so its end screen / autoplay never shows.
-  await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry), notice: false });
+  // `gen`: a new move, so a new loading picture (not the one the page was still showing).
+  await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry), notice: false, gen: next.gen });
   await browser.tabs.update(tabId, { url: entryPageUrl(entry, next.gen, next.card?.source ?? null) });
 }
 
@@ -234,7 +235,7 @@ async function postSource(url: string): Promise<CardSource> {
 function entryPageUrl(entry: RunEntry, gen: number, source: CardSource | null): string {
   if (entry.view === 'card' && source !== 'page') return cardPageUrl(gen);
   const view = entry.view && (isPageView(entry.view) || entry.view === 'card') ? entry.view : null;
-  return withWtvHash(entry.url, { t: entry.startS, end: entry.endS ?? null, title: entry.title, view });
+  return withWtvHash(entry.url, { t: entry.startS, end: entry.endS ?? null, title: entry.title, view, gen });
 }
 
 const cardPageUrl = (gen: number) => browser.runtime.getURL(`/card.html?gen=${gen}`);
@@ -414,7 +415,7 @@ async function media(tabId: number, frameId: number, gen: number, event: MediaEv
       const key = libraryKey(entry.url);
       const known = key ? await getRecord(key).catch(() => null) : null;
       const title = entry.title ?? known?.title ?? displayTitle(entry);
-      await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: `Unavailable: ${title}`, notice: true });
+      await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: `Unavailable: ${title}`, notice: true, gen });
       setTimeout(() => {
         void serial(async () => {
           const now = (await load())[tabId];

@@ -142,6 +142,11 @@ export interface Blackout {
   status: string | null;
   /** There's a playlist to skip ahead in (not for a stand-alone #wtv: link). */
   canNext: boolean;
+  /**
+   * The playlist's move to an entry this is the loading screen for (the runner's gen): its
+   * pages carry one ad picture on; a new move picks another (images/loading-picture.ts).
+   */
+  gen: number | null;
 }
 
 type Trigger = 'blocked' | 'blocked-in-frame' | 'timeout' | 'ready';
@@ -273,12 +278,12 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   }
 
   /** `forEntry`: this page is the entry (from hello), so Wtv should get it playing. */
-  function showBlackout(title: string | null, forEntry: boolean, notice = false): void {
+  function showBlackout(title: string | null, forEntry: boolean, gen: number | null, notice = false): void {
     if (!isTop) return;
     clearTimers();
     attempting = false;
     awaitingStart = forEntry;
-    blackout = { title, notice, prompt: false, attempt: 0, status: null, canNext: entry !== null };
+    blackout = { title, notice, prompt: false, attempt: 0, status: null, canNext: entry !== null, gen };
     if (forEntry) {
       promptTimer = setTimeout(() => {
         promptTimer = undefined;
@@ -732,7 +737,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       stopEmbed();
       syncNav(false);
     } else if (msg.op === 'blocked') trigger('blocked-in-frame');
-    else if (msg.op === 'blackout') showBlackout(msg.title, false, msg.notice);
+    else if (msg.op === 'blackout') showBlackout(msg.title, false, msg.gen, msg.notice);
     return undefined;
   };
   browser.runtime.onMessage.addListener(onMessage);
@@ -795,7 +800,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     pageView = hash?.view ?? null;
     if (hash) {
       // A page show has nothing to start: no Start prompt, no autoplay attempts.
-      showBlackout(hash.title ?? location.hostname, !pageView);
+      showBlackout(hash.title ?? location.hostname, !pageView, hash.gen ?? null);
       watchPrimary();
     }
     browser.runtime
@@ -811,7 +816,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
           pageView = entry.view;
           if (!isTop) return;
           if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });
-          else showBlackout(entry.title ?? (document.title || location.hostname), false);
+          else showBlackout(entry.title ?? (document.title || location.hostname), false, entry.gen);
           void runPageShow(entry.view, entry.speed, entry.endS);
           return;
         }
@@ -820,7 +825,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
         startS = entry.startS ?? (endS !== null ? 0 : null);
         watchEntry();
         if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });
-        else showBlackout(entry.title ?? (document.title || location.hostname), true);
+        else showBlackout(entry.title ?? (document.title || location.hostname), true, entry.gen);
         watchPrimary();
         watchForEmbed(pageRun);
         notify();

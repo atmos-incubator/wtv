@@ -17,6 +17,8 @@ describe('#wtv: hash', () => {
     expect(parseWtvHash('#wtv:v=scroll')?.view).toBe('scroll');
     expect(parseWtvHash('#wtv:v=card')?.view).toBe('card');
     expect(parseWtvHash('#wtv:v=video')?.view).toBeNull();
+    expect(parseWtvHash('#wtv:g=12')?.gen).toBe(12);
+    expect(parseWtvHash('#wtv:g=x')?.gen).toBeUndefined();
   });
 
   it('tolerates junk', () => {
@@ -35,7 +37,7 @@ describe('#wtv: hash', () => {
   });
 
   it('round-trips', () => {
-    const params = { t: 97.5, end: 120.25, title: 'A & B = C #1', view: 'scroll' as const };
+    const params = { t: 97.5, end: 120.25, title: 'A & B = C #1', view: 'scroll' as const, gen: 4 };
     expect(parseWtvHash(formatWtvHash(params))).toEqual(params);
     expect(formatWtvHash({ t: null, end: null, title: null })).toBe('#wtv:');
     expect(formatWtvHash({ t: 0, end: 45, title: null })).toBe('#wtv:e=45');
