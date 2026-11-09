@@ -15,6 +15,8 @@ import {
   planImport,
 } from '../../lib/backup';
 import { browserAreas } from '../../lib/browser-storage';
+import { reloadKeepingPages, takePlaylistDraft } from '../../lib/dev/reload';
+import { DEV_TOOLS } from '../../lib/env';
 import { LIB_CHANGED } from '../../lib/media-library/messages';
 import {
   coverRecords,
@@ -232,10 +234,19 @@ function renderPreview(): void {
         play.title = 'Play from here';
         play.setAttribute('aria-label', `Play from entry ${i + 1}`);
         play.addEventListener('click', () => void playFrom(i));
+        const actions = el('span', 'entry-actions');
+        actions.append(play);
+        // Just the page, in a tab of its own (no playlist, no TV): for looking at one entry.
+        if (/^https?:\/\//i.test(e.url)) {
+          const open = Object.assign(el('a', 'button', '↗'), { href: e.url, target: '_blank', rel: 'noopener' });
+          open.title = 'Open the page on its own (not as a playlist)';
+          open.setAttribute('aria-label', `Open entry ${i + 1} on its own`);
+          actions.append(open);
+        }
         li.append(
           thumbnail(record, placeholder),
           el('span', 'entry-title', e.title ?? record?.title ?? e.url),
-          play,
+          actions,
           el('span', 'entry-meta', meta.join(' · ')),
         );
         return li;
@@ -487,10 +498,40 @@ browser.storage.onChanged.addListener((changes, area) => {
   })();
 });
 
+if (DEV_TOOLS) {
+  $('dev').hidden = false;
+  const reload = $<HTMLButtonElement>('reload-wtv');
+  reload.addEventListener('click', () => {
+    reload.disabled = true;
+    const p = current();
+    const draft = dirty && p && !isBuiltin(p) ? { id: p.id, name: nameInput.value, text: textInput.value } : null;
+    // Nothing to lose now: the draft goes with the note.
+    setDirty(false);
+    void reloadKeepingPages(draft).catch((err: unknown) => {
+      reload.disabled = false;
+      setDirty(draft !== null);
+      setStatus(`Couldn’t reload: ${err instanceof Error ? err.message : String(err)}`, true);
+    });
+  });
+}
+
+/** Dev: the unsaved text this playlist had before Reload Wtv. */
+async function restoreDraft(): Promise<void> {
+  if (!DEV_TOOLS) return;
+  const draft = await takePlaylistDraft(currentId);
+  if (!draft) return;
+  nameInput.value = draft.name;
+  textInput.value = draft.text;
+  renderPreview();
+  setDirty(true);
+  setStatus('Your unsaved changes from before the reload.');
+}
+
 void library
   .load()
   .then(async () => {
     overrides = await loadOverrideStore(local).catch(() => ({}));
   })
   .then(refresh)
-  .then(renderEditor);
+  .then(renderEditor)
+  .then(restoreDraft);

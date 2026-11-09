@@ -221,6 +221,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   let embed: EmbedShow | null = null;
   /** `view=video` played as an embed: when it's over (nothing else will say). */
   let embedEnd: ReturnType<typeof setTimeout> | undefined;
+  /** `view=video` embed: its end is ours to time (not the frame's own player's). */
+  let embedTimed = false;
   let embedWait: ReturnType<typeof setTimeout> | undefined;
   const adActive = () => ads.status()?.active ?? false;
   const listeners = new Set<() => void>();
@@ -556,6 +558,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   }
 
   function stopEmbed(): void {
+    embedTimed = false;
     clearTimeout(embedEnd);
     clearTimeout(embedWait);
     embedEnd = embedWait = undefined;
@@ -579,16 +582,35 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
         if (run !== pageRun || !entry || !blackout || !awaitingStart || agent.primary()) return;
         if (!findPostEmbed(site)) return;
         console.info('[wtv] no player of its own here; showing the post’s embedded player');
-        embed = showEmbed(() => findPostEmbed(site), { kind: 'full' });
+        const durS = endS !== null ? Math.max(1, endS - (startS ?? 0)) : EMBED_DEFAULT_S;
+        // Its time doesn't run while the viewer has it paused.
+        let leftMs = durS * 1000;
+        let since = Date.now();
+        const runFor = (ms: number) => {
+          since = Date.now();
+          embedEnd = setTimeout(() => {
+            embedEnd = undefined;
+            if (run === pageRun) report('ended');
+          }, ms);
+        };
+        embed = showEmbed(() => findPostEmbed(site), { kind: 'full' }, {
+          onPaused(paused) {
+            if (run !== pageRun || sent.has('ended')) return;
+            if (paused && embedEnd !== undefined) {
+              clearTimeout(embedEnd);
+              embedEnd = undefined;
+              leftMs = Math.max(0, leftMs - (Date.now() - since));
+            } else if (!paused && embedEnd === undefined && embedTimed) {
+              runFor(leftMs);
+            }
+          },
+        });
         lift();
         notify();
         report('playing');
-        const durS = endS !== null ? Math.max(1, endS - (startS ?? 0)) : EMBED_DEFAULT_S;
         sendInfo({ ...pageInfo(), durationS: durS });
-        embedEnd = setTimeout(() => {
-          embedEnd = undefined;
-          if (run === pageRun) report('ended');
-        }, durS * 1000);
+        embedTimed = true;
+        runFor(leftMs);
       }, EMBED_WAIT_MS);
     });
   }
@@ -655,7 +677,11 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       browser.runtime.sendMessage({ type: PL_PAGE_POST, gen: entry.gen, result, inPage }).catch(() => undefined);
       if (inPage && site) {
         console.info('[wtv] the post has an embedded player; showing its card on this page');
-        embed = showEmbed(() => findPostEmbed(site), { kind: 'card', frame: cardFrame(`gen=${entry.gen}&embed=1`) });
+        embed = showEmbed(
+          () => findPostEmbed(site),
+          { kind: 'card', frame: cardFrame(`gen=${entry.gen}&embed=1`) },
+          { onPointer: () => nav?.poke() },
+        );
         notify();
       }
       return;
@@ -692,7 +718,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     if (msg.op === 'lift') {
       lift();
       // A frame's own player started (Wtv runs in the embed after all): it reports its end.
-      if (embedEnd !== undefined && !pageView) {
+      if (embedTimed && !pageView) {
+        embedTimed = false;
         clearTimeout(embedEnd);
         embedEnd = undefined;
       }

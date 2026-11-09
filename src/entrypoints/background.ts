@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
 import { startAdController } from '../lib/ads/controller';
 import { browserAreas } from '../lib/browser-storage';
+import { reopenNotedPages } from '../lib/dev/reload';
 import { startDevScreenshots } from '../lib/dev/screenshot';
 import { DEV_TOOLS } from '../lib/env';
 import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
@@ -64,5 +65,9 @@ export default defineBackground(() => {
   startViewController();
   startPlaylistRunner();
   startPlaylistMenus();
-  if (DEV_TOOLS) startDevScreenshots();
+  if (DEV_TOOLS) {
+    startDevScreenshots();
+    // After Reload Wtv on the playlists page: its pages back where they were.
+    reopenNotedPages().catch((err: unknown) => console.error('[wtv] reopening pages failed:', err));
+  }
 });

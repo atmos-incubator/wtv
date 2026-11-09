@@ -24,6 +24,13 @@
           <input id="import-file" type="file" accept=".json,application/json" hidden />
           <p id="backup-status" class="note" aria-live="polite"></p>
         </div>
+
+        <div id="dev" class="backup" hidden>
+          <h2 class="list-heading">Dev</h2>
+          <div class="actions">
+            <button id="reload-wtv" type="button" title="Reload the extension from disk; this page (and Wtv’s other pages) open again where they were, unsaved text included">Reload Wtv</button>
+          </div>
+        </div>
       </nav>
 
       <main id="editor" hidden>

@@ -23,7 +23,7 @@
 import './style.css';
 import { browser } from 'wxt/browser';
 import { cardDurationS, parsePost, type Post } from '../../lib/posts/adapters';
-import { CARD_PREVIEW_CLOSE, CARD_PREVIEW_POST } from '../../lib/posts/preview-messages';
+import { CARD_PAUSED, CARD_POINTER, CARD_PREVIEW_CLOSE, CARD_PREVIEW_POST } from '../../lib/posts/preview-messages';
 import { getImageBlob } from '../../lib/images/db';
 import { loadingPicture, rememberLoadingPicture } from '../../lib/images/loading-picture';
 import { createImageResolver } from '../../lib/images/resolver';
@@ -71,6 +71,8 @@ function layOut(): void {
   const { slot, text } = embedLayout(window.innerWidth, window.innerHeight);
   put($('slot'), slot);
   put(card, text);
+  // Over the post: the middle of the tab is under the player.
+  put(pausedMark, text);
 }
 
 window.addEventListener('resize', () => {
@@ -410,8 +412,9 @@ async function preview(token: string): Promise<void> {
     return;
   }
   const pics = embedded ? [] : await loadPictures(post.images);
+  // No countdown: a preview stays until it's closed (long text scrolls with the wheel).
+  $('progress').hidden = true;
   render(post, pics);
-  start(embedded ? embedCardDurationS(post) : cardDurationS(post));
 }
 
 async function main(): Promise<void> {
@@ -452,11 +455,37 @@ async function main(): Promise<void> {
   start(entry.endS ?? (embedded ? embedCardDurationS(result.post) : cardDurationS(result.post)));
 }
 
-document.addEventListener('click', () => setPaused(runningSince !== null));
+/** The viewer paused or played the card: beside an embedded player, it follows. */
+function togglePaused(): void {
+  setPaused(runningSince !== null);
+  if (embedded && totalMs && !done) window.parent.postMessage({ type: CARD_PAUSED, paused: runningSince === null }, '*');
+}
+
+document.addEventListener('click', togglePaused);
 document.addEventListener('keydown', (e) => {
   if (e.key !== ' ' || e.repeat) return;
   e.preventDefault();
-  setPaused(runningSince !== null);
+  togglePaused();
 });
+
+if (embedded) {
+  // The player was paused or played on its shield: the card's time follows.
+  window.addEventListener('message', (e: MessageEvent<unknown>) => {
+    const d = e.data as { type?: unknown; paused?: unknown } | null;
+    if (e.source === window.parent && d?.type === CARD_PAUSED && typeof d.paused === 'boolean') setPaused(d.paused);
+  });
+  // The page can't see the pointer over this frame; its playlist arrows wake on it.
+  let lastPointer = 0;
+  document.addEventListener(
+    'mousemove',
+    () => {
+      const now = Date.now();
+      if (now - lastPointer < 200) return;
+      lastPointer = now;
+      window.parent.postMessage({ type: CARD_POINTER }, '*');
+    },
+    { passive: true },
+  );
+}
 
 void main();

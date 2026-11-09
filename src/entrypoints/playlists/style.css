@@ -333,10 +333,14 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.entries button {
-  grid-row: span 2;
+.entries .entry-actions {
+  grid-row: 1 / span 2;
   grid-column: 4;
-  grid-row-start: 1;
+  display: flex;
+  gap: 6px;
+}
+
+.entries .entry-actions > * {
   padding: 4px 10px;
 }
 
@@ -360,13 +364,19 @@ input[type='checkbox'] {
   accent-color: var(--accent);
 }
 
-button {
+button,
+a.button {
   padding: 6px 12px;
   border-radius: 6px;
   border: 1px solid var(--line);
   background: transparent;
   color: var(--fg);
   cursor: pointer;
+}
+
+a.button {
+  text-decoration: none;
+  line-height: normal;
 }
 
 button.primary {
@@ -389,6 +399,7 @@ button:disabled {
 }
 
 button:focus-visible,
+a.button:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--accent);

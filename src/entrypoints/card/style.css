@@ -249,6 +249,12 @@ body {
   pointer-events: none;
 }
 
+:root.embedded #paused {
+  /* Placed over the post by main.ts (layOut). */
+  right: auto;
+  bottom: auto;
+}
+
 :root.paused #stage {
   opacity: 0.4;
   transition: opacity 300ms ease;
