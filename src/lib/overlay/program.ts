@@ -92,6 +92,8 @@ export type OverlayEvent =
   | { type: 'click' | 'dblclick'; x: number; y: number }
   /** Pointer moved over the shield; x / y are fractions (0–1) of the overlay box. */
   | { type: 'activity'; x: number; y: number }
+  /** Pointer moved over the overlay in any other mode (wakes the playlist's arrows). */
+  | { type: 'pointer' }
   /** `read`: the article is showing, for `durationS` in all (paused time not counted). */
   | { type: 'read-started'; id: number; durationS: number }
   /** `read`: no article on the page (show the page itself instead). */
@@ -204,6 +206,7 @@ export function parseOverlayEvent(raw: unknown): OverlayEvent | null {
     case 'undismiss':
     case 'start':
     case 'next':
+    case 'pointer':
       return { type: raw.type };
     case 'read-started':
       return Number.isInteger(raw.id) && isPositive(raw.durationS)

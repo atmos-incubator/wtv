@@ -19,6 +19,8 @@ export const PICK_CANCELLED = 'wtv/pick/cancelled';
 export const PICK_METADATA = 'wtv/pick/metadata';
 /** → PagePostReport: the post card this page would make (top frame). */
 export const PICK_POST = 'wtv/pick/post';
+/** → PreviewResult: show that card over the page, as a playlist would, until ✕ (top frame). */
+export const PICK_PREVIEW = 'wtv/pick/preview';
 /** Keys pressed while the side panel has focus, forwarded to the in-page picker. */
 export const PICK_KEY = 'wtv/pick/key';
 
@@ -32,7 +34,8 @@ export type PickRequest =
   | { type: typeof PICK_TEST; role: RoleName; selector: string; when: Condition | null }
   | { type: typeof PICK_ROLES }
   | { type: typeof PICK_METADATA }
-  | { type: typeof PICK_POST };
+  | { type: typeof PICK_POST }
+  | { type: typeof PICK_PREVIEW };
 
 export interface Candidate {
   selector: string;
@@ -65,6 +68,11 @@ export interface TestResult {
 export interface PagePostReport {
   post: Post | null;
   fields: PostField[];
+}
+
+/** PICK_PREVIEW's answer: error says why nothing is shown. */
+export interface PreviewResult {
+  error: string | null;
 }
 
 export interface MatcherReport {
@@ -114,6 +122,8 @@ export function parsePickRequest(raw: unknown): PickRequest | null {
       return { type: PICK_METADATA };
     case PICK_POST:
       return { type: PICK_POST };
+    case PICK_PREVIEW:
+      return { type: PICK_PREVIEW };
     case PICK_TEST: {
       if (!isRole(m.role) || typeof m.selector !== 'string') return null;
       const when = (CONDITIONS as readonly unknown[]).includes(m.when) ? (m.when as Condition) : null;

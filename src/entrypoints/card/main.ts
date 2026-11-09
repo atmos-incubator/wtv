@@ -22,7 +22,8 @@
  */
 import './style.css';
 import { browser } from 'wxt/browser';
-import { cardDurationS, type Post } from '../../lib/posts/adapters';
+import { cardDurationS, parsePost, type Post } from '../../lib/posts/adapters';
+import { CARD_PREVIEW_CLOSE, CARD_PREVIEW_POST } from '../../lib/posts/preview-messages';
 import { getImageBlob } from '../../lib/images/db';
 import { loadingPicture, rememberLoadingPicture } from '../../lib/images/loading-picture';
 import { createImageResolver } from '../../lib/images/resolver';
@@ -30,7 +31,9 @@ import { fitMode } from '../../lib/overlay/fit';
 import { DEFAULT_AD_ITEMS, buildSlides, type ProgramItem } from '../../lib/overlay/program';
 import { planCard } from '../../lib/posts/card-layout';
 import { embedCardDurationS, embedLayout, type Box } from '../../lib/posts/embed-layout';
+import { createNavArrows } from '../../lib/playlist/nav-arrows';
 import {
+  PL_COMMAND,
   PL_HELLO,
   PL_MEDIA,
   PL_POST,
@@ -52,6 +55,8 @@ const pausedMark = $('paused');
 const progress = $('progress').firstElementChild as HTMLElement;
 /** Framed over the post's page, beside its embedded player. */
 const embedded = new URLSearchParams(location.search).has('embed');
+/** A selector preview (posts/preview.ts): the post comes from the page, by postMessage. */
+const previewToken = new URLSearchParams(location.search).has('preview') ? location.hash.slice(1) || null : null;
 
 function put(el: HTMLElement, box: Box): void {
   Object.assign(el.style, {
@@ -153,7 +158,7 @@ function hidePoster(): void {
 const elapsed = () => shownMs + (runningSince === null ? 0 : performance.now() - runningSince);
 
 function frame(): void {
-  if (done || !entry) return;
+  if (done || !totalMs) return;
   const ms = elapsed();
   progress.style.transform = `scaleX(${Math.min(1, ms / totalMs)})`;
   if (ms >= totalMs) {
@@ -308,12 +313,50 @@ function start(durS: number): void {
   report('playing');
 }
 
+/** The post the previewing page sends (it checks our token; we check its). */
+function previewPost(token: string): Promise<Post | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 5000);
+    window.addEventListener('message', function onPost(e: MessageEvent<unknown>) {
+      const d = e.data as { type?: unknown; token?: unknown; post?: unknown } | null;
+      if (e.source !== window.parent || d?.type !== CARD_PREVIEW_POST || d.token !== token) return;
+      window.removeEventListener('message', onPost);
+      clearTimeout(timer);
+      resolve(parsePost(d.post));
+    });
+  });
+}
+
+async function preview(token: string): Promise<void> {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') window.parent.postMessage({ type: CARD_PREVIEW_CLOSE, token }, '*');
+  });
+  const post = await previewPost(token);
+  if (!post) {
+    say('Couldn’t read the post for the preview.');
+    return;
+  }
+  const pics = embedded ? [] : await loadPictures(post.images);
+  render(post, pics);
+  start(embedded ? embedCardDurationS(post) : cardDurationS(post));
+}
+
 async function main(): Promise<void> {
   say('');
+  if (previewToken) {
+    await preview(previewToken);
+    return;
+  }
   entry = parseEntryInfo(await browser.runtime.sendMessage({ type: PL_HELLO }).catch(() => null));
   if (!entry) {
     say('Nothing to show: this page shows posts from a Wtv playlist.');
     return;
+  }
+  // Framed in the post's page (embedded), the page has the arrows.
+  if (!embedded) {
+    createNavArrows((step) => {
+      browser.runtime.sendMessage({ type: PL_COMMAND, op: step }).catch(() => undefined);
+    }).update(entry.index > 0);
   }
   void showPoster(entry.ads ?? DEFAULT_AD_ITEMS);
   const result = parsePostResult(await browser.runtime.sendMessage({ type: PL_POST, gen: entry.gen }).catch(() => null));

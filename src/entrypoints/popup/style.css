@@ -29,7 +29,9 @@
 
 body {
   margin: 0;
-  width: 320px;
+  /* Fixed: the popup sizes to its content, so nothing in it may be wider than this. */
+  width: 380px;
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--fg);
   font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -62,8 +64,22 @@ h1 {
   border-top: 1px solid var(--line);
 }
 
+/* Grid items default to min-width: auto (their content's width), which lets a long
+   unbreakable line (a URL) push the column, and the popup, wider. */
+main > *,
+.row > * {
+  min-width: 0;
+}
+
+.line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .note {
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .media-title {

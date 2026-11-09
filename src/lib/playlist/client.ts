@@ -88,7 +88,8 @@ import {
   type PostResult,
 } from './messages';
 import { findPostEmbed, readPagePost } from '../posts/page';
-import { showEmbed, type EmbedShow } from '../posts/embed';
+import { cardFrame, showEmbed, type EmbedShow } from '../posts/embed';
+import { createNavArrows, type NavArrows } from './nav-arrows';
 import { EMBED_DEFAULT_S } from '../posts/embed-layout';
 import { hasPostSelectors } from '../sites/schema';
 import { unavailableMatchers } from '../sites/gone-markers';
@@ -176,6 +177,10 @@ export interface PlaylistClient {
   /** "Start" on the blackout (inside a user gesture). */
   start(): void;
   next(): void;
+  /** The pointer moved over our overlay (the page doesn't see it): wake the arrows. */
+  pointerMoved(): void;
+  /** Hide the arrows (the selector picker is running). */
+  suspendNav(on: boolean): void;
 }
 
 export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent, ads: AdWatcher): PlaylistClient {
@@ -219,6 +224,22 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   let embedWait: ReturnType<typeof setTimeout> | undefined;
   const adActive = () => ads.status()?.active ?? false;
   const listeners = new Set<() => void>();
+  /** Top frame: previous / next over the entry, while the playlist runs here. */
+  let nav: NavArrows | null = null;
+  let navSuspended = false;
+
+  function syncNav(on: boolean): void {
+    if (!on || !isTop || !entry) {
+      nav?.remove();
+      nav = null;
+      return;
+    }
+    nav ??= createNavArrows((step) => {
+      browser.runtime.sendMessage({ type: PL_COMMAND, op: step }).catch(() => undefined);
+    });
+    nav.update(entry.index > 0);
+    nav.suspend(navSuspended);
+  }
 
   function notify(): void {
     for (const cb of listeners) {
@@ -634,7 +655,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       browser.runtime.sendMessage({ type: PL_PAGE_POST, gen: entry.gen, result, inPage }).catch(() => undefined);
       if (inPage && site) {
         console.info('[wtv] the post has an embedded player; showing its card on this page');
-        embed = showEmbed(() => findPostEmbed(site), { kind: 'card', gen: entry.gen });
+        embed = showEmbed(() => findPostEmbed(site), { kind: 'card', frame: cardFrame(`gen=${entry.gen}&embed=1`) });
         notify();
       }
       return;
@@ -678,6 +699,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     } else if (msg.op === 'release') {
       lift();
       stopEmbed();
+      syncNav(false);
     } else if (msg.op === 'blocked') trigger('blocked-in-frame');
     else if (msg.op === 'blackout') showBlackout(msg.title, false, msg.notice);
     return undefined;
@@ -697,6 +719,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
 
   ctx.onInvalidated(() => {
     browser.runtime.onMessage.removeListener(onMessage);
+    syncNav(false);
     offPrimary();
     primaryCleanup?.();
     clearTimers();
@@ -727,6 +750,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
 
   function begin(hash: WtvHash | null): void {
     entry = null;
+    syncNav(false);
     fromHash = hash !== null;
     endS = hash?.end ?? null;
     startS = hash?.t ?? (endS !== null ? 0 : null);
@@ -747,6 +771,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       .sendMessage({ type: PL_HELLO })
       .then((raw: unknown) => {
         entry = parseEntryInfo(raw);
+        syncNav(true);
         if (!entry) {
           if (pageView && isTop) void runPageShow(pageView, null, hash?.end ?? null);
           return;
@@ -813,6 +838,13 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     },
     next() {
       browser.runtime.sendMessage({ type: PL_COMMAND, op: 'next' }).catch(() => undefined);
+    },
+    pointerMoved() {
+      nav?.poke();
+    },
+    suspendNav(on) {
+      navSuspended = on;
+      nav?.suspend(on);
     },
   };
 }

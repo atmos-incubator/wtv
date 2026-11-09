@@ -12,6 +12,7 @@ import type { OverlayController } from '../overlay/controller';
 import { togglePlayback } from '../view/playback';
 import { POST_ROLES, ROLE_DEFAULT_WHEN, ROLE_NAMES, effectiveWhen, type Condition, type PostRoleName } from '../sites/schema';
 import { postFieldValue, readPagePost } from '../posts/page';
+import { showCardPreview } from '../posts/preview';
 import { describeElement, generateCandidates } from './candidates';
 import {
   PICK_CANCELLED,
@@ -19,6 +20,7 @@ import {
   parsePickRequest,
   type PagePostReport,
   type MatcherReport,
+  type PreviewResult,
   type PickResult,
   type RolesReport,
   type TestResult,
@@ -128,6 +130,11 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
       case 'wtv/pick/metadata':
         sendResponse(pageMetadata(agent.profile().site));
         break;
+      case 'wtv/pick/preview': {
+        const result: PreviewResult = { error: showCardPreview(agent.profile().site) };
+        sendResponse(result);
+        break;
+      }
       case 'wtv/pick/post': {
         const site = agent.profile().site;
         const report: PagePostReport = site ? readPagePost(site) : { post: null, fields: [] };

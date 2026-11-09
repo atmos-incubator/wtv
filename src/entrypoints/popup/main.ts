@@ -187,10 +187,12 @@ function playlistRow(
   if (runner) {
     const mode = [runner.shuffle && 'shuffled', runner.loop && `looping${runner.lap > 1 ? `, lap ${runner.lap}` : ''}`];
     const modeText = mode.filter(Boolean).join(' · ');
-    nodes.push(
-      el('div', { text: `${runner.name} · ${runner.index + 1} / ${runner.total}${modeText ? ` · ${modeText}` : ''}` }),
-    );
-    nodes.push(note(runner.title ?? runner.url));
+    // One line each: a long title or URL is cut short, never widens the popup.
+    const status = `${runner.name} · ${runner.index + 1} / ${runner.total}${modeText ? ` · ${modeText}` : ''}`;
+    const now = runner.title ?? runner.url;
+    nodes.push(el('div', { text: status, className: 'line' }), el('div', { text: now, className: 'note line' }));
+    (nodes.at(-2) as HTMLElement).title = status;
+    (nodes.at(-1) as HTMLElement).title = runner.title ? `${runner.title}\n${runner.url}` : runner.url;
     const controls = el('div', { className: 'actions' });
     const step = (text: string, op: StepOp, primary = false) => {
       controls.append(

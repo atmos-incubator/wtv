@@ -437,7 +437,11 @@ export function startOverlay(
         break;
       }
       case 'activity':
+        playlist.pointerMoved();
         nudge(event.x, event.y);
+        break;
+      case 'pointer':
+        playlist.pointerMoved();
         break;
       case 'key':
         forwardKey(event);
@@ -548,6 +552,7 @@ export function startOverlay(
     },
     suspend(on) {
       suspended = on;
+      playlist.suspendNav(on);
       if (on && previewTimer !== undefined) {
         clearTimeout(previewTimer);
         previewTimer = undefined;

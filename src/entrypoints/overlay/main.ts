@@ -401,12 +401,11 @@ document.addEventListener('dblclick', (e) => {
 document.addEventListener(
   'mousemove',
   (e) => {
-    if (!shield) return;
-    wake();
+    if (shield) wake();
     const now = Date.now();
     if (now - lastActivity < ACTIVITY_THROTTLE_MS) return;
     lastActivity = now;
-    emit({ type: 'activity', ...where(e) });
+    emit(shield ? { type: 'activity', ...where(e) } : { type: 'pointer' });
   },
   { passive: true },
 );

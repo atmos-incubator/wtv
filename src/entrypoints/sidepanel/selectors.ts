@@ -25,6 +25,7 @@ import {
   PICK_KEY,
   PICK_METADATA,
   PICK_POST,
+  PICK_PREVIEW,
   PICK_RESULT,
   PICK_ROLES,
   PICK_START,
@@ -33,6 +34,7 @@ import {
   type PagePostReport,
   type PickKey,
   type PickResult,
+  type PreviewResult,
   type RoleReport,
   type RolesReport,
   type TestResult,
@@ -822,6 +824,25 @@ const groupOpen = loadGroupState();
 const cardPreview = el('div', { className: 'card-preview' });
 let shownPost = '';
 
+/** Shows the card over the page, as a playlist would (✕ or Esc closes it). */
+function previewOnPage(): HTMLElement {
+  const out = el('span', { className: 'note' });
+  const b = button('Preview on the page', async () => {
+    b.disabled = true;
+    out.textContent = '';
+    try {
+      const result = await toTop<PreviewResult>({ type: PICK_PREVIEW });
+      out.textContent = result?.error ?? '';
+    } catch {
+      out.textContent = 'Couldn’t reach the page. Reload it and try again.';
+    } finally {
+      b.disabled = false;
+    }
+  });
+  b.title = 'Show this card over the page the way a playlist would, with ✕ to close it';
+  return el('div', { className: 'actions' }, b, out);
+}
+
 function renderCardPreview(): void {
   const report = state.post;
   const post = report?.post ?? null;
@@ -856,6 +877,7 @@ function renderCardPreview(): void {
     embed
       ? el('p', { className: 'note', text: `▶ Plays ${embed} beside the card, on this page (no pictures then).` })
       : pics,
+    previewOnPage(),
   ];
   cardPreview.replaceChildren(...parts.filter((p): p is Node => p !== null));
 }
