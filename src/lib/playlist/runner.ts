@@ -32,9 +32,16 @@
  * Pages and posts (`view=read` / `scroll` / `card`): a read / scroll entry is its own
  * page, shown by the content script there (page-show/), which reports `ended` when it's
  * done; the hash says so (`v=`), so the page doesn't wait for a video. A card entry
- * navigates the tab to the extension's card page instead (never the post's site), which
- * says hello like a page, asks for the post (PL_POST: fetched here, posts/), and reports
- * `ended` when its time is up.
+ * plays on the extension's card page, which says hello like a page, asks for the post
+ * (PL_POST), and reports `ended` when its time is up. Where the post comes from
+ * (posts/source.ts), decided as the entry starts:
+ *   - `page`: the site has post selectors (and Wtv has access to it). The tab goes to
+ *     the post's own page first (`v=card`, behind the blackout), whose content script
+ *     reads the post with them and sends it (PL_PAGE_POST); then on to the card page.
+ *     The page is the user's own session, so it works signed in. Its address may change
+ *     while it's read (SPAs tidy their URLs); that doesn't count as leaving.
+ *   - `api`: straight to the card page; the post is fetched here through the site's
+ *     adapter (posts/), anonymously. Also the fallback when reading the page failed.
  *
  * The playlist is snapshotted when it starts; edits apply the next time it's played.
  * Starting one also records when it last played, for the explorer's order (explore.ts).
@@ -54,6 +61,7 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_PAGE_POST,
   PL_POST,
   PL_RUNS,
   PL_STATE,
@@ -73,8 +81,12 @@ import { getPlaylist } from './store';
 import { getRecord } from '../media-library/db';
 import { libraryKey } from '../media-library/record';
 import { updateMedia } from '../media-library/service';
-import { cardDurationS, postTitle } from '../posts/adapters';
+import { cardDurationS, findPostAdapter, postTitle } from '../posts/adapters';
 import { fetchPost } from '../posts/fetch';
+import { cardSource, type CardSource } from '../posts/source';
+import { originPatternsFor } from './match';
+import { BUNDLED_SITES } from '../sites/bundled';
+import { loadOverrideStore } from '../sites/override-store';
 import type { ProgramItem } from '../overlay/program';
 
 interface RunEntry {
@@ -110,6 +122,8 @@ export interface RunnerState {
   /** The entry's URL as the tab actually shows it (after redirects). */
   currentUrl: string | null;
   nearEnd: boolean;
+  /** A `view=card` entry (this gen): where its post comes from, and what its page said. */
+  card?: { source: CardSource; result: PostResult | null } | null;
 }
 
 type RunnerStore = Record<string, RunnerState>;
@@ -188,24 +202,45 @@ async function goTo(tabId: number, state: RunnerState, index: number): Promise<v
     phase: 'navigating',
     currentUrl: null,
     nearEnd: false,
+    card: null,
   };
   const entry = entryAt(next)!;
+  if (entry.view === 'card') next.card = { source: await postSource(entry.url), result: null };
   await put(tabId, next);
   // Go dark on the page we're leaving, so its end screen / autoplay never shows.
   await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry) });
-  await browser.tabs.update(tabId, { url: entryPageUrl(entry, next.gen) });
+  await browser.tabs.update(tabId, { url: entryPageUrl(entry, next.gen, next.card?.source ?? null) });
+}
+
+/** A card entry: its page when the site has post selectors and Wtv may run there, else the API. */
+async function postSource(url: string): Promise<CardSource> {
+  const overrides = await loadOverrideStore(browserAreas().local).catch(() => ({}));
+  if (cardSource(url, BUNDLED_SITES, overrides) !== 'page') return 'api';
+  const origins = originPatternsFor([url]);
+  const allowed = origins.length > 0 && (await browser.permissions.contains({ origins }).catch(() => false));
+  return allowed ? 'page' : 'api';
 }
 
 /**
- * Where the tab goes for an entry. Posts: the card page (`gen` makes each visit a new
- * page). Otherwise the entry itself, with a #wtv: hash that lets the new page black out
- * (and know its start / end time, or that it's a page show) before it paints, without
- * waiting for the hello round trip.
+ * Where the tab goes for an entry. Posts from the API: the card page (`gen` makes each
+ * visit a new page). Otherwise the entry itself, with a #wtv: hash that lets the new page
+ * black out (and know its start / end time, or that it's a page show, or a post to read)
+ * before it paints, without waiting for the hello round trip.
  */
-function entryPageUrl(entry: RunEntry, gen: number): string {
-  if (entry.view === 'card') return browser.runtime.getURL(`/card.html?gen=${gen}`);
-  const view = entry.view && isPageView(entry.view) ? entry.view : null;
+function entryPageUrl(entry: RunEntry, gen: number, source: CardSource | null): string {
+  if (entry.view === 'card' && source !== 'page') return cardPageUrl(gen);
+  const view = entry.view && (isPageView(entry.view) || entry.view === 'card') ? entry.view : null;
   return withWtvHash(entry.url, { t: entry.startS, end: entry.endS ?? null, title: entry.title, view });
+}
+
+const cardPageUrl = (gen: number) => browser.runtime.getURL(`/card.html?gen=${gen}`);
+
+function sameHost(a: string, b: string | undefined): boolean {
+  try {
+    return b !== undefined && new URL(a).hostname === new URL(b).hostname;
+  } catch {
+    return false;
+  }
 }
 
 async function start(
@@ -316,12 +351,30 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
   };
 }
 
-/** The card page asks for its post. Not queued: the fetch can take seconds. */
+/**
+ * The post's page read it (`page` source): keep what it said and move on to the card
+ * page. Same gen: the card page belongs to this entry.
+ */
+async function pagePost(tabId: number, frameId: number, gen: number, result: PostResult): Promise<void> {
+  const state = (await load())[tabId];
+  if (frameId !== 0 || !state || state.gen !== gen || state.phase === 'detached') return;
+  if (entryAt(state)?.view !== 'card' || state.card?.source !== 'page' || state.card.result) return;
+  if (!result.ok) console.info(`[wtv] couldn't read the post from its page: ${result.error}`);
+  await put(tabId, { ...state, phase: 'navigating', currentUrl: null, card: { source: 'page', result } });
+  await browser.tabs.update(tabId, { url: cardPageUrl(gen) });
+}
+
+/**
+ * The card page asks for its post. Not queued: the fetch can take seconds. Read from
+ * its page if it was; otherwise (or if that failed and the site has an adapter) fetched.
+ */
 async function post(tabId: number, gen: number): Promise<PostResult> {
   const state = (await load())[tabId];
   const entry = state && state.gen === gen ? entryAt(state) : undefined;
   if (!entry || entry.view !== 'card') return { ok: false, gone: false, error: 'not a post entry any more' };
-  const result = await fetchPost(entry.url);
+  const fromPage = state?.card?.result ?? null;
+  const result =
+    fromPage && (fromPage.ok || fromPage.gone || !findPostAdapter(entry.url)) ? fromPage : await fetchPost(entry.url);
   if (result.ok) {
     void updateMedia({
       url: entry.url,
@@ -390,6 +443,9 @@ async function tabUpdated(tabId: number, url: string | undefined, complete: bool
     return;
   }
   if (!url || state.phase !== 'playing' || onEntry(state, url)) return;
+  // A post's page being read for its card: SPAs tidy their address as they load. Same
+  // site: still the post (somewhere else is the user leaving).
+  if (state.card?.source === 'page' && !state.card.result && sameHost(url, entryAt(state)?.url)) return;
   if (state.nearEnd) {
     await goTo(tabId, state, state.index + 1);
   } else {
@@ -458,6 +514,10 @@ export function startPlaylistRunner(): void {
           sendResponse({ ok: false, gone: false, error: err instanceof Error ? err.message : String(err) }),
         );
         return true;
+      case PL_PAGE_POST:
+        if (senderTab === undefined) return undefined;
+        void serial(() => pagePost(senderTab, sender.frameId ?? 0, msg.gen, msg.result));
+        return undefined;
       case PL_INFO:
         if (senderTab === undefined) return undefined;
         void serial(() => info(senderTab, msg.gen, msg.info));

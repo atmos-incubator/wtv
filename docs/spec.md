@@ -1,7 +1,8 @@
 # Wtv spec
 
-Round 1 of development (steps 0–9): the build order as it ran, the architecture decisions, and the
-feature specs, kept current as features change. Round 2's plan is in [`todo.md`](../todo.md).
+The build order as it ran (round 1: steps 0–9, round 2: steps 10–17), the architecture decisions,
+the feature specs (kept current as features change), and what's still open. New work is planned in
+[`todo.md`](../todo.md); once built, it lands here.
 
 New Plugin - wtv - Web TV - Wtv
 
@@ -47,6 +48,24 @@ Each step is reviewed and committed before the next one starts.
 - [x] **Step 9 — Site health checks**
     - Playwright daily runner (outside the extension) + in-extension "selectors may be broken" badge.
 
+Round 2 (planned in `todo.md`, now merged here; F-numbers pointed into `docs/future.md` as it was then):
+
+- [x] **Step 10 — Overlay control + YouTube's "Continue watching?"** [F1, F6]
+    - **Show pictures** pill after ✕, and in the popup's Ads row. The `continuePrompt` role, clicked only when nobody has used the page for a minute. The stuck-ad safety net (10 min with the video's time not moving).
+- [x] **Step 11 — Selector panel: remove selectors, metadata preview** [F2, F4]
+    - ✕ per selector, **Remove unmatched**, **Undo**. Metadata extraction (`src/lib/metadata/`) and the panel's **Preview**.
+- [x] **Step 12 — Pictures outside ads** [F5, F11]
+    - **Show pictures while paused**. `view=pictures`, `[view pictures]`, `[show]`.
+- [x] **Step 13 — Playlist options** [F16, F13]
+    - `end=` / `dur=` (hash `e=`), `[shuffle]` with **Reshuffle**, `[loop]`.
+- [x] **Step 14 — Media library** [F7, F9, part of F10]
+    - Durations, thumbnails (`thumbnailHosts`), the `unavailable` role and gone entries.
+- [x] **Step 15 — Built-in playlists + backup / restore** [F3, F8, F12]
+    - `src/playlists/*.txt` + placeholder SVG covers, `npm run health -- --playlists`, **Export everything** / **Import…**.
+- [x] **Step 16 — Playlist explorer side panel** [F10]
+- [x] **Step 17 — Non-video shows: web pages and posts** [F14, F15]
+    - `view=read` (Readability), `view=scroll`, `view=card` (post adapters: X, Reddit, Bluesky).
+
 ---
 
 ## Architecture Decisions
@@ -78,7 +97,7 @@ Each step is reviewed and committed before the next one starts.
 
 - One JSON file per site in `src/sites/<id>.json` (file name = `id`): `schemaVersion`, `id`, `name`, `domains`, `roles`, optional `quirks` (`controlBarInset` for the click shield; `adsInMainVideo` when ads play in the main `<video>`, as on YouTube), optional `thumbnailHosts` (where the site's thumbnails live, e.g. `i.ytimg.com`: requested at Play for the media library, never given content scripts). The folder holds only data, so the dev repo writer can be pointed at it.
 - Validated at build time (`wxt.config.ts` fails the build) and in tests. Bundled `host_permissions` are generated from `domains`.
-- **Roles:** `video`, `player` (optional: the player's outer box; ad pictures cover it, and it's searched for unlisted Skip buttons), `adIndicator`, `skip`, `continuePrompt` (optional, see Ad detection + muting), `unavailable` (optional: the player's "Video unavailable" message, see Media library), `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`.
+- **Roles:** `video`, `player` (optional: the player's outer box; ad pictures cover it, and it's searched for unlisted Skip buttons), `adIndicator`, `skip`, `continuePrompt` (optional, see Ad detection + muting), `unavailable` (optional: the player's "Video unavailable" message, see Media library), `playButton` (optional), `progressBar` (optional, click-to-seek geometry), `title`, `description`, `keywords`, `creator`, and the post roles (optional, for `view=card` read from the page; see Pages and posts as shows): `post` (the box around the post; the others are looked for in it first), `postTitle`, `postAuthor`, `postText`, `postTime` (a `<time datetime>` is read from its datetime), `postImage` (up to 4 pictures). A site has post selectors when it has `postText` or `postTitle` (`hasPostSelectors`).
 - **Each role is an ordered list of fallback selectors**, not a single selector. First match wins. Entries are a selector string or `{ "selector", "when" }`.
 - **Selector format supports shadow DOM** traversal with ` >>> `, e.g. `"ytd-app >>> #movie_player video"`.
 - **`when` condition** per selector, since many sites leave ad nodes in the DOM and only hide them:
@@ -162,6 +181,7 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
 ### Selector picker (side panel)
 
 - `chrome.sidePanel` UI to pick DOM nodes and generate unique CSS selectors for each role: the side panel's **Fix selectors** view (beside **Playlists**, see Playlist explorer). Opened from the popup's **Fix selectors…**, which asks that window's panel for this view (`src/lib/sidepanel-view.ts`: localStorage + the `storage` event, since `sidePanel.open()` must run synchronously in the click). It only talks to the page while it's the view showing. Ships in the store build (users fix their own session); only the repo writer is dev-only.
+- Roles in collapsible groups (`ROLE_GROUPS`): Player, Ads and prompts, About the video, Posts. Posts starts closed until the site has a post selector; open / closed is remembered per group. The Posts group has a **card preview**: the post card this page would make (`wtv/pick/post` → `readPagePost`), refreshed with the metadata Preview. The test line of a post role shows what it reads.
 - Per role: current selectors with live match counts and which one wins, source (built-in / yours), **Pick**, **Pick in 5 s**, **Type selector**, **Reset**.
 - **Removing selectors:** a **✕** on each selector row, and **Remove unmatched (n)** per role (every selector with 0 matches right now; asks first, and warns for roles that only show during an ad or dialog). Removal saves an override with the rest (`withSelectorsRemoved`, pure + tested):
     - What's left equals the built-in list: the override is dropped instead (same as Reset).
@@ -175,7 +195,8 @@ Sites will ultimately be completely dynamic. YouTube is the only bundled config 
     - Filtered out: hashed / generated ids and classes (`css-1x9f2`, `Button_root__a1b2c`, framework ids), state classes (`active`, `is-open`). Pure + tested.
     - Avoid text / `aria-label` selectors. They're localized and break for non-English users.
     - Elements in open shadow roots get host selectors joined with ` >>> `. Non-unique candidates are kept but ranked down.
-- **In-page picker:** hover highlight with tag + size, click to select (page clicks swallowed), **↑ / ↓** walk to parent and back, **P** play/pause the primary (freeze an ad), **Esc** cancel. The keys work whether the page or the side panel has focus (the panel forwards them). The ad overlay steps aside while picking. Runs in every frame; the frame you click in answers.
+- **In-page picker:** hover highlight with tag + size, click to select, **↑ / ↓** walk to parent and back, **P** play/pause the primary (freeze an ad), **Esc** cancel. The keys work whether the page or the side panel has focus (the panel forwards them). The ad overlay steps aside while picking. Runs in every frame; the frame you click in answers.
+- **The page never sees a pick** (`src/lib/picker/guard.ts`): pointer / mouse / touch / click / contextmenu / drag events are stopped by window capture listeners the content script adds at `document_start`, before any page script has added its own (same-target listeners run in the order added, so the page's never run). Listeners added when picking starts would run after the page's, and a page that acts on pointerdown at the window (Reddit's media viewer) got there first and ate the click. The pick is the element pressed on; if no click follows within 350 ms of pointerup, it's taken anyway. Injected into an already-open page (no early guard), the picker listens itself, as before.
 - **Delayed pick** (5 s countdown) because skip buttons and ad indicators are transient.
 - **Editor:** candidate list, editable selector, condition (default / exists / visible), live test with green outlines on every match, "keep current selectors as fallbacks" (on by default: the new one goes first).
 - **Save** writes the override to `chrome.storage.local`. On a generic site this creates a user-defined site for the host (minus `www.`).
@@ -276,7 +297,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
     - **Placeholder cover:** an optional `src/playlists/<id>.svg` (≤ 50 kB; no scripts, event handlers, `<foreignObject>`, or references other than `#fragment`s: `checkSvg`, checked at build). It's the playlist's sidebar cover until any entry has a thumbnail, and the thumbnail of every entry that hasn't got one yet. Always shown with `<img>`.
 - **Storage:** `wtv.playlists` in `chrome.storage.local`: `{ id, name, text, createdAt, updatedAt }` per playlist (`src/lib/playlist/store.ts`, tested). The name is metadata, not part of the text.
 - **Adding pages** to any playlist, not just the running one: popup **Add this page** (playlist picker, remembers the last one, or "New playlist"), and the context menu **Add to Wtv playlist ▸** (each playlist + "New playlist"; a link adds its target, anywhere else adds the page with the tab title). The menu is rebuilt whenever playlists change.
-- **Play** opens a new tab. First it requests host access for every entry's site (for `view=card` posts, the post adapter's fetch hosts instead, if it needs any) in one prompt (Wtv only runs where it has access, and it needs to be there to see a video end). Declined sites still play, but need **Next** by hand. Shared by the playlists page and the explorer (`src/lib/playlist/play.ts`). Starting records when the playlist last played (`wtv.playlistPlays`, local; not in backups).
+- **Play** opens a new tab. First it requests host access for every entry's site (for `view=card` posts: the post's site if it has post selectors, plus the post adapter's fetch hosts if it needs any) in one prompt (Wtv only runs where it has access, and it needs to be there to see a video end). Declined sites still play, but need **Next** by hand. Shared by the playlists page and the explorer (`src/lib/playlist/play.ts`). Starting records when the playlist last played (`wtv.playlistPlays`, local; not in backups).
 - **Runner** (`src/lib/playlist/runner.ts`) lives in the background; per-tab state in `storage.session`; all operations go through one queue. The playlist is snapshotted at start (edits apply next time).
     - Moving to an entry: the current page blacks out with the next title (so end screens / autoplay never show), `gen` is bumped, the tab navigates.
     - Each frame says hello at start; the runner answers with the entry (title, `t=`, end time, ads program) if the page is that entry (`sameEntryUrl`: ignores www./m., extra query params, hash; also compared with the URL the tab actually landed on, so redirects count).
@@ -358,7 +379,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 - `[shuffle]` before the first URL and `[loop]` after the last are defaults for the Play options; anywhere else they're reported and ignored. `[loop]` doesn't end the last entry's `[ads]` / `[show]` block.
 - `[view pictures]` before the first URL makes every entry pictures; `view=…` on an entry overrides it. Views: `video`, `pictures`, `read`, `scroll`, `card`. A `[view …]` after the first URL, or an unknown view, is reported and ignored.
 - `speed=` on a `read` entry is words per minute, on a `scroll` entry pixels a second (a unit, `wpm` / `px/s`, is optional but must match). `[speed 200 wpm]` / `[speed 40 px/s]` before the first URL set the playlist's defaults (the unit is required). Out of range (30–1000 wpm, 1–2000 px/s), on another view, or after the first URL: reported and ignored.
-- On `read` / `scroll` / `card` entries, `dur=` (or `end=`) is how long they show and `t=` is reported and ignored. A `card` entry whose URL no post adapter knows is reported.
+- On `read` / `scroll` / `card` entries, `dur=` (or `end=`) is how long they show and `t=` is reported and ignored. Whether a `card` entry can play depends on the user's post selectors, so the format doesn't check it; the playlists page says per entry where its post comes from ("read from its page with your post selectors" / "from Bluesky's public data"), or that the site needs post selectors.
 - Indentation is **not** significant. An `[ads]` or `[show]` block's scope ends at the next URL line. Indentation is cosmetic and preserved on export.
 
 ### Pages and posts as shows
@@ -368,11 +389,15 @@ Playlist entries that are read, not watched (`src/lib/page-show/`, `src/lib/post
 - **`view=read`**: the entry's page loads under the blackout (the `#wtv:` hash's `v=read` tells the content script there's no video to wait for: no Start prompt, no autoplay attempts, media events ignored in every frame). Once it has loaded (the `load` event, at most 12 s, then 1.2 s more), the top frame pauses the media on it and hands a snapshot (`outerHTML`, ≤ 8 MB) to the overlay (`read` command). The overlay page parses it with DOMParser (runs nothing), finds the article with **Readability** (`@mozilla/readability` 0.6.0, Firefox Reader View's library; Apache-2.0, no dependencies) and rebuilds it from text and picture URLs only: site, title, byline, headings, paragraphs, quotes, list items, pictures (`src/entrypoints/overlay/reader.ts`). Large type, a centered column, scrolled so a reading line moves down the article at the entry's pace (default 180 wpm), held 35% down the screen; a 4 s lead-in on the title and a 5 s dwell at the end (`readPlan`, `readScrollTop`, tested). `dur=` fits the whole thing into that time. Click or Space pauses. Less than 500 characters of article: the overlay says so and the page is scrolled instead.
 - **`view=scroll`**: the page itself, scrolled at the entry's pace (default 30 px/s; the document, or the page's biggest scrolling box), then 5 s at the bottom; a page that grows as it scrolls keeps going, up to 15 min. `dur=` ends it at that time instead. The viewer scrolling holds it for 5 s. Nothing covers the page (no click shield or pause pictures). (`src/lib/page-show/scroller.ts`.)
 - Both report `playing`, then the page's metadata with the show's planned length (so the playlist length counts it), then `ended`. A stand-alone `#wtv:v=read` / `v=scroll` link works too: at the end, the page is left as it is.
-- **`view=card`**: the runner sends the tab to the extension's **card page** (`card.html?gen=N`), never the post's site. The card page says hello like an entry page, asks the background for the post (`wtv/playlist/post`), and shows author, handle (or community), title, text, up to 4 pictures and date on a full-screen card for `dur=`, else 6 s + 0.4 s a word + 3 s a picture (8–45 s, `cardDurationS`). Click or Space pauses. A post the site says is gone (each adapter decides from the endpoint's answer) is reported `gone` (marked in the library, skipped after 3 s); any other failure is shown for 8 s, then the playlist moves on.
+- **`view=card`** plays on the extension's **card page** (`card.html?gen=N`). Where the post comes from is decided as the entry starts (`src/lib/posts/source.ts`, pure + tested):
+  - **From its page** (`page`), when the site has post selectors (built in, or picked in Fix selectors → Posts) and Wtv has access to it. Picking them is how you say "use my sign-in": the tab goes to the post's own page first (`#wtv:v=card`, behind the blackout), where the content script reads the post with the selectors (`src/lib/posts/page.ts`: text with its line breaks, `<time datetime>`, pictures ≥ 64 px from `img` / video posters, https only), trying for 15 s since apps render late, then once more 0.8 s later for pictures still loading. A visible `unavailable` role means gone. It sends the post, or why not, to the runner (`wtv/playlist/page-post`), which goes on to the card page. The page is your own session, so posts that need signing in (Reddit, Bluesky authors who hide from signed-out viewers, forums) work. The page's address may change while it's read (SPAs tidy URLs): same host doesn't count as leaving.
+  - **From the API** (`api`): straight to the card page, the post fetched by the background through the site's adapter, anonymously. Also the fallback when reading the page failed and the site has an adapter.
+  - Neither: the card page says why for 8 s, then the playlist moves on.
+- The card page says hello like an entry page, asks the background for the post (`wtv/playlist/post`), and shows author, handle (or community), title, text, up to 4 pictures and date on a full-screen card for `dur=`, else 6 s + 0.4 s a word + 3 s a picture (8–45 s, `cardDurationS`). Click or Space pauses. A post the site says is gone (each adapter decides from the endpoint's answer) is reported `gone` (marked in the library, skipped after 3 s, with the reason under "Unavailable"); any other failure is shown for 8 s, then the playlist moves on.
 - **Post adapters** (`src/lib/posts/adapters.ts`, pure + tested, no imports so the health check can use it): post URL → canonical URL → endpoint → `{ site, author, handle, title, text, time, url, images }`, or gone / an error (`read(status, body)`). HTML from the sites is read with regular expressions (the background has no DOM); only text and picture URLs come out. Fetched anonymously by the background (`src/lib/posts/fetch.ts`, `credentials: 'omit'`). Each adapter lists its **fetch hosts** (need host access, asked for at Play instead of the post's own page) and its **API hosts** (serve only the endpoint: never get content scripts, like thumbnail hosts).
   - **X / Twitter**: x.com / twitter.com / mobile, `/<user>/status/<id>` → `publish.x.com/oembed` (public, no sign-in; `publish.twitter.com` redirects there). Picture links dropped. 404 / 410 / 403 → gone. Fetch + API host `publish.x.com`.
   - **Reddit**: www / old / new / m / np.reddit.com `/r/<sub>/comments/<id>/…` (also `/comments/<id>`, `/user/<name>/comments/<id>`) and `redd.it/<id>` → the post's Atom feed `www.reddit.com/…/comments/<id>/.rss?limit=1` (Reddit's `.json` asks for a login; the feed doesn't). The first entry is the post: title, `u/author`, `r/sub`, self text (between `SC_OFF` / `SC_ON`), one picture (the `[link]` when it's an image, else the preview, else the thumbnail; Reddit's image hosts only). 404 / 410, or a `[deleted]` / `[removed]` body → gone; 403 / 429 → an error (private community, rate limit). Share links (`/r/<sub>/s/<code>`) aren't posts: use the post's own address. Fetch host `www.reddit.com`, which keeps its content scripts (people watch Reddit, too).
-  - **Bluesky**: bsky.app `/profile/<handle or DID>/post/<rkey>` → `public.api.bsky.app/xrpc/app.bsky.feed.getPostThread` (`depth=0`): text, display name, handle, date, pictures (images, a video's poster, a link card's picture; none when the post is labelled adult). The API allows cross-origin requests: no fetch hosts, nothing asked at Play. `400 NotFound`, `notFoundPost` / `blockedPost` → gone; so is an author labelled `!no-unauthenticated` (they asked to be seen only by signed-in people).
+  - **Bluesky**: bsky.app `/profile/<handle or DID>/post/<rkey>` → `public.api.bsky.app/xrpc/app.bsky.feed.getPostThread` (`depth=0`): text, display name, handle, date, pictures (images, a video's poster, a link card's picture; none when the post is labelled adult). The API allows cross-origin requests: no fetch hosts, nothing asked at Play. `400 NotFound`, `notFoundPost` / `blockedPost` → gone. An author labelled `!no-unauthenticated` (seen only by signed-in people; about one post in seven on the Discover feed) isn't shown from the anonymous API, though it answers: an error that says to pick Bluesky's post selectors, so the post is read from bsky.app, signed in.
   - More sites (Mastodon, …) are one adapter each.
 - The playlists page describes each ("read as an article, 200 wpm", "the page, scrolled 30 px/s", "a post, on a title card"; "for 1:00" instead of "until"). `npm run health -- --playlists` checks pages by HTTP status and posts through their adapter, as ✅ / ❌ gone / ❔.
 
@@ -444,6 +469,23 @@ The side panel's **Playlists** view, for browsing while watching (`src/entrypoin
 - Unit tests (Vitest) for the playlist parser, filename durations, timestamp parsing, and override merging.
 
 ---
+
+## Open
+
+Not done, or done but not verified (carried over from round 2's `todo.md`).
+
+- [ ] **Run the health check once for real.** `npm run health` (and `-- --playlists`) has only been type-checked and unit-tested. Run it, check `.health/results/latest.md`, fix what the first real run turns up.
+- [ ] **Publishing over the previous extension:** the checklist under Architecture Decisions. Version `2.0.0` must beat the store listing; diff permission warnings against the published manifest. The storage wipe and the `host_permissions` scoping are built; tick them once checked against the published version.
+- **Open bugs:**
+    - [ ] Ads stopped reappearing after several video clicks on YouTube (deferred in step 6). Reproduce with the dev timeline and 📸 snapshots.
+    - [ ] Ad pictures blip off for a split second when an ad starts. Two fixes are in (end the ad only once the show is playing; cover the player that holds the video) plus a blip detector that logs a timeline. Close once it hasn't recurred for a while.
+    - [ ] YouTube advertiser surveys: Skip ignores untrusted clicks, and seeking can't help (no video plays). The skip code rotates four click strategies and records which one worked; if none works, the survey stays muted and covered for its ~30 s. Close after a few surveys either way.
+- **Deferred on purpose** (not scheduled):
+    - An "on" toolbar state, as an icon variant rather than a badge.
+    - `use_dynamic_url` for the overlay page (stops sites probing for Wtv; needs testing).
+    - Generic-site ad signals (Google IMA SDK iframes, mid-playback `src` / duration swaps).
+    - In a playlist, a "Continue watching?" prompt that can't be dismissed counting as the entry stalling (Start / Next, like a blocked autoplay).
+    - More post adapters (Mastodon public statuses, …), one per site.
 
 ## Later
 

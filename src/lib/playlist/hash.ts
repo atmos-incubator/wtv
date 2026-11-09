@@ -6,7 +6,8 @@
  *   t   start time (any parseTimestamp format; written as seconds)
  *   e   end time, same format: the media pauses there (in a playlist, the next entry starts)
  *   d   display title for the blackout (encodeURIComponent, so underscores etc. survive)
- *   v   `read` or `scroll`: the page is the show (page-show/), so don't wait for a video
+ *   v   `read` or `scroll`: the page is the show (page-show/), so don't wait for a video;
+ *       `card`: the page is a post to read for a card (posts/page.ts)
  *
  * Namespaced so it can't collide with a site's own hash routing or `t` parameter. The
  * background runner's state is the source of truth for playlists; the hash is the
@@ -28,11 +29,11 @@ export interface WtvHash {
   /** Seconds. */
   end: number | null;
   title: string | null;
-  /** A page shown as a page (`read` / `scroll`); null: the usual (media). */
+  /** A page shown as a page (`read` / `scroll`), or read for a post card; null: the usual (media). */
   view?: HashView | null;
 }
 
-export type HashView = 'read' | 'scroll';
+export type HashView = 'read' | 'scroll' | 'card';
 
 function decode(value: string): string {
   try {
@@ -54,7 +55,7 @@ export function parseWtvHash(hash: string): WtvHash | null {
     if (key === 't') out.t = parseTimestamp(value);
     else if (key === 'e') out.end = parseTimestamp(value);
     else if (key === 'd') out.title = value.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE) || null;
-    else if (key === 'v' && (value === 'read' || value === 'scroll')) out.view = value;
+    else if (key === 'v' && (value === 'read' || value === 'scroll' || value === 'card')) out.view = value;
   }
   return out;
 }

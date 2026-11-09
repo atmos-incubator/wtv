@@ -6,6 +6,8 @@
  */
 import { CONDITIONS, ROLE_NAMES, type Condition, type RoleName } from '../sites/schema';
 import type { SiteProfile } from '../sites/registry';
+import type { Post } from '../posts/adapters';
+import type { PostField } from '../posts/page';
 
 export const PICK_START = 'wtv/pick/start';
 export const PICK_CANCEL = 'wtv/pick/cancel';
@@ -15,6 +17,8 @@ export const PICK_RESULT = 'wtv/pick/result';
 export const PICK_CANCELLED = 'wtv/pick/cancelled';
 /** The page's metadata (title, creator, ...) with where each value came from. Top frame. */
 export const PICK_METADATA = 'wtv/pick/metadata';
+/** → PagePostReport: the post card this page would make (top frame). */
+export const PICK_POST = 'wtv/pick/post';
 /** Keys pressed while the side panel has focus, forwarded to the in-page picker. */
 export const PICK_KEY = 'wtv/pick/key';
 
@@ -27,7 +31,8 @@ export type PickRequest =
   | { type: typeof PICK_KEY; key: PickKey }
   | { type: typeof PICK_TEST; role: RoleName; selector: string; when: Condition | null }
   | { type: typeof PICK_ROLES }
-  | { type: typeof PICK_METADATA };
+  | { type: typeof PICK_METADATA }
+  | { type: typeof PICK_POST };
 
 export interface Candidate {
   selector: string;
@@ -52,8 +57,14 @@ export interface TestResult {
   /** The role's condition (exists / visible) is satisfied by at least one match. */
   satisfied: boolean;
   error: string | null;
-  /** Metadata roles: what the first match reads (its text, or a meta tag's content). */
+  /** Metadata and post roles: what the first match reads (its text, or a meta tag's content). */
   value?: string | null;
+}
+
+/** PICK_POST's answer: the card this page would make, and what each post role read. */
+export interface PagePostReport {
+  post: Post | null;
+  fields: PostField[];
 }
 
 export interface MatcherReport {
@@ -101,6 +112,8 @@ export function parsePickRequest(raw: unknown): PickRequest | null {
       return { type: PICK_ROLES };
     case PICK_METADATA:
       return { type: PICK_METADATA };
+    case PICK_POST:
+      return { type: PICK_POST };
     case PICK_TEST: {
       if (!isRole(m.role) || typeof m.selector !== 'string') return null;
       const when = (CONDITIONS as readonly unknown[]).includes(m.when) ? (m.when as Condition) : null;

@@ -5,10 +5,11 @@
  *     PL_HELLO                       → EntryInfo | null   "is this page a playlist entry?" (every frame, at start)
  *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked / gone, from frames that got an EntryInfo
  *     PL_INFO   { gen, info }                              what the page says about the entry (title, duration…), for the media library
+ *     PL_PAGE_POST { gen, result }                         `view=card` read from the post's own page (top frame): the post, or why not
  *
  *   card page (card.html, in the playlist's tab: `view=card` entries) → background
  *     PL_HELLO / PL_MEDIA as above (the card page is the entry's page)
- *     PL_POST   { gen }      → PostResult   the post, fetched by the background (posts/)
+ *     PL_POST   { gen }      → PostResult   the post: read from its page (PL_PAGE_POST), else fetched by the background (posts/)
  *
  *   background → content, top frame only (tabs.sendMessage, frameId 0)
  *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
@@ -35,6 +36,7 @@ export const PL_STATE = 'wtv/playlist/state';
 export const PL_INFO = 'wtv/playlist/info';
 export const PL_RUNS = 'wtv/playlist/runs';
 export const PL_POST = 'wtv/playlist/post';
+export const PL_PAGE_POST = 'wtv/playlist/page-post';
 
 /** `gone`: the site says the media is unavailable (the `unavailable` role). */
 export const MEDIA_EVENTS = ['playing', 'near-end', 'ended', 'blocked', 'gone'] as const;
@@ -100,7 +102,8 @@ export type ContentRequest =
   | { type: typeof PL_HELLO }
   | { type: typeof PL_MEDIA; gen: number; event: MediaEvent }
   | { type: typeof PL_INFO; gen: number; info: MediaInfo }
-  | { type: typeof PL_POST; gen: number };
+  | { type: typeof PL_POST; gen: number }
+  | { type: typeof PL_PAGE_POST; gen: number; result: PostResult };
 
 export type PageRequest =
   | {
@@ -140,6 +143,10 @@ export function parsePlaylistRequest(raw: unknown): ContentRequest | PageRequest
       return { type: PL_RUNS };
     case PL_POST:
       return isIndex(raw.gen) ? { type: PL_POST, gen: raw.gen } : null;
+    case PL_PAGE_POST: {
+      const result = isIndex(raw.gen) ? parsePostResult(raw.result) : null;
+      return result ? { type: PL_PAGE_POST, gen: raw.gen as number, result } : null;
+    }
     case PL_INFO:
       return isIndex(raw.gen) && isObj(raw.info) ? { type: PL_INFO, gen: raw.gen, info: parseMediaInfo(raw.info) } : null;
     case PL_COMMAND:

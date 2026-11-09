@@ -5,13 +5,17 @@
  *
  * Wtv only runs where it has host access, so it asks for every entry's site up front, so
  * the runner can detect each video's end (or show the page, for `view=read` / `scroll`);
- * for the post adapters' fetch hosts, if they need any (`view=card`: the post's own page
- * is never visited);
+ * for `view=card` posts, the post's own site when it has post selectors (its page is
+ * read, signed in as the user is), plus the adapter's fetch hosts if it has any (the
+ * public endpoint, also the fallback);
  * and for the sites' thumbnail hosts, so the media library can cache thumbnails, unless
  * the user said no to those before (remembered in this origin's localStorage, shared by
  * every Wtv page).
  */
 import { browser } from 'wxt/browser';
+import { browserAreas } from '../browser-storage';
+import { loadOverrideStore } from '../sites/override-store';
+import { siteReadsPosts } from '../posts/source';
 import { thumbnailOriginsFor } from '../media-library/record';
 import { originPatternForHost } from '../permissions';
 import { postFetchHosts } from '../posts/adapters';
@@ -40,9 +44,11 @@ export async function playPlaylist(p: { id: string; text: string }, o: PlayOptio
   const compiled = compilePlaylist(parsePlaylist(p.text));
   if (compiled.entries.length === 0) return { ok: false, error: 'it has no entries' };
 
-  const urls = compiled.entries.filter((e) => e.view !== 'card').map((e) => e.url);
+  const overrides = await loadOverrideStore(browserAreas().local).catch(() => ({}));
   const posts = compiled.entries.filter((e) => e.view === 'card').map((e) => e.url);
-  const origins = [...originPatternsFor(urls), ...postFetchHosts(posts).map(originPatternForHost)];
+  const pagePosts = posts.filter((url) => siteReadsPosts(url, BUNDLED_SITES, overrides));
+  const urls = [...compiled.entries.filter((e) => e.view !== 'card').map((e) => e.url), ...pagePosts];
+  const origins = [...new Set([...originPatternsFor(urls), ...postFetchHosts(posts).map(originPatternForHost)])];
   const declined = declinedThumbnails();
   const thumbnailOrigins = thumbnailOriginsFor(urls, BUNDLED_SITES).filter((o) => !declined.has(o));
   let granted = await browser.permissions.contains({ origins });

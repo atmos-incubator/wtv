@@ -203,7 +203,7 @@ describe('pages and posts', () => {
     ]);
   });
 
-  it('flags speeds that don\'t fit, t= on a page, and posts it can\'t read', () => {
+  it('flags speeds that don\'t fit and t= on a page', () => {
     const r = compile(
       [
         '[speed 200]',
@@ -211,7 +211,7 @@ describe('pages and posts', () => {
         'https://a.com/2 | speed=200',
         'https://a.com/3 | view=scroll | speed=5000',
         'https://a.com/4 | view=read | speed=fast',
-        'https://bsky.app/profile/a/post/1 | view=card',
+        'https://forum.example/t/1 | view=card',
         '[speed 200 wpm]',
       ].join('\n'),
     );
@@ -222,7 +222,6 @@ describe('pages and posts', () => {
       [3, 'speed= only applies to view=read and view=scroll (ignored)'],
       [4, 'speed=5000: expected between 1 and 2000 px/s (ignored)'],
       [5, 'speed=fast: expected a number, like speed=200 (wpm) or speed=40 (px/s)'],
-      [6, 'view=card: not a post Wtv can read (so far: posts on X, Reddit and Bluesky)'],
       [7, '[speed …] goes before the first entry; use speed= on an entry (ignored)'],
     ]);
     expect(r.entries[0]!.startS).toBeNull();

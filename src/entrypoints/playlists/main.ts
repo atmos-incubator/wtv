@@ -48,6 +48,10 @@ import {
 } from '../../lib/playlist/store';
 import { parseSettings } from '../../lib/settings';
 import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-store';
+import type { OverrideStore } from '../../lib/sites/overrides';
+import { BUNDLED_SITES } from '../../lib/sites/bundled';
+import { findPostAdapter } from '../../lib/posts/adapters';
+import { cardSource } from '../../lib/posts/source';
 import { KEYS, readKey, writeKey } from '../../lib/storage';
 import { cover, picture } from '../../lib/ui/cover';
 
@@ -80,6 +84,8 @@ type AnyPlaylist = StoredPlaylist | BuiltinPlaylist;
 const isBuiltin = (p: AnyPlaylist | null): p is BuiltinPlaylist => p !== null && 'builtin' in p;
 
 let playlists: StoredPlaylist[] = [];
+/** Selector overrides: whether a site's posts are read from their pages (describeCard). */
+let overrides: OverrideStore = {};
 let currentId: string | null = new URLSearchParams(location.search).get('id');
 let dirty = false;
 let compiled: CompiledPlaylist = compilePlaylist(parsePlaylist(''));
@@ -125,6 +131,14 @@ function describeEntryLength(length: number | null, record: MediaRecord | null):
   if (length === null) return null;
   const whole = record?.durationS ?? null;
   return whole !== null && Math.abs(whole - length) >= 1 ? `${formatClock(length)} of ${formatClock(whole)}` : formatClock(length);
+}
+
+/** Where a card's post comes from (posts/source.ts), or why it can't play. */
+function describeCard(url: string): string {
+  const source = cardSource(url, BUNDLED_SITES, overrides);
+  if (source === 'page') return 'a post, on a title card: read from its page with your post selectors';
+  if (source === 'api') return `a post, on a title card: from ${findPostAdapter(url)?.adapter.site ?? 'the site'}’s public data`;
+  return '⚠ a post card needs post selectors for this site: open a post there, then Fix selectors → Posts';
 }
 
 function describeProgram(label: string, items: ProgramItem[] | null, isDefault: boolean): string {
@@ -204,7 +218,7 @@ function renderPreview(): void {
         else if (e.endS !== null) meta.push(isMediaView(e.view) ? `until ${formatTime(e.endS)}` : `for ${formatTime(e.endS)}`);
         if (e.view === 'read') meta.push(`read as an article, ${e.speed ?? DEFAULT_WPM} wpm`);
         else if (e.view === 'scroll') meta.push(`the page, scrolled ${e.speed ?? DEFAULT_SCROLL_PX_S} px/s`);
-        else if (e.view === 'card') meta.push('a post, on a title card');
+        else if (e.view === 'card') meta.push(describeCard(e.url));
         if (e.view === 'pictures') {
           // The show's pictures fall back to the ads program; say which one it is.
           const label = e.show !== null && e.show === e.ads ? 'shown as pictures, from its ads' : 'shown as pictures';
@@ -451,6 +465,15 @@ window.addEventListener('beforeunload', (e) => {
   if (dirty) e.preventDefault();
 });
 
+// Selectors saved in the side panel change where cards come from.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !(KEYS.siteOverrides in changes)) return;
+  void loadOverrideStore(local).then((store) => {
+    overrides = store;
+    renderPreview();
+  });
+});
+
 // Playlists changed elsewhere (context menu, another tab).
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !(KEYS.playlists in changes)) return;
@@ -466,5 +489,8 @@ browser.storage.onChanged.addListener((changes, area) => {
 
 void library
   .load()
+  .then(async () => {
+    overrides = await loadOverrideStore(local).catch(() => ({}));
+  })
   .then(refresh)
   .then(renderEditor);

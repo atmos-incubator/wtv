@@ -323,9 +323,9 @@ async function checkPlaylists(ext: Extension, context: BrowserContext): Promise<
     for (const [i, url] of file.urls.entries()) {
       const view = file.views[i] ?? 'video';
       const result =
-        view === 'card'
+        view === 'card' && findPostAdapter(url)
           ? await checkPost(url)
-          : view === 'read' || view === 'scroll'
+          : view === 'card' || view === 'read' || view === 'scroll'
             ? await checkPage(page, url)
             : judgeEntry(await checkEntry(ext, page, file.id, url));
       if (result.verdict !== 'ok') console.info(`[health]   ${result.verdict}: ${url}${result.detail ? ` (${result.detail})` : ''}`);

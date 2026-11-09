@@ -301,6 +301,74 @@ button.remove:hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
+/* Role groups */
+.group {
+  display: grid;
+  gap: 8px;
+}
+
+.group > summary {
+  font-weight: 650;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.group[open] {
+  padding-bottom: 6px;
+}
+
+.group > .note {
+  margin: 0;
+}
+
+/* The Posts group's card preview */
+.card-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  background: var(--panel);
+}
+
+.card-preview p {
+  margin: 0;
+}
+
+.card-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.card-author,
+.card-title {
+  font-weight: 650;
+}
+
+.card-text {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  overflow: hidden;
+}
+
+.card-pics {
+  display: flex;
+  gap: 4px;
+}
+
+.card-pics img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg);
+}
+
 /* Metadata preview */
 .preview {
   border: 1px solid var(--line);

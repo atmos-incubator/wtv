@@ -2,6 +2,8 @@
  * The side panel's Selectors view: inspect each role's selectors on the current tab, pick
  * elements to generate new ones, test them live, remove ones that don't match, and save
  * the result as local overrides. A Preview shows the metadata Wtv reads from the page.
+ * Roles come in groups (picker/roles.ts); the Posts group has a card preview: the post
+ * card this page would make (for `view=card` entries read from the page).
  * Dev builds can also write the resulting site config straight into src/sites/.
  *
  * Only talks to the page while it's the view showing (showSelectors / hideSelectors).
@@ -22,18 +24,20 @@ import {
   PICK_CANCELLED,
   PICK_KEY,
   PICK_METADATA,
+  PICK_POST,
   PICK_RESULT,
   PICK_ROLES,
   PICK_START,
   PICK_TEST,
   type Candidate,
+  type PagePostReport,
   type PickKey,
   type PickResult,
   type RoleReport,
   type RolesReport,
   type TestResult,
 } from '../../lib/picker/messages';
-import { ROLE_HINTS, ROLE_LABELS } from '../../lib/picker/roles';
+import { ROLE_GROUPS, ROLE_HINTS, ROLE_LABELS } from '../../lib/picker/roles';
 import { siteConfigToJson } from '../../lib/picker/serialize';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-store';
@@ -82,6 +86,7 @@ const state: {
   /** The last removal, until something else changes the overrides. */
   undo: { siteId: string; before: SiteOverride | undefined; label: string } | null;
   metadata: PageMetadata | null;
+  post: PagePostReport | null;
 } = {
   tabId: null,
   frameId: 0,
@@ -93,6 +98,7 @@ const state: {
   confirmRemove: null,
   undo: null,
   metadata: null,
+  post: null,
 };
 
 // --- DOM helpers ---------------------------------------------------------------------
@@ -154,6 +160,7 @@ async function refresh(): Promise<void> {
   }
   render();
   await refreshPreview();
+  await refreshPostPreview();
 }
 
 // --- picking / testing / saving -----------------------------------------------------------
@@ -710,6 +717,98 @@ function renderPreview(): void {
   previewBox.replaceChildren(...children.filter((c): c is Node => c !== null));
 }
 
+// --- role groups and the card preview ---------------------------------------------------
+
+/** Groups the user opened or closed (by title); the rest use their default. */
+const GROUPS_KEY = 'wtv.selectorGroups';
+function loadGroupState(): Record<string, boolean> {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(GROUPS_KEY) ?? '{}');
+    return typeof raw === 'object' && raw !== null ? (raw as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+const groupOpen = loadGroupState();
+
+/** Kept across renders, like the metadata preview; refreshed on its own. */
+const cardPreview = el('div', { className: 'card-preview' });
+let shownPost = '';
+
+function renderCardPreview(): void {
+  const report = state.post;
+  const post = report?.post ?? null;
+  if (!post) {
+    cardPreview.replaceChildren(
+      el('p', {
+        className: 'note',
+        text: 'Card preview: no post yet. Pick at least the post text or title, on a post’s own page.',
+      }),
+    );
+    return;
+  }
+  const head = el(
+    'div',
+    { className: 'card-head' },
+    el('span', { className: 'card-author', text: post.author || '(no author)' }),
+    post.time ? el('span', { className: 'note', text: post.time }) : null,
+  );
+  const pics = post.images.length
+    ? el(
+        'div',
+        { className: 'card-pics' },
+        ...post.images.map((src) => Object.assign(el('img'), { src, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' })),
+      )
+    : null;
+  const parts: (Node | null)[] = [
+    el('p', { className: 'field-name', text: 'Card preview' }),
+    head,
+    post.title ? el('p', { className: 'card-title', text: post.title }) : null,
+    post.text ? el('p', { className: 'card-text', text: post.text }) : null,
+    pics,
+  ];
+  cardPreview.replaceChildren(...parts.filter((p): p is Node => p !== null));
+}
+
+async function refreshPostPreview(): Promise<void> {
+  if (!state.report) return;
+  try {
+    state.post = await toTop<PagePostReport>({ type: PICK_POST });
+  } catch {
+    state.post = null;
+  }
+  const key = JSON.stringify(state.post?.post ?? null);
+  if (key === shownPost) return;
+  shownPost = key;
+  renderCardPreview();
+}
+
+function groupView(group: (typeof ROLE_GROUPS)[number], roles: RoleReport[]): HTMLElement | null {
+  const mine = roles.filter((r) => group.roles.includes(r.role));
+  if (mine.length === 0) return null;
+  const isPosts = group.roles.includes('postText');
+  // Posts: closed until the site has some post selectors (most sites are for watching).
+  const fallback = !isPosts || mine.some((r) => r.matchers.length > 0) || group.roles.includes(state.editor?.role ?? 'video');
+  const details = el(
+    'details',
+    { className: 'group' },
+    el('summary', { text: group.title }),
+    group.note ? el('p', { className: 'note', text: group.note }) : null,
+    isPosts ? cardPreview : null,
+    ...mine.map(roleView),
+  );
+  details.open = groupOpen[group.title] ?? fallback;
+  details.addEventListener('toggle', () => {
+    groupOpen[group.title] = details.open;
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify(groupOpen));
+    } catch {
+      // Not important.
+    }
+  });
+  return details;
+}
+
 async function refreshPreview(): Promise<void> {
   if (!state.report) return;
   try {
@@ -724,7 +823,10 @@ async function refreshPreview(): Promise<void> {
 }
 
 setInterval(() => {
-  if (active && document.visibilityState === 'visible' && state.report && !state.picking) void refreshPreview();
+  if (active && document.visibilityState === 'visible' && state.report && !state.picking) {
+    void refreshPreview();
+    void refreshPostPreview();
+  }
 }, PREVIEW_POLL_MS);
 
 // --- rendering ---------------------------------------------------------------------------
@@ -780,7 +882,7 @@ function draw(): void {
         ? el('p', { className: 'warn', text: state.message })
         : null,
     previewBox,
-    ...report.roles.map(roleView),
+    ...ROLE_GROUPS.map((g) => groupView(g, report.roles)),
     el(
       'footer',
       {},

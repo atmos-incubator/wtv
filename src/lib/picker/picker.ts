@@ -2,7 +2,10 @@
  * In-page element picker UI. DOM-only (content script).
  *
  * - Hover highlights the element under the pointer (through open shadow roots).
- * - Click selects. Page clicks are swallowed while picking.
+ * - Click selects. The page sees none of the pick's events (pointer, mouse, touch, click):
+ *   they go through the guard (guard.ts), whose listeners were added before the page's
+ *   own, so a page that acts on pointerdown can't open things or eat the click. The pick
+ *   is the element pressed on; if the click never arrives, it's taken at pointerup.
  * - ↑ / ↓ walk to the parent / back down. P plays/pauses the primary media (freeze an
  *   ad to pick its parts). Esc cancels.
  * - Optional countdown first, for things that only appear on hover or mid-ad.
@@ -10,6 +13,8 @@
  * The UI lives in a closed shadow root on a pointer-events:none popover host, so the
  * page can't restyle it and it never becomes the pick target.
  */
+
+import { GUARDED_EVENTS, setPickGuard } from './guard';
 
 export interface PickerOptions {
   delayMs: number;
@@ -80,6 +85,9 @@ function div(className: string, text = ''): HTMLDivElement {
   return d;
 }
 
+/** After pointerup, how long to wait for the click before picking anyway. */
+const CLICK_WAIT_MS = 350;
+
 function targetOf(e: Event): Element | null {
   const t = e.composedPath()[0];
   return t instanceof Element ? t : null;
@@ -102,6 +110,9 @@ export function startPicker(options: PickerOptions): Picker {
   let trail: Element[] = [];
   let active = false;
   let countdown: ReturnType<typeof setInterval> | undefined;
+  /** Pressed on (pointerdown): picked at the click, or shortly after pointerup without one. */
+  let pressed: Element | null = null;
+  let clickWait: ReturnType<typeof setTimeout> | undefined;
   const controller = new AbortController();
   const { signal } = controller;
 
@@ -132,14 +143,33 @@ export function startPicker(options: PickerOptions): Picker {
   function stop(): void {
     active = false;
     if (countdown !== undefined) clearInterval(countdown);
+    clearTimeout(clickWait);
+    setPickGuard(null);
     controller.abort();
     host.remove();
   }
 
-  function swallow(e: Event): void {
+  function pick(el: Element | null): void {
+    if (!active || !el) return;
+    stop();
+    options.onPick(el);
+  }
+
+  /** Every guarded event: kept from the page; the press, release and click make the pick. */
+  function onGuarded(e: Event): void {
     if (!active) return;
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     e.stopImmediatePropagation();
+    const primary = !(e instanceof MouseEvent) || e.button === 0;
+    if ((e.type === 'pointerdown' || e.type === 'mousedown' || e.type === 'touchstart') && primary) {
+      pressed ??= hovered ?? targetOf(e);
+    } else if (e.type === 'click' && primary) {
+      pick(hovered ?? pressed ?? targetOf(e));
+    } else if ((e.type === 'pointerup' || e.type === 'touchend') && pressed) {
+      // The click normally follows at once; if the page made sure it won't, pick anyway.
+      clearTimeout(clickWait);
+      clickWait = setTimeout(() => pick(pressed), CLICK_WAIT_MS);
+    }
   }
 
   function activate(): void {
@@ -156,20 +186,11 @@ export function startPicker(options: PickerOptions): Picker {
       },
       { ...opts, passive: true },
     );
-    for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'auxclick', 'dblclick', 'contextmenu']) {
-      window.addEventListener(type, swallow, opts);
+    // Injected into an already-open page, there's no early guard: listen now (after the
+    // page's own window listeners, so less sure, but the pointerup fallback still picks).
+    if (!setPickGuard(onGuarded)) {
+      for (const type of GUARDED_EVENTS) window.addEventListener(type, onGuarded, opts);
     }
-    window.addEventListener(
-      'click',
-      (e) => {
-        swallow(e);
-        const el = hovered ?? targetOf(e);
-        if (!el) return;
-        stop();
-        options.onPick(el);
-      },
-      opts,
-    );
     window.addEventListener('scroll', () => show(hovered), { ...opts, passive: true });
   }
 

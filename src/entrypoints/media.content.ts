@@ -7,6 +7,7 @@ import { MSG_PREVIEW_OVERLAY, MSG_SHOW_AD_PICTURES, isStatusRequest, type FrameS
 import { startHealthMonitor } from '../lib/health/monitor';
 import { pageMetadata } from '../lib/metadata/page';
 import { startOverlay } from '../lib/overlay/controller';
+import { installPickGuard } from '../lib/picker/guard';
 import { startPickerService } from '../lib/picker/service';
 import { startPlaylistClient } from '../lib/playlist/client';
 import { startContinuePrompt } from '../lib/prompts/continue';
@@ -35,6 +36,8 @@ export default defineContentScript({
     // when something reads `ctx.isInvalid`, which `ctx.setInterval` does on every tick;
     // then every `onInvalidated` cleanup runs and the overlay is removed.
     ctx.setInterval(() => undefined, ORPHAN_CHECK_MS);
+    // First, before the page's scripts add listeners of their own (see guard.ts).
+    installPickGuard(ctx.signal);
 
     const agent = startMediaAgent(ctx, { debug: DEV_TOOLS });
     const ads = startAdWatcher(ctx, agent, { debug: DEV_TOOLS });

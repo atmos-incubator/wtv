@@ -33,6 +33,7 @@ body {
 
 .status {
   max-width: 85%;
+  white-space: pre-line;
   margin: 0;
   text-align: center;
   font-size: clamp(16px, 3.4vw, 44px);

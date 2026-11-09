@@ -10,12 +10,14 @@ import { pageMetadata, readRoleValue } from '../metadata/page';
 import type { MediaAgent } from '../media/agent';
 import type { OverlayController } from '../overlay/controller';
 import { togglePlayback } from '../view/playback';
-import { ROLE_DEFAULT_WHEN, ROLE_NAMES, effectiveWhen, type Condition } from '../sites/schema';
+import { POST_ROLES, ROLE_DEFAULT_WHEN, ROLE_NAMES, effectiveWhen, type Condition, type PostRoleName } from '../sites/schema';
+import { postFieldValue, readPagePost } from '../posts/page';
 import { describeElement, generateCandidates } from './candidates';
 import {
   PICK_CANCELLED,
   PICK_RESULT,
   parsePickRequest,
+  type PagePostReport,
   type MatcherReport,
   type PickResult,
   type RolesReport,
@@ -111,9 +113,11 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
         const { elements, ...rest } = evaluate(msg.selector, when);
         flashMatches(elements);
         const result: TestResult = rest;
+        const hit = when === 'visible' ? elements.find(isElementVisible) : elements[0];
         if ((META_ROLES as readonly string[]).includes(msg.role)) {
-          const hit = when === 'visible' ? elements.find(isElementVisible) : elements[0];
           result.value = hit ? readRoleValue(hit) : null;
+        } else if ((POST_ROLES as readonly string[]).includes(msg.role)) {
+          result.value = hit ? postFieldValue(msg.role as PostRoleName, hit) : null;
         }
         sendResponse(result);
         break;
@@ -124,6 +128,12 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
       case 'wtv/pick/metadata':
         sendResponse(pageMetadata(agent.profile().site));
         break;
+      case 'wtv/pick/post': {
+        const site = agent.profile().site;
+        const report: PagePostReport = site ? readPagePost(site) : { post: null, fields: [] };
+        sendResponse(report);
+        break;
+      }
     }
     return undefined;
   };

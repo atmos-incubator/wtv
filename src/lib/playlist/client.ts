@@ -44,6 +44,11 @@
  *   - scroll: scrolls the page itself (page-show/scroller.ts).
  * Either way the frame reports `playing`, the page's metadata with the show's length,
  * and `ended` when it's done. Media events are ignored in every frame meanwhile.
+ *
+ * A post's page read for its card (`view=card` from a site with post selectors, or a
+ * hash with `v=card`): the blackout stays up while the top frame reads the post with the
+ * site's post selectors (posts/page.ts), trying for a while (apps render late), and
+ * sends it, or why not, to the runner (PL_PAGE_POST), which moves on to the card page.
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
@@ -66,12 +71,16 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_PAGE_POST,
   parseEntryInfo,
   parsePlaylistApply,
   type EntryInfo,
   type MediaEvent,
   type MediaInfo,
+  type PostResult,
 } from './messages';
+import { readPagePost } from '../posts/page';
+import { hasPostSelectors } from '../sites/schema';
 
 /** Offer "Start" if nothing has played (and nothing was refused) by then. */
 const FALLBACK_PROMPT_MS = 15_000;
@@ -91,6 +100,11 @@ const PAGE_LOAD_MAX_MS = 12_000;
 const PAGE_SETTLE_MS = 1200;
 /** Look for the `unavailable` role this often, for this long after the entry starts (until it plays). */
 const GONE_POLL_MS = 1000;
+/** A post's page: how long to look for the post, and how often. */
+const POST_WAIT_MS = 15_000;
+const POST_POLL_MS = 500;
+/** Once found, read again after this, for what was still loading (pictures). */
+const POST_SETTLE_MS = 800;
 const GONE_WATCH_MS = 60_000;
 const WATCH_EVENTS = [
   'playing',
@@ -496,6 +510,10 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     await whenLoaded();
     if (run !== pageRun || signal.aborted) return;
     pausePageMedia();
+    if (view === 'card') {
+      void readPost(run);
+      return;
+    }
     if (view === 'read') {
       const html = document.documentElement.outerHTML.slice(0, MAX_READ_HTML);
       page = { kind: 'read', id: run, url: location.href, html, wpm: speed ?? DEFAULT_WPM, durS };
@@ -503,6 +521,50 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       return;
     }
     startScroll(run, speed ?? DEFAULT_SCROLL_PX_S, durS);
+  }
+
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  /** `v=card`: read the post with the site's post selectors, and hand it to the runner. */
+  async function readPost(run: number): Promise<void> {
+    const site = agent.profile().site;
+    const until = performance.now() + POST_WAIT_MS;
+    let result: PostResult;
+    for (;;) {
+      if (run !== pageRun || signal.aborted) return;
+      // Apps start their videos late; nothing should play behind the blackout.
+      pausePageMedia();
+      if (!site || !hasPostSelectors(site.config.roles)) {
+        result = { ok: false, gone: false, error: `No post selectors for ${location.hostname} (Fix selectors → Posts)` };
+        break;
+      }
+      const unavailable = site.config.roles.unavailable;
+      if (unavailable?.length && matchRole('unavailable', unavailable).match) {
+        result = { ok: false, gone: true, error: `${site.config.name} says this post isn’t available` };
+        break;
+      }
+      if (readPagePost(site).post) {
+        await sleep(POST_SETTLE_MS);
+        if (run !== pageRun || signal.aborted) return;
+        const post = readPagePost(site).post;
+        if (post) {
+          result = { ok: true, post };
+          break;
+        }
+      }
+      if (performance.now() >= until) {
+        result = { ok: false, gone: false, error: `Couldn’t find the post on this page with ${site.config.name}’s post selectors` };
+        break;
+      }
+      await sleep(POST_POLL_MS);
+    }
+    console.info('[wtv] post read from the page:', result.ok ? result.post.title ?? result.post.text.slice(0, 60) : result.error);
+    if (entry) {
+      browser.runtime.sendMessage({ type: PL_PAGE_POST, gen: entry.gen, result }).catch(() => undefined);
+      return;
+    }
+    // A stand-alone #wtv:v=card link: nothing to hand it to; back to the page.
+    lift();
   }
 
   function startScroll(run: number, pxPerS: number, durS: number | null): void {
@@ -604,7 +666,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
           if (pageView && isTop) void runPageShow(pageView, null, hash?.end ?? null);
           return;
         }
-        if (isPageView(entry.view)) {
+        if (isPageView(entry.view) || entry.view === 'card') {
           pageView = entry.view;
           if (!isTop) return;
           if (hash && blackout) update({ canNext: true, title: entry.title ?? blackout.title });

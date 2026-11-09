@@ -20,7 +20,23 @@ export const ROLE_NAMES = [
   'description',
   'keywords',
   'creator',
+  // Posts (`view=card` read from the page itself: forums, social sites).
+  'post',
+  'postTitle',
+  'postAuthor',
+  'postText',
+  'postTime',
+  'postImage',
 ] as const;
+
+/** The roles a post card is read from (see posts/page.ts). */
+export const POST_ROLES = ['post', 'postTitle', 'postAuthor', 'postText', 'postTime', 'postImage'] as const;
+export type PostRoleName = (typeof POST_ROLES)[number];
+
+/** A site whose post can be read from the page: it has a selector for the text or the title. */
+export function hasPostSelectors(roles: Roles): boolean {
+  return (roles.postText?.length ?? 0) > 0 || (roles.postTitle?.length ?? 0) > 0;
+}
 
 export type RoleName = (typeof ROLE_NAMES)[number];
 
@@ -52,6 +68,12 @@ export const ROLE_DEFAULT_WHEN: Record<RoleName, Condition> = {
   description: 'exists',
   keywords: 'exists',
   creator: 'exists',
+  post: 'exists',
+  postTitle: 'exists',
+  postAuthor: 'exists',
+  postText: 'exists',
+  postTime: 'exists',
+  postImage: 'exists',
 };
 
 /**

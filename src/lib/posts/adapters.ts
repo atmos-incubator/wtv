@@ -312,9 +312,13 @@ export function parseBlueskyThread(raw: unknown, canonical: string): PostResult 
   const author = post && isObj(post.author) ? post.author : null;
   const record = post && isObj(post.record) ? post.record : null;
   if (!post || !author || !record) return unreadable('Bluesky');
-  // Authors can ask to be seen only by signed-in people; Wtv is never signed in.
+  // Authors can ask to be seen only by signed-in people. The public API still answers,
+  // but it's anonymous, so Wtv doesn't show these from it. Read from bsky.app itself
+  // (post selectors: posts/source.ts), the page is the user's own signed-in session.
   if (labelValues(author.labels).includes('!no-unauthenticated')) {
-    return failed('The author shows their Bluesky posts only to signed-in people', true);
+    return failed(
+      'This author’s Bluesky posts are for signed-in people only. To show them signed in, open a Bluesky post and pick its post selectors (Fix selectors → Posts).',
+    );
   }
   const handle = str(author.handle);
   const name = str(author.displayName)?.trim() || handle || '';
@@ -412,6 +416,7 @@ export function cardDurationS(post: Pick<Post, 'title' | 'text' | 'images'>): nu
 export function postTitle(post: Post): string {
   const line = (post.title ?? post.text).replace(/\s+/g, ' ').trim();
   const short = line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+  if (!post.author) return short;
   return short ? `${post.author}: ${short}` : post.author;
 }
 

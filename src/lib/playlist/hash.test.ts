@@ -15,7 +15,8 @@ describe('#wtv: hash', () => {
     expect(parseWtvHash('#wtv:')).toEqual({ t: null, end: null, title: null, view: null });
     expect(parseWtvHash('#wtv:v=read&d=Story')).toEqual({ t: null, end: null, title: 'Story', view: 'read' });
     expect(parseWtvHash('#wtv:v=scroll')?.view).toBe('scroll');
-    expect(parseWtvHash('#wtv:v=card')?.view).toBeNull();
+    expect(parseWtvHash('#wtv:v=card')?.view).toBe('card');
+    expect(parseWtvHash('#wtv:v=video')?.view).toBeNull();
   });
 
   it('tolerates junk', () => {

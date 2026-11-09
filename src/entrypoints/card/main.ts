@@ -161,7 +161,8 @@ async function main(): Promise<void> {
     return;
   }
   if (!result.ok) {
-    say(result.gone ? `Unavailable: ${entry.title ?? 'this post'}` : result.error);
+    // Say why, either way: "unavailable" alone doesn't help fix a playlist.
+    say(result.gone ? `Unavailable: ${entry.title ?? 'this post'}\n${result.error}` : result.error);
     if (result.gone) report('gone');
     else setTimeout(() => report('ended'), ERROR_DWELL_MS);
     return;

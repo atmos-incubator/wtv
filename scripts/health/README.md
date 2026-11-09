@@ -29,9 +29,10 @@ playing it, and marks it ❌ gone when the player shows its "Video unavailable" 
 restricted: age or content checks a TV can't pass). The report gets a "Built-in playlists"
 section listing them per playlist. Gone entries don't change the exit code. Pages and posts
 (`view=read` / `scroll`) are checked by HTTP status instead (404 / 410 is ❌ gone). Posts
-(`view=card`) are fetched from the site's public endpoint and read by the extension's own
-post adapter, so ❌ gone means what Unavailable means in a playlist. Reddit limits these
-requests hard (a few a minute), so expect some ❔ there.
+(`view=card`) on a site with a post adapter (X, Reddit, Bluesky) are fetched from the site's
+public endpoint and read by the extension's own
+post adapter, so ❌ gone means what Unavailable means in a playlist. Other posts are
+checked like pages. Reddit limits these requests hard (a few a minute), so expect some ❔ there.
 
 It's headful on purpose: headless browsers and datacenter IPs get bot walls. Run it on
 your own machine, logged in.

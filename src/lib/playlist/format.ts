@@ -35,8 +35,11 @@
  *     page itself, scrolled to the bottom. `speed=` (words per minute for `read`, pixels
  *     a second for `scroll`), else the playlist's `[speed …]` for that unit, else the
  *     default (page-show/pace.ts). `dur=` / `end=` is how long it shows; `t=` is ignored.
- *   - `card`: a post (posts/adapters.ts: X so far) on a full-screen title card, for
- *     `dur=` or a time from its length.
+ *   - `card`: a post on a full-screen title card, for `dur=` or a time from its length:
+ *     read from its page with the site's post selectors, or fetched through a post
+ *     adapter (X, Reddit, Bluesky; posts/source.ts). Which one, and whether there's
+ *     either, depends on the user's selectors, so it isn't checked here: the playlists
+ *     page says per entry.
  *
  * Times: `t=` starts the entry there; `end=` stops it there, or `dur=` that long after the
  * start. `end=` wins if both are given (flagged). An end at or before the start is
@@ -55,7 +58,6 @@
  */
 import type { ProgramItem } from '../overlay/program';
 import { parseSpeed, speedProblem, type Speed, type SpeedUnit } from '../page-show/pace';
-import { POST_SITES, findPostAdapter } from '../posts/adapters';
 import { parseTimestamp } from './time';
 
 export interface EntryOption {
@@ -276,9 +278,6 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
           startS = null;
         }
         if (speed) speed = checkSpeed(speed, shown, (message) => problems.push({ line: at, message }));
-        if (shown === 'card' && !findPostAdapter(line.url)) {
-          problems.push({ line: at, message: `view=card: not a post Wtv can read (so far: posts on ${POST_SITES})` });
-        }
         const endS = entryEnd(startS, endOpt, durOpt, (message) => problems.push({ line: at, message }));
         entries.push({ url: line.url, title: line.title, startS, endS, view, ownSpeed: speed, line: i, ownAds: [], ownShow: [] });
         block = null;

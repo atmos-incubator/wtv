@@ -274,13 +274,13 @@ describe('Bluesky threads', () => {
     });
   });
 
-  it('leaves out pictures labelled adult, and posts their authors keep to signed-in people', () => {
+  it('leaves out pictures labelled adult, and posts their authors keep to signed-in people (not gone: readable signed in)', () => {
     const adult = { thread: { ...thread.thread, post: { ...thread.thread.post, labels: [{ val: 'nudity' }] } } };
     expect((parseBlueskyThread(adult, url) as { post: Post }).post.images).toEqual([]);
     const hidden = {
       thread: { ...thread.thread, post: { ...thread.thread.post, author: { ...thread.thread.post.author, labels: [{ val: '!no-unauthenticated' }] } } },
     };
-    expect(parseBlueskyThread(hidden, url)).toMatchObject({ ok: false, gone: true });
+    expect(parseBlueskyThread(hidden, url)).toMatchObject({ ok: false, gone: false, error: expect.stringMatching(/signed-in/) });
   });
 
   it('knows missing and blocked posts', () => {
@@ -322,6 +322,7 @@ describe('cards', () => {
     expect(postTitle({ ...post, text: 'x'.repeat(200) })).toMatch(/^U\.S\. Department of the Interior: x{79}…$/);
     expect(postTitle({ ...post, text: '' })).toBe('U.S. Department of the Interior');
     expect(postTitle({ ...post, title: 'A title' })).toBe('U.S. Department of the Interior: A title');
+    expect(postTitle({ ...post, author: '', title: 'A title' })).toBe('A title');
   });
 
   it('checks posts passed between pages', () => {

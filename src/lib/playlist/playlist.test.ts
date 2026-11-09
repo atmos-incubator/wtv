@@ -8,6 +8,7 @@ import {
   PL_HELLO,
   PL_INFO,
   PL_MEDIA,
+  PL_PAGE_POST,
   PL_POST,
   PL_RUNS,
   PL_STATE,
@@ -182,6 +183,12 @@ describe('playlist messages', () => {
   it('parses post requests and results', () => {
     expect(parsePlaylistRequest({ type: PL_POST, gen: 3 })).toEqual({ type: PL_POST, gen: 3 });
     expect(parsePlaylistRequest({ type: PL_POST })).toBeNull();
+    const read = { ok: true, post: { site: 'Forum', author: 'A', handle: null, title: 'T', text: '', time: null, url: 'https://f.example/t/1', images: [] } };
+    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: read })).toEqual({ type: PL_PAGE_POST, gen: 2, result: read });
+    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2, result: { ok: false, gone: true, error: 'x' } })).toMatchObject({
+      result: { ok: false, gone: true },
+    });
+    expect(parsePlaylistRequest({ type: PL_PAGE_POST, gen: 2 })).toBeNull();
     const post = { site: 'X', author: 'A', handle: '@a', title: null, text: 'Hi', time: null, url: 'https://x.com/a/status/1', images: [] };
     expect(parsePostResult({ ok: true, post })).toEqual({ ok: true, post });
     expect(parsePostResult({ ok: true, post: { ...post, url: 'javascript:alert(1)' } })).toBeNull();
