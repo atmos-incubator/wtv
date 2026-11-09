@@ -20,6 +20,7 @@ import {
   type ProgramItem,
   type Slide,
 } from '../../lib/overlay/program';
+import { loadingPicture, rememberLoadingPicture, sameSource } from '../../lib/images/loading-picture';
 import { startReader, type Reader } from './reader';
 
 const ACTIVITY_THROTTLE_MS = 150;
@@ -129,11 +130,21 @@ function wake(): void {
     : undefined;
 }
 
+/** The next present() appears at once (the loading picture carried over from the last page). */
+let instantNext = false;
+
 /** Render into the back layer, then cross-fade it to the front. */
 function present(node: Node, urls: string[] = []): void {
   clearLayer(back);
   back.append(node);
   layerUrls.set(back, urls);
+  if (instantNext) {
+    instantNext = false;
+    back.style.transition = 'none';
+    back.classList.add('visible');
+    void back.offsetWidth; // Apply it before the transition comes back.
+    back.style.transition = '';
+  }
   back.classList.add('visible');
   front.classList.remove('visible');
   const old = front;
@@ -228,8 +239,13 @@ function showPictures(cmd: Extract<OverlayCommand, { type: 'pictures' }>): void 
   setPicturesState(cmd);
 }
 
-/** Loop the program's slides until the next command. */
-async function playProgram(host: string, items: readonly ProgramItem[]): Promise<void> {
+/**
+ * Loop the program's slides until the next command. `loading`: the playlist's loading
+ * screen. It starts with the picture the last loading screen showed if that was moments
+ * ago (on the page being left, or before this page knew its entry), so moving between
+ * entries doesn't flash one picture and then another; and remembers what it shows.
+ */
+async function playProgram(host: string, items: readonly ProgramItem[], loading = false): Promise<void> {
   const gen = generation;
   const resolve = await createImageResolver(host);
   let slides: Slide[] = [];
@@ -244,15 +260,22 @@ async function playProgram(host: string, items: readonly ProgramItem[]): Promise
     if (index >= slides.length) {
       slides = buildSlides(items, resolve);
       if (slides.length === 0) slides = buildSlides(DEFAULT_AD_ITEMS, bundledResolved);
+      const carried = loading && index === 0 ? loadingPicture() : null;
+      if (carried) {
+        slides = [carried, ...slides.filter((s) => s.kind !== 'img' || !sameSource(s.src, carried.src))];
+        instantNext = true;
+      }
       index = 0;
     }
     const slide = slides[index++];
     if (!slide) return;
+    if (loading && slide.kind === 'img') rememberLoadingPicture(slide);
     try {
       await renderSlide(slide, gen);
     } catch (err) {
       console.warn('[wtv] overlay slide failed:', err);
     }
+    instantNext = false;
     if (gen !== generation) return;
     timer = setTimeout(() => void advance(), slide.durationMs);
   };
@@ -272,12 +295,13 @@ function pulse(target: HTMLElement): void {
 function showBlackout(cmd: Extract<OverlayCommand, { type: 'blackout' }>): void {
   const { title, pictures, prompt: offerStart } = cmd;
   if (pictures) {
-    // Loading: the ad pictures, kept going while the prompt and status change.
-    const key = JSON.stringify(['blackout', pictures.host, pictures.items]);
+    // Loading: the ad pictures, kept going while the prompt and status change, and when
+    // the page learns its entry's own [ads] (a new program then would swap the picture).
+    const key = 'blackout-pictures';
     if (programKey !== key) {
       reset();
       programKey = key;
-      void playProgram(pictures.host, pictures.items);
+      void playProgram(pictures.host, pictures.items, true);
     }
     lastBlackoutTitle = null;
   } else {

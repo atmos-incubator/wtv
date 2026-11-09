@@ -24,6 +24,7 @@ import './style.css';
 import { browser } from 'wxt/browser';
 import { cardDurationS, type Post } from '../../lib/posts/adapters';
 import { getImageBlob } from '../../lib/images/db';
+import { loadingPicture, rememberLoadingPicture } from '../../lib/images/loading-picture';
 import { createImageResolver } from '../../lib/images/resolver';
 import { fitMode } from '../../lib/overlay/fit';
 import { DEFAULT_AD_ITEMS, buildSlides, type ProgramItem } from '../../lib/overlay/program';
@@ -104,12 +105,20 @@ const poster = $('poster');
 let posterDone = false;
 let posterUrl: string | null = null;
 
-/** One ad picture over the whole page until the post (or why not) is ready. */
+/**
+ * One ad picture over the whole page until the post (or why not) is ready: the one the
+ * loading screen before this page showed, if that was moments ago (images/loading-picture.ts).
+ */
 async function showPoster(items: readonly ProgramItem[]): Promise<void> {
   try {
-    const resolve = await createImageResolver('');
-    const slide = buildSlides(items, resolve).find((s) => s.kind === 'img') ?? buildSlides(DEFAULT_AD_ITEMS, resolve)[0];
-    if (!slide || slide.kind !== 'img' || posterDone) return;
+    let slide = loadingPicture();
+    if (!slide) {
+      const resolve = await createImageResolver('');
+      const first = buildSlides(items, resolve).find((s) => s.kind === 'img') ?? buildSlides(DEFAULT_AD_ITEMS, resolve)[0];
+      slide = first?.kind === 'img' ? first : null;
+    }
+    if (!slide || posterDone) return;
+    rememberLoadingPicture(slide);
     let url: string;
     if (slide.src.type === 'url') {
       url = slide.src.url;
