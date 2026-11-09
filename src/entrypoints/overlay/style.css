@@ -178,6 +178,14 @@ body {
   opacity: 0.75;
 }
 
+/* Over the loading pictures: legible on anything. */
+#prompt-status:not(:empty) {
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.6);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+}
+
 /* One pulse per automatic start attempt: the Start button, or the status line before it shows. */
 #prompt button.pulse {
   animation: pulse 900ms ease-out;

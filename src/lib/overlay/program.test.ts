@@ -20,6 +20,7 @@ describe('parseOverlayCommand', () => {
     expect(parseOverlayCommand({ type: 'blackout', title: '  Show  ' })).toEqual({
       type: 'blackout',
       title: 'Show',
+      pictures: null,
       prompt: false,
       attempt: 0,
       status: null,
@@ -28,6 +29,7 @@ describe('parseOverlayCommand', () => {
     expect(parseOverlayCommand({ type: 'blackout', prompt: true, attempt: 2, status: ' Blocked ' })).toEqual({
       type: 'blackout',
       title: null,
+      pictures: null,
       prompt: true,
       attempt: 2,
       status: 'Blocked',
@@ -35,6 +37,11 @@ describe('parseOverlayCommand', () => {
     });
     expect(parseOverlayCommand({ type: 'blackout', canNext: false })).toMatchObject({ canNext: false });
     expect(parseOverlayCommand({ type: 'blackout', attempt: -1 })).toMatchObject({ attempt: 0 });
+    // Loading: the ad pictures; an empty program means the site's images.
+    expect(parseOverlayCommand({ type: 'blackout', pictures: { host: 'a.example', items: [] } })).toMatchObject({
+      pictures: { host: 'a.example', items: [{ kind: 'img', keyword: null, durationS: null }] },
+    });
+    expect(parseOverlayCommand({ type: 'blackout', pictures: { host: 1, items: [] } })).toMatchObject({ pictures: null });
   });
 
   it('parses an ad program and drops invalid items', () => {

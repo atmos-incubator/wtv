@@ -102,7 +102,18 @@ export interface SiteQuirks {
    * site ignores synthetic clicks on its Skip button.
    */
   adsInMainVideo?: boolean;
+  /** The site never shows ads: no ad detection, even with ad selectors. */
+  noAds?: boolean;
+  /**
+   * Its videos always start by themselves: in a playlist, Wtv never presses play (no
+   * start attempts). Start / Next still show if nothing has played after a while.
+   */
+  startsItself?: boolean;
 }
+
+/** Quirks the user can set per site (side panel), stored with their overrides. */
+export const USER_QUIRKS = ['noAds', 'startsItself'] as const;
+export type UserQuirk = (typeof USER_QUIRKS)[number];
 
 export interface SiteConfig {
   schemaVersion: typeof SCHEMA_VERSION;

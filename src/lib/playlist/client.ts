@@ -130,6 +130,8 @@ const WATCH_EVENTS = [
 
 export interface Blackout {
   title: string | null;
+  /** A notice ("Unavailable: …"): the title is the point. Otherwise loading: ad pictures, no title. */
+  notice: boolean;
   /** Offer Start / Next. */
   prompt: boolean;
   /** Automatic start attempts so far (each one pulses the Start button). */
@@ -247,12 +249,12 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   }
 
   /** `forEntry`: this page is the entry (from hello), so Wtv should get it playing. */
-  function showBlackout(title: string | null, forEntry: boolean): void {
+  function showBlackout(title: string | null, forEntry: boolean, notice = false): void {
     if (!isTop) return;
     clearTimers();
     attempting = false;
     awaitingStart = forEntry;
-    blackout = { title, prompt: false, attempt: 0, status: null, canNext: entry !== null };
+    blackout = { title, notice, prompt: false, attempt: 0, status: null, canNext: entry !== null };
     if (forEntry) {
       promptTimer = setTimeout(() => {
         promptTimer = undefined;
@@ -328,14 +330,20 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     }
     if (why === 'blocked') update({ prompt: true, status: 'Chrome blocked autoplay.' });
     else if (why === 'timeout') update({ prompt: true });
-    if (attempting) return;
+    // The site starts its videos itself: Start / Next, but no tries of our own.
+    if (attempting || agent.profile().site?.config.quirks?.startsItself) return;
     attempting = true;
     attempt(0);
   }
 
-  /** The primary has data but isn't playing: start the grace period before we start it. */
+  /**
+   * The primary has data but isn't playing: start the grace period before we start it.
+   * Not on a site marked as starting its videos itself (`quirks.startsItself`): pressing
+   * play there can fight the site's own start. The fallback Start / Next still shows.
+   */
   function considerStarting(): void {
     if (!isTop || !blackout || !awaitingStart || attempting || graceTimer !== undefined || pageView) return;
+    if (agent.profile().site?.config.quirks?.startsItself) return;
     if (adActive()) return; // The site's ad flow decides what plays now.
     const primary = agent.primary();
     if (!primary) return;
@@ -668,7 +676,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       lift();
       stopEmbed();
     } else if (msg.op === 'blocked') trigger('blocked-in-frame');
-    else if (msg.op === 'blackout') showBlackout(msg.title, false);
+    else if (msg.op === 'blackout') showBlackout(msg.title, false, msg.notice);
     return undefined;
   };
   browser.runtime.onMessage.addListener(onMessage);

@@ -1,5 +1,6 @@
 /**
- * Content-script ad watcher. Runs only where the site config has an `adIndicator` role.
+ * Content-script ad watcher. Runs only where the site config has an `adIndicator` role,
+ * and isn't marked as never having ads (`quirks.noAds`, the side panel's "No ads").
  *
  * Re-evaluates (at most every 150 ms) on:
  *   - DOM mutations: child lists, and `class` / `hidden` attributes (sites toggle ad
@@ -135,7 +136,11 @@ export function startAdWatcher(
   const evaluateSoon = scheduler(evaluate, EVALUATE_DELAY_MS, signal);
   const mutations = new MutationObserver(evaluateSoon);
 
-  const roles = () => agent.profile().site?.config.roles;
+  /** The ad selectors, unless the site is marked as never having ads. */
+  const roles = () => {
+    const config = agent.profile().site?.config;
+    return config?.quirks?.noAds ? undefined : config?.roles;
+  };
 
   function log(...args: unknown[]): void {
     if (options.debug) record('ads', ...args);
@@ -428,7 +433,8 @@ export function startAdWatcher(
 
   /** Start / stop DOM observation depending on whether this site has ad selectors. */
   function syncObservation(profile: SiteProfile): void {
-    const wanted = Boolean(profile.site?.config.roles.adIndicator?.length);
+    const config = profile.site?.config;
+    const wanted = Boolean(config?.roles.adIndicator?.length) && !config?.quirks?.noAds;
     if (wanted && !observing) {
       mutations.observe(document, {
         subtree: true,

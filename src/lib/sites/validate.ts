@@ -119,9 +119,9 @@ function validateQuirks(raw: unknown, errors: string[], warnings: string[]): Sit
       } else {
         quirks.controlBarInset = value;
       }
-    } else if (key === 'adsInMainVideo') {
-      if (typeof value !== 'boolean') errors.push('quirks.adsInMainVideo: must be true or false');
-      else quirks.adsInMainVideo = value;
+    } else if (key === 'adsInMainVideo' || key === 'noAds' || key === 'startsItself') {
+      if (typeof value !== 'boolean') errors.push(`quirks.${key}: must be true or false`);
+      else quirks[key] = value;
     } else {
       warnings.push(`quirks: unknown key "${key}" ignored`);
     }

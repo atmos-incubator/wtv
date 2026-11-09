@@ -14,7 +14,8 @@
  *     PL_POST   { gen }      → PostResult   the post: read from its page (PL_PAGE_POST), else fetched by the background (posts/)
  *
  *   background → content, top frame only (tabs.sendMessage, frameId 0)
- *     PL_APPLY  { op: 'blackout', title } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
+ *     PL_APPLY  { op: 'blackout', title, notice } | { op: 'lift' } | { op: 'blocked' }  (autoplay refused in a child frame)
+ *               (notice: the title is a message, "Unavailable: …"; else it's loading, shown as ad pictures)
  *               | { op: 'release' }   the playlist let go of the tab (stopped, or the user went elsewhere):
  *                                     lift, and take down anything shown for the entry (an embed)
  *
@@ -125,7 +126,7 @@ export type PageRequest =
   | { type: typeof PL_RUNS };
 
 export type PlaylistApply =
-  | { type: typeof PL_APPLY; op: 'blackout'; title: string | null }
+  | { type: typeof PL_APPLY; op: 'blackout'; title: string | null; notice: boolean }
   | { type: typeof PL_APPLY; op: 'lift' | 'blocked' | 'release' };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -195,7 +196,7 @@ export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
   if (!isObj(raw) || raw.type !== PL_APPLY) return null;
   if (raw.op === 'lift' || raw.op === 'blocked' || raw.op === 'release') return { type: PL_APPLY, op: raw.op };
   if (raw.op === 'blackout') {
-    return { type: PL_APPLY, op: 'blackout', title: typeof raw.title === 'string' ? raw.title : null };
+    return { type: PL_APPLY, op: 'blackout', title: typeof raw.title === 'string' ? raw.title : null, notice: raw.notice === true };
   }
   return null;
 }

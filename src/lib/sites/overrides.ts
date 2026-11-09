@@ -1,6 +1,9 @@
 /**
  * User overrides, layered over bundled configs per role.
  *
+ * Also the user's per-site switches (`quirks`: no ads, starts by itself; USER_QUIRKS).
+ * Those are plain settings, not selectors: they always apply, whatever a release changes.
+ *
  * Each role override records `baseHash`: the hash of the bundled role it replaced
  * (or NO_BASE if the bundled config had no such role / no such site). An override
  * applies only while the bundled role still hashes to `baseHash`. Once a release
@@ -9,7 +12,7 @@
  * This means nobody has to remember to bump a version number when fixing selectors.
  */
 import { canonicalJson, cyrb53 } from '../hash';
-import { SCHEMA_VERSION, type Matcher, type RoleName, type SiteConfig } from './schema';
+import { SCHEMA_VERSION, USER_QUIRKS, type Matcher, type RoleName, type SiteConfig, type UserQuirk } from './schema';
 import { isHostname, isRecord, isRoleName, validateMatchers } from './validate';
 
 export const NO_BASE = 'none';
@@ -27,7 +30,12 @@ export interface SiteOverride {
   /** Only used for user-defined sites (no bundled config). */
   domains?: string[];
   roles: Partial<Record<RoleName, RoleOverride>>;
+  /** The user's switches; each wins over the bundled config's (false turns one off). */
+  quirks?: Partial<Record<UserQuirk, boolean>>;
 }
+
+/** The site entry has nothing in it any more. */
+const isEmpty = (site: SiteOverride) => Object.keys(site.roles).length === 0 && Object.keys(site.quirks ?? {}).length === 0;
 
 /** Keyed by site id. */
 export type OverrideStore = Record<string, SiteOverride>;
@@ -106,6 +114,9 @@ export function resolveSite(
       stale.push({ siteId, role, savedAt: ov.savedAt });
     }
   }
+  if (override?.quirks && Object.keys(override.quirks).length > 0) {
+    config.quirks = { ...config.quirks, ...override.quirks };
+  }
 
   return { config, sources, stale, userDefined };
 }
@@ -126,7 +137,8 @@ export function pruneStaleOverrides(
       if (isOverrideCurrent(bundled, role, ov)) roles[role] = ov;
       else removed.push({ siteId, role, savedAt: ov.savedAt });
     }
-    if (Object.keys(roles).length > 0) next[siteId] = { ...site, roles };
+    const kept = { ...site, roles };
+    if (!isEmpty(kept)) next[siteId] = kept;
   }
 
   return { store: next, removed };
@@ -184,8 +196,38 @@ export function withoutRoleOverride(store: OverrideStore, siteId: string, role: 
   const roles = { ...existing.roles };
   delete roles[role];
   const next = { ...store };
-  if (Object.keys(roles).length > 0) next[siteId] = { ...existing, roles };
+  const site = { ...existing, roles };
+  if (!isEmpty(site)) next[siteId] = site;
   else delete next[siteId];
+  return next;
+}
+
+/**
+ * Set one of the user's switches (USER_QUIRKS). Pure. Matching the bundled config's
+ * value (unset counts as false) drops it, so only real differences are stored. A site
+ * with no bundled config becomes a user-defined one (`site` names it).
+ */
+export function withQuirk(
+  store: OverrideStore,
+  bundled: SiteConfig | undefined,
+  siteId: string,
+  key: UserQuirk,
+  value: boolean,
+  site: { name?: string; domains?: string[] } = {},
+): OverrideStore {
+  const existing: SiteOverride = store[siteId] ?? { roles: {} };
+  const quirks = { ...existing.quirks };
+  if (value === Boolean(bundled?.quirks?.[key])) delete quirks[key];
+  else quirks[key] = value;
+  const entry: SiteOverride = { ...existing, quirks };
+  if (Object.keys(quirks).length === 0) delete entry.quirks;
+  if (!bundled) {
+    if (entry.name === undefined && site.name !== undefined) entry.name = site.name;
+    if (entry.domains === undefined && site.domains !== undefined) entry.domains = [...site.domains];
+  }
+  const next = { ...store };
+  if (isEmpty(entry)) delete next[siteId];
+  else next[siteId] = entry;
   return next;
 }
 
@@ -233,7 +275,19 @@ export function validateOverrideStore(raw: unknown): { store: OverrideStore; war
       }
       site.roles[role] = { matchers, baseHash: ov.baseHash, savedAt: ov.savedAt };
     }
-    if (Object.keys(site.roles).length > 0) store[siteId] = site;
+    if (entry.quirks !== undefined) {
+      if (isRecord(entry.quirks)) {
+        const quirks: SiteOverride['quirks'] = {};
+        for (const [key, value] of Object.entries(entry.quirks)) {
+          if ((USER_QUIRKS as readonly string[]).includes(key) && typeof value === 'boolean') quirks[key as UserQuirk] = value;
+          else warnings.push(`overrides.${siteId}.quirks.${key}: dropped`);
+        }
+        if (Object.keys(quirks).length > 0) site.quirks = quirks;
+      } else {
+        warnings.push(`overrides.${siteId}.quirks: invalid, dropped`);
+      }
+    }
+    if (!isEmpty(site)) store[siteId] = site;
   }
   return { store, warnings };
 }

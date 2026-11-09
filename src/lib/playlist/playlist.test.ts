@@ -128,7 +128,9 @@ describe('playlist messages', () => {
       type: PL_APPLY,
       op: 'blackout',
       title: 'T',
+      notice: false,
     });
+    expect(parsePlaylistApply({ type: PL_APPLY, op: 'blackout', title: 'Unavailable: T', notice: true })).toMatchObject({ notice: true });
     expect(parsePlaylistApply({ type: PL_APPLY, op: 'blocked' })).toEqual({ type: PL_APPLY, op: 'blocked' });
     expect(parsePlaylistApply({ type: PL_APPLY, op: 'release' })).toEqual({ type: PL_APPLY, op: 'release' });
     expect(parsePlaylistApply({ type: PL_APPLY, op: 'nope' })).toBeNull();

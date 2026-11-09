@@ -1,7 +1,8 @@
 /**
  * Overlay page: an extension page framed into sites by the content script (see
  * lib/overlay/host.ts). Plays the ad slideshow / quotes, pictures over a paused show or
- * as the show itself, shows a blackout title, reads a page's article out at a reading
+ * as the show itself, shows the ad pictures while a playlist entry loads (or a notice's
+ * title on black), reads a page's article out at a reading
  * pace (reader.ts), or is a transparent click shield. Runs in the extension origin, so it
  * reads the image library from IndexedDB.
  */
@@ -269,14 +270,25 @@ function pulse(target: HTMLElement): void {
 }
 
 function showBlackout(cmd: Extract<OverlayCommand, { type: 'blackout' }>): void {
-  const { title, prompt: offerStart } = cmd;
-  // Same title, prompt just appearing: keep the title on screen instead of re-fading it.
-  const same = title === lastBlackoutTitle && front.classList.contains('visible');
-  if (!same) {
-    reset();
-    if (title) present(Object.assign(document.createElement('p'), { className: 'title', textContent: title }));
+  const { title, pictures, prompt: offerStart } = cmd;
+  if (pictures) {
+    // Loading: the ad pictures, kept going while the prompt and status change.
+    const key = JSON.stringify(['blackout', pictures.host, pictures.items]);
+    if (programKey !== key) {
+      reset();
+      programKey = key;
+      void playProgram(pictures.host, pictures.items);
+    }
+    lastBlackoutTitle = null;
+  } else {
+    // A notice. Same title, prompt just appearing: keep it on screen instead of re-fading it.
+    const same = programKey === null && title === lastBlackoutTitle && front.classList.contains('visible');
+    if (!same) {
+      reset();
+      if (title) present(Object.assign(document.createElement('p'), { className: 'title', textContent: title }));
+    }
+    lastBlackoutTitle = title;
   }
-  lastBlackoutTitle = title;
   prompt.hidden = !offerStart && !cmd.status;
   promptButtons.hidden = !offerStart;
   promptNext.hidden = !cmd.canNext;

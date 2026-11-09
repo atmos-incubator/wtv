@@ -13,6 +13,9 @@
  * player is lifted into the slot this page leaves empty beside the post (embed-layout.ts).
  * No pictures then (the player is the picture), and it shows for at least a minute.
  *
+ * While the post loads, one of the ad pictures shows (the entry's `[ads]`, else the
+ * library's), like the blackout on other entries.
+ *
  * Click or Space pauses (⏸); the playlist's Next / Previous work as anywhere. A post the
  * site says is gone is reported (the runner shows "Unavailable" and moves on); any other
  * failure is shown for a moment, then the playlist moves on.
@@ -20,6 +23,10 @@
 import './style.css';
 import { browser } from 'wxt/browser';
 import { cardDurationS, type Post } from '../../lib/posts/adapters';
+import { getImageBlob } from '../../lib/images/db';
+import { createImageResolver } from '../../lib/images/resolver';
+import { fitMode } from '../../lib/overlay/fit';
+import { DEFAULT_AD_ITEMS, buildSlides, type ProgramItem } from '../../lib/overlay/program';
 import { planCard } from '../../lib/posts/card-layout';
 import { embedCardDurationS, embedLayout, type Box } from '../../lib/posts/embed-layout';
 import {
@@ -88,6 +95,50 @@ function report(event: MediaEvent): void {
 function say(text: string): void {
   statusLine.textContent = text;
   statusLine.hidden = !text;
+  if (text) hidePoster();
+}
+
+// --- the loading picture -------------------------------------------------------------
+
+const poster = $('poster');
+let posterDone = false;
+let posterUrl: string | null = null;
+
+/** One ad picture over the whole page until the post (or why not) is ready. */
+async function showPoster(items: readonly ProgramItem[]): Promise<void> {
+  try {
+    const resolve = await createImageResolver('');
+    const slide = buildSlides(items, resolve).find((s) => s.kind === 'img') ?? buildSlides(DEFAULT_AD_ITEMS, resolve)[0];
+    if (!slide || slide.kind !== 'img' || posterDone) return;
+    let url: string;
+    if (slide.src.type === 'url') {
+      url = slide.src.url;
+    } else {
+      const blob = await getImageBlob(slide.src.id);
+      if (!blob || posterDone) return;
+      url = posterUrl = URL.createObjectURL(blob);
+    }
+    const media = slide.isVideo
+      ? Object.assign(document.createElement('video'), { src: url, muted: true, loop: true, autoplay: true, playsInline: true })
+      : Object.assign(document.createElement('img'), { src: url, alt: '' });
+    const fit = () => {
+      const [w, h] = media instanceof HTMLVideoElement ? [media.videoWidth, media.videoHeight] : [media.naturalWidth, media.naturalHeight];
+      media.style.objectFit = fitMode(w, h, window.innerWidth, window.innerHeight);
+    };
+    media.addEventListener(media instanceof HTMLVideoElement ? 'loadedmetadata' : 'load', fit, { once: true });
+    poster.replaceChildren(media);
+    poster.hidden = false;
+  } catch (err) {
+    console.warn('[wtv] no loading picture:', err);
+  }
+}
+
+function hidePoster(): void {
+  posterDone = true;
+  poster.hidden = true;
+  poster.replaceChildren();
+  if (posterUrl) URL.revokeObjectURL(posterUrl);
+  posterUrl = null;
 }
 
 const elapsed = () => shownMs + (runningSince === null ? 0 : performance.now() - runningSince);
@@ -255,7 +306,7 @@ async function main(): Promise<void> {
     say('Nothing to show: this page shows posts from a Wtv playlist.');
     return;
   }
-  say(entry.title ?? 'Loading the post…');
+  void showPoster(entry.ads ?? DEFAULT_AD_ITEMS);
   const result = parsePostResult(await browser.runtime.sendMessage({ type: PL_POST, gen: entry.gen }).catch(() => null));
   if (!result) {
     say('Couldn’t load the post.');
@@ -270,7 +321,9 @@ async function main(): Promise<void> {
     return;
   }
   // Embedded player: it is the picture.
-  render(result.post, embedded ? [] : await loadPictures(result.post.images));
+  const pics = embedded ? [] : await loadPictures(result.post.images);
+  hidePoster();
+  render(result.post, pics);
   start(entry.endS ?? (embedded ? embedCardDurationS(result.post) : cardDurationS(result.post)));
 }
 

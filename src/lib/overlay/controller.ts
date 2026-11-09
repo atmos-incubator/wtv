@@ -2,8 +2,10 @@
  * Decides what the overlay iframe shows over the primary video. Highest priority first:
  *
  *   1. Selector picker running         → nothing (suspend)
- *   2. Playlist entry loading          → blackout with the title over the whole tab
- *                                        (top frame), then Start / Next if nothing plays
+ *   2. Playlist entry loading          → blackout over the whole tab (top frame): the ad
+ *                                        pictures (the entry's `[ads]`, else the site's
+ *                                        images), or a notice's title ("Unavailable: …");
+ *                                        then Start / Next if nothing plays
  *   2b. Page shown as a page: view=read → the article over the whole tab (top frame);
  *                             view=scroll → nothing (the page is the show)
  *   2c. A post's embedded player lifted (over its card, or filling the tab) → nothing
@@ -255,7 +257,7 @@ export function startOverlay(
     const blackout = next === 'blackout' ? playlist.blackout() : null;
     const page = next === 'read' ? playlist.page() : null;
     const signature = blackout
-      ? JSON.stringify(blackout)
+      ? JSON.stringify([blackout, blackout.notice ? null : playlist.ads()])
       : next === 'show-pictures'
         ? String(showPaused())
         : page
@@ -271,6 +273,10 @@ export function startOverlay(
           {
             type: 'blackout',
             title: blackout?.title ?? null,
+            pictures:
+              blackout && !blackout.notice
+                ? { host: location.hostname, items: [...(playlist.ads() ?? DEFAULT_AD_ITEMS)] }
+                : null,
             prompt: blackout?.prompt ?? false,
             attempt: blackout?.attempt ?? 0,
             status: blackout?.status ?? null,

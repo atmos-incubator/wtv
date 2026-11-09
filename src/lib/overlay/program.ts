@@ -13,13 +13,16 @@ export type OverlayCommand =
   /** Ad running: play `items` in order, looping, until hidden. */
   | { type: 'ad'; host: string; items: ProgramItem[]; muted: boolean }
   /**
-   * Black screen with an optional title (playlist transitions). `prompt`: offer Start /
-   * Next. `attempt` counts automatic start attempts (each new one pulses the Start
-   * button); `status` says how the last one went.
+   * Playlist transitions and loading: the ad pictures (`pictures`: the entry's `[ads]`
+   * program, or the site's images) until the entry is ready; or, for a notice
+   ("Unavailable: …"), black with `title`. `prompt`: offer Start / Next. `attempt`
+   * counts automatic start attempts (each new one pulses the Start button); `status`
+   * says how the last one went.
    */
   | {
       type: 'blackout';
       title: string | null;
+      pictures: { host: string; items: ProgramItem[] } | null;
       prompt: boolean;
       attempt: number;
       status: string | null;
@@ -144,6 +147,10 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
       return {
         type: 'blackout',
         title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim().slice(0, MAX_TEXT) : null,
+        pictures:
+          isObj(raw.pictures) && typeof raw.pictures.host === 'string' && Array.isArray(raw.pictures.items)
+            ? { host: raw.pictures.host, items: parseItems(raw.pictures.items) }
+            : null,
         prompt: raw.prompt === true,
         attempt: Number.isInteger(raw.attempt) && (raw.attempt as number) > 0 ? (raw.attempt as number) : 0,
         status: typeof raw.status === 'string' && raw.status.trim() ? raw.status.trim().slice(0, MAX_TEXT) : null,

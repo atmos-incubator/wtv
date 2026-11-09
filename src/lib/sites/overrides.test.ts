@@ -6,6 +6,7 @@ import {
   roleHash,
   validateOverrideStore,
   withRoleOverride,
+  withQuirk,
   withSelectorsRemoved,
   withoutRoleOverride,
   type OverrideStore,
@@ -185,6 +186,45 @@ describe('withSelectorsRemoved', () => {
   it('is a no-op for selectors that are not there', () => {
     const store = {};
     expect(withSelectorsRemoved(store, two, 'example.com', 'skip', ['.nope'])).toBe(store);
+  });
+});
+
+describe('withQuirk', () => {
+  it('turns a switch on for a built-in site, and off again by dropping it', () => {
+    let store = withQuirk({}, bundled, 'example.com', 'noAds', true);
+    expect(store['example.com']?.quirks).toEqual({ noAds: true });
+    expect(resolveSite('example.com', bundled, store['example.com'])?.config.quirks).toEqual({ noAds: true });
+    store = withQuirk(store, bundled, 'example.com', 'noAds', false);
+    expect(store).toEqual({});
+  });
+
+  it('stores false only to turn off what the built-in config turns on', () => {
+    const withAds = { ...bundled, quirks: { startsItself: true } };
+    const store = withQuirk({}, withAds, 'example.com', 'startsItself', false);
+    expect(store['example.com']?.quirks).toEqual({ startsItself: false });
+    expect(resolveSite('example.com', withAds, store['example.com'])?.config.quirks?.startsItself).toBe(false);
+  });
+
+  it('makes a user-defined site of a site with no config', () => {
+    const store = withQuirk({}, undefined, 'tube.example', 'startsItself', true, { name: 'tube.example', domains: ['tube.example'] });
+    const r = resolveSite('tube.example', undefined, store['tube.example']);
+    expect(r?.userDefined).toBe(true);
+    expect(r?.config.quirks).toEqual({ startsItself: true });
+  });
+
+  it('keeps a site whose only override is a switch, through removal of a role and validation', () => {
+    let store = withRoleOverride({}, bundled, 'example.com', 'skip', fix);
+    store = withQuirk(store, bundled, 'example.com', 'noAds', true);
+    store = withoutRoleOverride(store, 'example.com', 'skip');
+    expect(store['example.com']).toEqual({ roles: {}, quirks: { noAds: true } });
+    expect(validateOverrideStore(store).store).toEqual(store);
+    expect(pruneStaleOverrides(store, [bundledV2]).store).toEqual(store);
+  });
+
+  it('drops unknown switches on validation', () => {
+    const { store, warnings } = validateOverrideStore({ 'example.com': { roles: {}, quirks: { noAds: 'yes', future: true } } });
+    expect(store).toEqual({});
+    expect(warnings.length).toBe(2);
   });
 });
 

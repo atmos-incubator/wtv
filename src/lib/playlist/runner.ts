@@ -212,7 +212,7 @@ async function goTo(tabId: number, state: RunnerState, index: number): Promise<v
   if (entry.view === 'card') next.card = { source: await postSource(entry.url), result: null };
   await put(tabId, next);
   // Go dark on the page we're leaving, so its end screen / autoplay never shows.
-  await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry) });
+  await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: displayTitle(entry), notice: false });
   await browser.tabs.update(tabId, { url: entryPageUrl(entry, next.gen, next.card?.source ?? null) });
 }
 
@@ -412,7 +412,7 @@ async function media(tabId: number, frameId: number, gen: number, event: MediaEv
       const key = libraryKey(entry.url);
       const known = key ? await getRecord(key).catch(() => null) : null;
       const title = entry.title ?? known?.title ?? displayTitle(entry);
-      await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: `Unavailable: ${title}` });
+      await toTop(tabId, { type: PL_APPLY, op: 'blackout', title: `Unavailable: ${title}`, notice: true });
       setTimeout(() => {
         void serial(async () => {
           const now = (await load())[tabId];

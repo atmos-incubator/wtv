@@ -326,6 +326,35 @@ button.remove:hover:not(:disabled) {
   height: calc(3 * 1.45em + 12px);
 }
 
+/* Per-site switches */
+.quirks {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.quirk {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.quirk input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.quirk > span {
+  display: grid;
+}
+
+.quirk-label {
+  font-weight: 600;
+}
+
 /* Role groups */
 .group {
   display: grid;

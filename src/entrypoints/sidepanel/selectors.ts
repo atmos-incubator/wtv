@@ -44,11 +44,12 @@ import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-s
 import {
   resolveSite,
   withRoleOverride,
+  withQuirk,
   withSelectorsRemoved,
   withoutRoleOverride,
   type SiteOverride,
 } from '../../lib/sites/overrides';
-import { CONDITIONS, POST_ROLES, ROLE_DEFAULT_WHEN, type Condition, type Matcher, type RoleName } from '../../lib/sites/schema';
+import { CONDITIONS, POST_ROLES, ROLE_DEFAULT_WHEN, USER_QUIRKS, type UserQuirk, type Condition, type Matcher, type RoleName } from '../../lib/sites/schema';
 import { validateMatchers } from '../../lib/sites/validate';
 
 const app = document.getElementById('selectors') as HTMLElement;
@@ -87,6 +88,8 @@ const state: {
   undo: { siteId: string; before: SiteOverride | undefined; label: string } | null;
   metadata: PageMetadata | null;
   post: PagePostReport | null;
+  /** The site's switches as they apply now (built in + yours). */
+  quirks: Partial<Record<UserQuirk, boolean>>;
 } = {
   tabId: null,
   frameId: 0,
@@ -99,6 +102,7 @@ const state: {
   undo: null,
   metadata: null,
   post: null,
+  quirks: {},
 };
 
 // --- DOM helpers ---------------------------------------------------------------------
@@ -154,6 +158,9 @@ async function refresh(): Promise<void> {
   try {
     state.report = await toFrame<RolesReport>({ type: PICK_ROLES });
     state.error = null;
+    const { siteId, bundled } = siteIdentity(state.report);
+    const store = await loadOverrideStore(local);
+    state.quirks = resolveSite(siteId, bundled, store[siteId])?.config.quirks ?? {};
   } catch {
     state.report = null;
     state.error = 'Wtv isn’t running on this page. Enable it from the toolbar popup, or reload the page.';
@@ -249,6 +256,53 @@ async function save(): Promise<void> {
   state.message = `Saved ${ROLE_LABELS[ed.role].toLowerCase()} selector for ${siteId}.`;
   // Let the content script pick up the storage change before re-reading.
   setTimeout(() => void refresh(), 400);
+}
+
+const QUIRK_TEXT: Record<UserQuirk, { label: string; hint: string }> = {
+  noAds: {
+    label: 'No ads on this site',
+    hint: 'Ad detection stays off here, even with ad selectors: no muting, skipping or ad pictures.',
+  },
+  startsItself: {
+    label: 'Videos start by themselves',
+    hint: 'In a playlist, Wtv waits for the video to start instead of pressing play. Start / Next still show if nothing plays.',
+  },
+};
+
+async function setQuirk(key: UserQuirk, value: boolean): Promise<void> {
+  if (!state.report) return;
+  const { siteId, bundled } = siteIdentity(state.report);
+  const store = await loadOverrideStore(local);
+  await saveOverrideStore(
+    local,
+    withQuirk(store, bundled, siteId, key, value, {
+      name: store[siteId]?.name ?? state.report.siteName ?? siteId,
+      domains: store[siteId]?.domains ?? [siteId],
+    }),
+  );
+  state.quirks = { ...state.quirks, [key]: value };
+  state.message = `${QUIRK_TEXT[key].label}: ${value ? 'on' : 'off'} for ${siteId}.`;
+  render();
+}
+
+function quirksView(): HTMLElement {
+  return el(
+    'section',
+    { className: 'quirks' },
+    ...USER_QUIRKS.map((key) => {
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = Boolean(state.quirks[key]);
+      box.dataset.key = `quirk-${key}`;
+      box.addEventListener('change', () => void setQuirk(key, box.checked));
+      return el(
+        'label',
+        { className: 'quirk' },
+        box,
+        el('span', {}, el('span', { className: 'quirk-label', text: QUIRK_TEXT[key].label }), el('span', { className: 'note', text: QUIRK_TEXT[key].hint })),
+      );
+    }),
+  );
 }
 
 async function resetRole(role: RoleName): Promise<void> {
@@ -927,6 +981,7 @@ function draw(): void {
       : state.message
         ? el('p', { className: 'warn', text: state.message })
         : null,
+    quirksView(),
     previewBox,
     ...ROLE_GROUPS.map((g) => groupView(g, report.roles)),
     el(
