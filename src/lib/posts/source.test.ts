@@ -38,6 +38,7 @@ describe('where a card comes from', () => {
   it('needs the text or the title', () => {
     expect(hasPostSelectors({ postText: [{ selector: 'p' }] })).toBe(true);
     expect(hasPostSelectors({ postTitle: [{ selector: 'h1' }] })).toBe(true);
+    expect(hasPostSelectors({ postImage: [{ selector: 'img' }] })).toBe(true);
     expect(hasPostSelectors({ postAuthor: [{ selector: 'a' }], postText: [] })).toBe(false);
   });
 });

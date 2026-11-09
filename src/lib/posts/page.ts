@@ -7,7 +7,7 @@
  * The `postEmbed` role is different: it's the element itself (findPostEmbed), lifted in
  * place over the card (posts/embed.ts), never copied out.
  */
-import { deepQueryAll, matchRole } from '../dom/query';
+import { deepQueryAll, isShown, matchRoleShownFirst } from '../dom/query';
 import type { ResolvedSite } from '../sites/overrides';
 import type { Matcher, PostRoleName } from '../sites/schema';
 import { MAX_IMAGES, formatDate, type Post } from './adapters';
@@ -134,20 +134,21 @@ export function findPostEmbed(site: ResolvedSite): HTMLElement | null {
   const matchers = site.config.roles.postEmbed;
   if (!matchers?.length) return null;
   const roles = site.config.roles;
-  const box = roles.post?.length ? (matchRole('post', roles.post).match?.element ?? null) : null;
-  const el = (box ? matchRole('postEmbed', matchers, box).match?.element : null) ?? matchRole('postEmbed', matchers).match?.element;
+  const box = roles.post?.length ? matchRoleShownFirst('post', roles.post) : null;
+  const el = (box ? matchRoleShownFirst('postEmbed', matchers, box) : null) ?? matchRoleShownFirst('postEmbed', matchers);
   return el ? embedTarget(el) : null;
 }
 
 export function readPagePost(site: ResolvedSite, pageUrl: string = location.href): { post: Post | null; fields: PostField[] } {
   const roles = site.config.roles;
-  const box = roles.post?.length ? matchRole('post', roles.post).match?.element ?? null : null;
+  // On screen first: an app keeps the posts you navigated away from in the page, hidden.
+  const box = roles.post?.length ? matchRoleShownFirst('post', roles.post) : null;
 
   /** In the post's box first, then anywhere (a forum's thread title sits outside it). */
   const find = (role: PostRoleName): Element | null => {
     const matchers = roles[role];
     if (!matchers?.length) return null;
-    return (box ? matchRole(role, matchers, box).match?.element : null) ?? matchRole(role, matchers).match?.element ?? null;
+    return (box ? matchRoleShownFirst(role, matchers, box) : null) ?? matchRoleShownFirst(role, matchers);
   };
 
   const titleEl = find('postTitle');
@@ -160,6 +161,7 @@ export function readPagePost(site: ResolvedSite, pageUrl: string = location.href
   const time = timeEl ? timeOf(timeEl) : null;
   const images = postPictures(roles.postImage ?? [], box);
   const embedEl = find('postEmbed');
+  const embed = embedEl ? describeEmbed(embedEl) || null : null;
 
   const fields: PostField[] = [
     { role: 'post', value: box ? oneLine(textOf(box)).slice(0, 120) || '(no text)' : null },
@@ -168,9 +170,10 @@ export function readPagePost(site: ResolvedSite, pageUrl: string = location.href
     { role: 'postText', value: text || null },
     { role: 'postTime', value: time },
     { role: 'postImage', value: images.length ? images.join('\n') : null },
-    { role: 'postEmbed', value: embedEl ? describeEmbed(embedEl) || null : null },
+    { role: 'postEmbed', value: embed },
   ];
-  if (!title && !text) return { post: null, fields };
+  // A picture or a player is a post too (no caption: the card is all picture).
+  if (!title && !text && images.length === 0 && !embed) return { post: null, fields };
   return {
     post: {
       site: site.config.name,
@@ -186,12 +189,20 @@ export function readPagePost(site: ResolvedSite, pageUrl: string = location.href
   };
 }
 
-/** The first matcher that finds pictures (in the post's box when there is one). */
+/**
+ * The first matcher that finds pictures: in the post's box first, then anywhere, like the
+ * other roles (the box picked may be just the text's: Bluesky's pictures sit beside it).
+ */
 function postPictures(matchers: readonly Matcher[], box: Element | null): string[] {
-  for (const m of matchers) {
-    const { elements } = deepQueryAll(m.selector, box ?? document);
-    const urls = [...new Set(elements.flatMap(pictureUrls).map(httpsUrl).filter((u): u is string => u !== null))];
-    if (urls.length) return urls.slice(0, MAX_IMAGES);
+  for (const root of box ? [box, document] : [document]) {
+    for (const m of matchers) {
+      const found = deepQueryAll(m.selector, root).elements;
+      // The ones on screen, if any: not an earlier post the app keeps hidden.
+      const shown = found.filter(isShown);
+      const elements = shown.length ? shown : found;
+      const urls = [...new Set(elements.flatMap(pictureUrls).map(httpsUrl).filter((u): u is string => u !== null))];
+      if (urls.length) return urls.slice(0, MAX_IMAGES);
+    }
   }
   return [];
 }

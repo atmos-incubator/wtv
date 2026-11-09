@@ -34,9 +34,12 @@ export const ROLE_NAMES = [
 export const POST_ROLES = ['post', 'postTitle', 'postAuthor', 'postText', 'postTime', 'postImage', 'postEmbed'] as const;
 export type PostRoleName = (typeof POST_ROLES)[number];
 
-/** A site whose post can be read from the page: it has a selector for the text or the title. */
+/** Roles that can make a post on their own (a post of only a picture is one). */
+const POST_CONTENT_ROLES = ['postText', 'postTitle', 'postImage', 'postEmbed'] as const;
+
+/** A site whose post can be read from the page: a selector for its text, title, pictures or player. */
 export function hasPostSelectors(roles: Roles): boolean {
-  return (roles.postText?.length ?? 0) > 0 || (roles.postTitle?.length ?? 0) > 0;
+  return POST_CONTENT_ROLES.some((r) => (roles[r]?.length ?? 0) > 0);
 }
 
 export type RoleName = (typeof ROLE_NAMES)[number];

@@ -65,7 +65,7 @@ export function showCardPreview(site: ResolvedSite | null): string | null {
   closeCardPreview();
   if (!site) return 'No site config for this page yet: pick some post selectors first.';
   const { post } = readPagePost(site);
-  if (!post) return 'No post found with these selectors. Pick at least the post text or title, on a post’s own page.';
+  if (!post) return 'No post found with these selectors. Pick at least the post’s text, title or pictures, on a post’s own page.';
 
   const token = crypto.randomUUID();
   const hasEmbed = findPostEmbed(site) !== null;

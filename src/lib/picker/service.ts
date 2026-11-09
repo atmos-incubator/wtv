@@ -4,7 +4,7 @@
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
-import { deepQueryAll, isElementVisible } from '../dom/query';
+import { deepQueryAll, isElementVisible, isShown } from '../dom/query';
 import { META_ROLES } from '../metadata/extract';
 import { pageMetadata, readRoleValue } from '../metadata/page';
 import type { MediaAgent } from '../media/agent';
@@ -115,7 +115,8 @@ export function startPickerService(ctx: ContentScriptContext, agent: MediaAgent,
         const { elements, ...rest } = evaluate(msg.selector, when);
         flashMatches(elements);
         const result: TestResult = rest;
-        const hit = when === 'visible' ? elements.find(isElementVisible) : elements[0];
+        // What a post would read: the one on screen (apps keep earlier screens, hidden).
+        const hit = when === 'visible' ? elements.find(isElementVisible) : (elements.find(isShown) ?? elements[0]);
         if ((META_ROLES as readonly string[]).includes(msg.role)) {
           result.value = hit ? readRoleValue(hit) : null;
         } else if ((POST_ROLES as readonly string[]).includes(msg.role)) {

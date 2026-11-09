@@ -60,6 +60,28 @@ export function matchRole(role: RoleName, matchers: readonly Matcher[], root: Pa
   return { match: null, errors };
 }
 
+/**
+ * Rendered: not inside something `display: none` or `visibility: hidden`. Size doesn't
+ * count (a picture that hasn't loaded yet is still the one on screen).
+ */
+export const isShown = (el: Element) => el.checkVisibility({ visibilityProperty: true });
+
+/**
+ * Like matchRole, but an element on screen wins over one the page keeps hidden, for
+ * roles whose condition is `exists`. Single-page apps (Bluesky, Reddit) keep the screens
+ * you navigated away from in the DOM, hidden, ahead of the current one: the first match
+ * would be the post you were on before. Nothing shown: matchRole's answer (a <meta>).
+ */
+export function matchRoleShownFirst(role: RoleName, matchers: readonly Matcher[], root: ParentNode = document): Element | null {
+  for (const m of matchers) {
+    const { elements, error } = deepQueryAll(m.selector, root);
+    if (error) continue;
+    const hit = effectiveWhen(role, m) === 'visible' ? elements.find(isElementVisible) : elements.find(isShown);
+    if (hit) return hit;
+  }
+  return matchRole(role, matchers, root).match?.element ?? null;
+}
+
 /** The media element for a matched element: itself, or the first media inside it. */
 export function mediaWithin(el: Element): HTMLMediaElement | null {
   if (el instanceof HTMLMediaElement) return el;

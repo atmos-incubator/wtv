@@ -850,7 +850,7 @@ function renderCardPreview(): void {
     cardPreview.replaceChildren(
       el('p', {
         className: 'note',
-        text: 'Card preview: no post yet. Pick at least the post text or title, on a post’s own page.',
+        text: 'Card preview: no post yet. Pick at least the post’s text, title or pictures, on a post’s own page.',
       }),
     );
     return;

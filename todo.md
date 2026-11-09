@@ -16,3 +16,5 @@ build; selectors live in source; no new install-time permission warnings.
 13. The iframe embedded videos need to intercept clicks in the playlist mode too - trying to pause causes that popup to open still in the playback mode.
 
 15. Preview mode shouldn't trigger the timer to skip to the next item.
+
+16. The next / prev buttons don't appear over the bluesky content in playlist mode - and the pause button doesn't either (but I can pause it.)
