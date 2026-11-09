@@ -2,7 +2,8 @@
  * Card page: where a playlist entry with `view=card` plays. The runner navigates the
  * playlist's tab here (`card.html?gen=N`) instead of to the post's site. Shows the post
  * on a full-screen title card (author, title, text, pictures, time) for `dur=`, or a time
- * from its length.
+ * from its length. Pictures are loaded first, for their shapes: tall ones usually go down
+ * the side, wide ones under the text (layOutPictures, posts/card-layout.ts).
  *
  * The post comes from the background (PL_POST, through the site's adapter in posts/),
  * never from the site's embed script, and only as text and picture URLs: nothing here is
@@ -19,6 +20,7 @@
 import './style.css';
 import { browser } from 'wxt/browser';
 import { cardDurationS, type Post } from '../../lib/posts/adapters';
+import { planCard } from '../../lib/posts/card-layout';
 import { embedCardDurationS, embedLayout, type Box } from '../../lib/posts/embed-layout';
 import {
   PL_HELLO,
@@ -32,6 +34,8 @@ import {
 
 /** A failure stays on screen this long before the next entry. */
 const ERROR_DWELL_MS = 8000;
+/** Wait this long at most for the pictures' shapes before showing the card. */
+const PICTURE_WAIT_MS = 3000;
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const statusLine = $('status');
@@ -55,6 +59,10 @@ function layOut(): void {
   put($('slot'), slot);
   put(card, text);
 }
+
+window.addEventListener('resize', () => {
+  if (pictures.length) layOutPictures();
+});
 
 if (embedded) {
   document.documentElement.classList.add('embedded');
@@ -123,31 +131,94 @@ function lengthClass(text: string, crowded: number): string {
   return SIZES[Math.min(SIZES.length - 1, step + crowded)]!;
 }
 
-function renderPictures(urls: readonly string[]): void {
+interface Picture {
+  src: string;
+  /** Width ÷ height; null until it has loaded. */
+  aspect: number | null;
+}
+
+let pictures: Picture[] = [];
+
+/** Load the pictures to learn their shapes, for at most PICTURE_WAIT_MS. Broken ones are dropped. */
+async function loadPictures(urls: readonly string[]): Promise<Picture[]> {
+  const broken = new Set<Picture>();
+  const all = urls.map((src) => {
+    const pic: Picture = { src, aspect: null };
+    const img = new Image();
+    img.referrerPolicy = 'no-referrer';
+    const done = new Promise<void>((resolve) => {
+      img.onload = () => {
+        pic.aspect = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
+        resolve();
+        // Arrived after the card was laid out: again, with its real shape.
+        if (pictures.includes(pic)) layOutPictures();
+      };
+      img.onerror = () => {
+        broken.add(pic);
+        resolve();
+        if (pictures.includes(pic)) {
+          pictures = pictures.filter((p) => p !== pic);
+          layOutPictures();
+        }
+      };
+    });
+    img.src = src;
+    return { pic, done };
+  });
+  await Promise.race([Promise.all(all.map((a) => a.done)), new Promise((r) => setTimeout(r, PICTURE_WAIT_MS))]);
+  // Still loading: kept, as a square until it arrives.
+  return all.map((a) => a.pic).filter((p) => !broken.has(p));
+}
+
+/**
+ * Pick the layout for the pictures' shapes and the card's size (card-layout.ts): `stack`
+ * (text above, pictures below) or `side` (pictures down the left, text beside them), and
+ * rows of pictures that fill their area. Again on resize, and as late pictures load.
+ */
+function layOutPictures(): void {
   const box = $('pics');
-  box.replaceChildren(
-    ...urls.map((src) => {
+  card.classList.remove('stack', 'side');
+  card.classList.toggle('with-pics', pictures.length > 0);
+  if (pictures.length === 0) {
+    box.replaceChildren();
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const style = getComputedStyle(card);
+  const pad = (a: string, b: string) => parseFloat(style.getPropertyValue(a)) + parseFloat(style.getPropertyValue(b));
+  const aspects = pictures.map((p) => p.aspect ?? 1);
+  const hasText = Boolean($('title').textContent || $('text').textContent);
+  const plan = planCard(
+    { width: card.clientWidth - pad('padding-left', 'padding-right'), height: card.clientHeight - pad('padding-top', 'padding-bottom') },
+    aspects,
+    hasText,
+  );
+  if (!plan) return;
+  card.classList.add(plan.layout);
+  const block = document.createElement('div');
+  block.className = 'pics-block';
+  block.style.setProperty('--ratio', String(plan.ratio));
+  for (const row of plan.rows) {
+    const line = document.createElement('div');
+    line.className = 'pics-row';
+    // Rows share the block's width; each is as tall as its pictures' shapes allow.
+    line.style.flexGrow = String(1 / row.reduce((sum, i) => sum + aspects[i]!, 0));
+    for (const i of row) {
       const img = document.createElement('img');
       img.alt = '';
       img.referrerPolicy = 'no-referrer';
       img.decoding = 'async';
-      img.src = src;
-      img.addEventListener(
-        'error',
-        () => {
-          img.remove();
-          box.hidden = box.childElementCount === 0;
-        },
-        { once: true },
-      );
-      return img;
-    }),
-  );
-  box.dataset.count = String(urls.length);
-  box.hidden = urls.length === 0;
+      img.src = pictures[i]!.src;
+      img.style.flexGrow = String(aspects[i]);
+      line.append(img);
+    }
+    block.append(line);
+  }
+  box.replaceChildren(block);
 }
 
-function render(post: Post): void {
+function render(post: Post, pics: Picture[]): void {
   $('author').textContent = post.author;
   $('handle').textContent = post.handle ?? '';
   const title = $('title');
@@ -156,14 +227,15 @@ function render(post: Post): void {
   const text = $('text');
   text.textContent = post.text;
   text.hidden = !post.text;
-  const images = embedded ? [] : post.images;
-  text.className = `text ${lengthClass(post.text, (post.title ? 1 : 0) + (images.length || embedded ? 1 : 0))}`;
-  renderPictures(images);
+  text.className = `text ${lengthClass(post.text, (post.title ? 1 : 0) + (pics.length || embedded ? 1 : 0))}`;
   $('site').textContent = post.site;
   $('time').textContent = post.time ?? '';
   document.title = post.author ? `${post.author} · Wtv` : 'Wtv';
   say('');
   card.hidden = false;
+  // Measured now that it's on the page; before the next paint, so no jump.
+  pictures = pics;
+  layOutPictures();
 }
 
 function start(durS: number): void {
@@ -197,7 +269,8 @@ async function main(): Promise<void> {
     else setTimeout(() => report('ended'), ERROR_DWELL_MS);
     return;
   }
-  render(result.post);
+  // Embedded player: it is the picture.
+  render(result.post, embedded ? [] : await loadPictures(result.post.images));
   start(entry.endS ?? (embedded ? embedCardDurationS(result.post) : cardDurationS(result.post)));
 }
 

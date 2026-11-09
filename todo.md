@@ -25,3 +25,7 @@ build; selectors live in source; no new install-time permission warnings.
 7. And use the snapshot for youtube to handle unavailable videos
 
 8. Instead of the domain name text on the interstitial card, let's just show an ad image until the post / video / page is ready for display.
+
+9. Cards can overflow the screen and they don't scroll to see the rest of the post.
+
+10. The popup menu that shows the playlist / current playing items will change width if the item has a long url rendered in the display.  That should just ellipsis, and the content should be a consistent width - with a decent width to show long-ish titles.

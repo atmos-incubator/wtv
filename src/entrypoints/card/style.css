@@ -109,6 +109,149 @@ body {
   font-size: 1.35em;
 }
 
+/* Pictures (main.ts, card-layout.ts). The card fills the screen and the pictures get an
+   area of it: below the text (stack) or down the left beside it (side). In that area a
+   block of rows, shaped like its pictures (--ratio, width ÷ height), as big as fits;
+   rows share its width, pictures in a row share the row's height, sized by their shape
+   (flex-grow set per element), so nothing is letterboxed. */
+.card.with-pics {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.card.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.card.stack > * {
+  flex: none;
+}
+
+/* Long text gives way, down to what the pictures need. */
+.card.stack > .text {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.card.stack > .pics {
+  flex: 1 1 0;
+  min-height: 40%;
+}
+
+.card.side {
+  grid-template-columns: minmax(0, 55fr) minmax(0, 45fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'pics header'
+    'pics title'
+    'pics text'
+    'pics footer';
+  column-gap: 1.6em;
+  /* A hidden title leaves an empty row: spacing by margins, so it adds none. */
+  row-gap: 0;
+}
+
+.card.side > header {
+  grid-area: header;
+  margin-bottom: 1em;
+}
+
+.card.side > .title {
+  grid-area: title;
+  margin-bottom: 0.6em;
+}
+
+.card.side > .text {
+  grid-area: text;
+  min-height: 0;
+  align-self: start;
+  max-height: 100%;
+}
+
+.card.side > .pics {
+  grid-area: pics;
+}
+
+.card.side > footer {
+  grid-area: footer;
+  margin-top: 1em;
+}
+
+.pics {
+  container-type: size;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  min-width: 0;
+}
+
+.pics-block {
+  --gap: 0.4em;
+  width: min(100cqw, 100cqh * var(--ratio));
+  height: min(100cqh, 100cqw / var(--ratio));
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.pics-row {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  gap: var(--gap);
+}
+
+/* The gaps cost a sliver of the shape: cover crops that, rather than letterboxing. */
+.pics-row img {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0.5em;
+}
+
+.card footer {
+  color: var(--muted);
+}
+
+.title {
+  margin: 0;
+  font-size: 2em;
+  line-height: 1.2;
+  font-weight: 750;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.text {
+  margin: 0;
+  font-weight: 550;
+  line-height: 1.35;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  overflow: hidden;
+}
+
+.text.short {
+  font-size: 3em;
+  line-height: 1.2;
+}
+
+.text.medium {
+  font-size: 2.2em;
+}
+
+.text.long {
+  font-size: 1.7em;
+}
+
+.text.longer {
+  font-size: 1.35em;
+}
+
 .pics {
   display: grid;
   grid-auto-flow: column;
