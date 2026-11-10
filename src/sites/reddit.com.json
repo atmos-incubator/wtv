@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "reddit.com",
+  "name": "reddit.com",
+  "domains": [
+    "reddit.com"
+  ],
+  "access": "optional",
+  "roles": {
+    "video": [
+      "shreddit-player[data-post-click-location=\"video-player\"] >>> video:nth-of-type(1)",
+      "div[slot=post-media-container] div.h-full"
+    ],
+    "player": [
+      "div[slot=post-media-container] div.h-full"
+    ],
+    "post": [
+      "shreddit-post.block"
+    ],
+    "postTitle": [
+      "h1.text-neutral-content-strong"
+    ],
+    "postAuthor": [
+      "a.author-name.whitespace-nowrap.inline-flex.items-center.text-neutral-content.visited\\:text-neutral-content-weak span.truncate"
+    ],
+    "postText": [
+      "div[property=\"schema:articleBody\"]"
+    ],
+    "postTime": [
+      "faceplate-timeago.flex.items-center.whitespace-nowrap.text-neutral-content-weak.font-normal.text-12 time"
+    ],
+    "postImage": [
+      "shreddit-embed"
+    ],
+    "postEmbed": [
+      "shreddit-player[data-post-click-location=\"video-player\"] >>> video:nth-of-type(1)",
+      "div.absolute.inset-0.h-full.w-full shreddit-embed"
+    ]
+  },
+  "quirks": {
+    "noAds": true,
+    "startsItself": true
+  }
+}
