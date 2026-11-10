@@ -42,6 +42,8 @@ export const KEYS = {
   runner: 'wtv.runner',
   /** Record<tabId, TvState> (session): tabs in TV mode (fullscreen window + maximized video). */
   tvMode: 'wtv.tvMode',
+  /** Record<tabId, true> (session): tabs the user maximized; a playlist's next entries maximize too. */
+  maximizeKept: 'wtv.maximizeKept',
 } as const;
 
 export async function readKey<T>(area: KVArea, key: string, fallback: T): Promise<T> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeDuration, parseBridgeCommand, parseBridgeMessage, type BridgedMediaState } from './protocol';
+import { encodeDuration, parseBridgeCommand, parseBridgeMessage, skipTarget, type BridgedMediaState } from './protocol';
 
 const state: BridgedMediaState = {
   id: 1,
@@ -48,11 +48,14 @@ describe('parseBridgeCommand', () => {
     expect(parseBridgeCommand('{"id":1,"cmd":"pause"}')).toEqual({ id: 1, cmd: 'pause' });
     expect(parseBridgeCommand('{"id":1,"cmd":"seek","time":97}')).toEqual({ id: 1, cmd: 'seek', time: 97 });
     expect(parseBridgeCommand('{"id":1,"cmd":"mute","muted":true}')).toEqual({ id: 1, cmd: 'mute', muted: true });
+    expect(parseBridgeCommand('{"id":1,"cmd":"skip","by":-10}')).toEqual({ id: 1, cmd: 'skip', by: -10 });
   });
 
   it('rejects malformed commands', () => {
     expect(parseBridgeCommand('{"id":1,"cmd":"seek","time":-5}')).toBeNull();
     expect(parseBridgeCommand('{"id":1,"cmd":"mute"}')).toBeNull();
+    expect(parseBridgeCommand('{"id":1,"cmd":"skip","by":0}')).toBeNull();
+    expect(parseBridgeCommand('{"id":1,"cmd":"skip"}')).toBeNull();
     expect(parseBridgeCommand('{"id":1,"cmd":"eval"}')).toBeNull();
     expect(parseBridgeCommand('{"cmd":"play"}')).toBeNull();
   });
@@ -63,5 +66,22 @@ describe('encodeDuration', () => {
     expect(encodeDuration(Infinity)).toEqual({ duration: null, live: true });
     expect(encodeDuration(NaN)).toEqual({ duration: null, live: false });
     expect(encodeDuration(42)).toEqual({ duration: 42, live: false });
+  });
+});
+
+describe('skipTarget', () => {
+  it('skips within the media', () => {
+    expect(skipTarget(50, 10, 180, null)).toBe(60);
+    expect(skipTarget(50, -10, 180, null)).toBe(40);
+    expect(skipTarget(4, -10, 180, null)).toBe(0);
+    expect(skipTarget(175, 10, 180, null)).toBe(180);
+  });
+
+  it('skips within a live stream’s window, or not at all', () => {
+    expect(skipTarget(1000, -10, Infinity, { start: 900, end: 1005 })).toBe(990);
+    expect(skipTarget(905, -10, Infinity, { start: 900, end: 1005 })).toBe(900);
+    expect(skipTarget(1000, 10, Infinity, { start: 900, end: 1005 })).toBe(1005);
+    expect(skipTarget(1000, 10, Infinity, null)).toBeNull();
+    expect(skipTarget(10, 10, NaN, null)).toBeNull();
   });
 });

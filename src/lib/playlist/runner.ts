@@ -18,7 +18,8 @@
  * An entry with an end time (`end=` / `dur=`) reports `ended` when the media reaches it.
  *
  * Gone: a frame that sees the site's `unavailable` role reports `gone`. The entry is
- * marked gone in the media library, the tab shows "Unavailable: <title>" for 3 s, and
+ * marked gone in the media library, the tab shows "Unavailable: <title>" for 3 s (in TV
+ * mode or kept maximized: no notice, the next entry straight away), and
  * the runner moves on.
  *
  * Media library (media-library/): `playing` records the play (status ok, last played);
@@ -53,7 +54,7 @@ import { browser } from 'wxt/browser';
 import { browserAreas } from '../browser-storage';
 import { isWebUrl } from '../permissions';
 import { KEYS } from '../storage';
-import { setTvMode } from '../view/controller';
+import { setTvMode, watchingFullView } from '../view/controller';
 import { compilePlaylist, isPageView, parsePlaylist, type ViewMode } from './format';
 import { withWtvHash } from './hash';
 import { sameEntryUrl } from './match';
@@ -366,6 +367,13 @@ async function pagePost(tabId: number, frameId: number, gen: number, result: Pos
   if (frameId !== 0 || !state || state.gen !== gen || state.phase === 'detached') return;
   if (entryAt(state)?.view !== 'card' || state.card?.source !== 'page' || state.card.result) return;
   if (!result.ok) console.info(`[wtv] couldn't read the post from its page: ${result.error}`);
+  // Gone, watching in TV mode or maximized: no card page to say so, straight on.
+  if (!result.ok && result.gone && (await watchingFullView(tabId).catch(() => false))) {
+    const entry = entryAt(state);
+    if (entry) await updateMedia({ url: entry.url, status: 'gone' });
+    await goTo(tabId, state, state.index + 1);
+    return;
+  }
   if (inPage && result.ok) {
     await put(tabId, { ...state, card: { source: 'page', result, inPage: true } });
     return;
@@ -412,6 +420,12 @@ async function media(tabId: number, frameId: number, gen: number, event: MediaEv
       if (!entry) return;
       console.info(`[wtv] playlist entry ${state.index + 1} is unavailable: ${entry.url}`);
       await updateMedia({ url: entry.url, status: 'gone' });
+      // Watching in TV mode or maximized: no notice, straight on (the loading pictures stay up).
+      if (await watchingFullView(tabId).catch(() => false)) {
+        const now = (await load())[tabId];
+        if (now && now.gen === gen && now.phase !== 'detached') await goTo(tabId, now, now.index + 1);
+        return;
+      }
       const key = libraryKey(entry.url);
       const known = key ? await getRecord(key).catch(() => null) : null;
       const title = entry.title ?? known?.title ?? displayTitle(entry);

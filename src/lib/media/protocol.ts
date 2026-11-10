@@ -48,6 +48,8 @@ export type BridgeCommand =
   | { id: number; cmd: 'play' }
   | { id: number; cmd: 'pause' }
   | { id: number; cmd: 'seek'; time: number }
+  /** Seconds back (−) or forward from where it is now (the page's state can be stale). */
+  | { id: number; cmd: 'skip'; by: number }
   | { id: number; cmd: 'mute'; muted: boolean };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -110,6 +112,8 @@ export function parseBridgeCommand(raw: unknown): BridgeCommand | null {
       return { id: v.id, cmd: v.cmd };
     case 'seek':
       return isNum(v.time) && v.time >= 0 ? { id: v.id, cmd: 'seek', time: v.time } : null;
+    case 'skip':
+      return isNum(v.by) && v.by !== 0 && Math.abs(v.by) <= 3600 ? { id: v.id, cmd: 'skip', by: v.by } : null;
     case 'mute':
       return isBool(v.muted) ? { id: v.id, cmd: 'mute', muted: v.muted } : null;
     default:
@@ -121,4 +125,30 @@ export function parseBridgeCommand(raw: unknown): BridgeCommand | null {
 export function encodeDuration(d: number): { duration: number | null; live: boolean } {
   if (d === Infinity) return { duration: null, live: true };
   return { duration: Number.isFinite(d) ? d : null, live: false };
+}
+
+/**
+ * Where skipping `by` seconds from `current` lands: within the media (finite duration), or
+ * a live stream's seekable window (DVR). Null when there's nothing to skip within. Pure.
+ */
+export function skipTarget(
+  current: number,
+  by: number,
+  duration: number,
+  seekable: { start: number; end: number } | null,
+): number | null {
+  if (!Number.isFinite(current)) return null;
+  const finite = Number.isFinite(duration) && duration > 0;
+  if (!finite && !(seekable && seekable.end > seekable.start)) return null;
+  const lo = !finite && seekable ? seekable.start : 0;
+  const hi = finite ? duration : seekable!.end;
+  return Math.min(hi, Math.max(lo, current + by));
+}
+
+/** Skip a media element `by` seconds (see skipTarget). */
+export function skipElement(el: HTMLMediaElement, by: number): void {
+  const r = el.seekable;
+  const seekable = r.length > 0 ? { start: r.start(0), end: r.end(r.length - 1) } : null;
+  const t = skipTarget(el.currentTime, by, el.duration, seekable);
+  if (t !== null) el.currentTime = t;
 }

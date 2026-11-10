@@ -11,6 +11,12 @@
  * fullscreen *window* (not element fullscreen) needs no user gesture and survives
  * navigation, so each new page in a TV-mode tab just re-maximizes once its video is up
  * (VIEW_READY). Leaving the window fullscreen some other way ends TV mode.
+ *
+ * Maximize kept: the user maximized in a tab (shortcut, popup, double-click), so while a
+ * playlist plays there its next entries maximize too, the same way, until the user
+ * restores (or Esc). A page losing its maximized video doesn't count as restoring.
+ *
+ * Skip back / forward (arrow keys over the video): to the frame play / pause goes to.
  */
 import { browser } from 'wxt/browser';
 import { toggleTabMute } from '../ads/controller';
@@ -40,6 +46,8 @@ interface TvState {
 
 type TvStore = Record<string, TvState>;
 
+/** Arrow keys move this far through the video. */
+export const SKIP_S = 10;
 /** Wait for the new page's frames to settle before re-maximizing in TV mode. */
 const READY_DELAY_MS = 400;
 /** Ignore window bound changes this soon after we went fullscreen (macOS animates it). */
@@ -65,6 +73,32 @@ async function loadTv(): Promise<TvStore> {
 
 async function saveTv(store: TvStore): Promise<void> {
   await browser.storage.session.set({ [KEYS.tvMode]: store });
+}
+
+async function loadKept(): Promise<Record<string, true>> {
+  const raw = (await browser.storage.session.get(KEYS.maximizeKept))[KEYS.maximizeKept];
+  return typeof raw === 'object' && raw !== null ? (raw as Record<string, true>) : {};
+}
+
+async function keepMaximized(tabId: number, on: boolean): Promise<void> {
+  const kept = await loadKept();
+  if (Boolean(kept[tabId]) === on) return;
+  if (on) kept[tabId] = true;
+  else delete kept[tabId];
+  await browser.storage.session.set({ [KEYS.maximizeKept]: kept });
+}
+
+/** A playlist is playing in the tab (the runner's store: it imports us, so not its code). */
+async function playlistIn(tabId: number): Promise<boolean> {
+  const raw = (await browser.storage.session.get(KEYS.runner))[KEYS.runner] as Record<string, { phase?: string }> | undefined;
+  const state = raw?.[tabId];
+  return state !== undefined && state.phase !== 'detached';
+}
+
+/** For the playlist runner: the tab is in TV mode, or kept maximized. */
+export async function watchingFullView(tabId: number): Promise<boolean> {
+  const [tv, kept] = await Promise.all([loadTv(), loadKept()]);
+  return Boolean(tv[tabId] || kept[tabId]);
 }
 
 /** Runs in each frame's isolated world. Must be self-contained (it's serialized). */
@@ -125,16 +159,21 @@ async function restore(tabId: number): Promise<void> {
   await broadcast(tabId, { type: VIEW_APPLY, op: 'restore' });
 }
 
+/** The user's maximize / restore: kept (or not) for a playlist's next entries. */
 async function toggleMaximize(tabId: number): Promise<void> {
   const frames = await queryFrames(tabId);
-  if (frames.some((f) => f.candidate.maximized)) await restore(tabId);
-  else await maximize(tabId, frames);
+  if (frames.some((f) => f.candidate.maximized)) {
+    await keepMaximized(tabId, false);
+    await restore(tabId);
+  } else if (await maximize(tabId, frames)) {
+    await keepMaximized(tabId, true);
+  }
 }
 
-async function playPause(tabId: number): Promise<void> {
+/** To the frame playing (or holding) the show. */
+async function toPlaybackFrame(tabId: number, msg: ViewApply): Promise<void> {
   const frameId = electFrame(await queryFrames(tabId), 'playback');
   if (frameId === null) return;
-  const msg: ViewApply = { type: VIEW_APPLY, op: 'play-pause' };
   await browser.tabs.sendMessage(tabId, msg, { frameId }).catch(() => undefined);
 }
 
@@ -158,6 +197,7 @@ async function exitTv(tabId: number, restoreWindow = true): Promise<void> {
   if (!tv) return;
   delete store[tabId];
   await saveTv(store);
+  await keepMaximized(tabId, false);
   await restore(tabId);
   if (!restoreWindow || tv.previous === 'fullscreen' || tv.previous === 'locked-fullscreen') return;
   const tab = await browser.tabs.get(tabId).catch(() => null);
@@ -178,11 +218,12 @@ async function toggleTv(tabId: number): Promise<void> {
 }
 
 async function viewState(tabId: number): Promise<ViewState> {
-  const [frames, tv] = await Promise.all([queryFrames(tabId), loadTv()]);
+  const [frames, tv, kept] = await Promise.all([queryFrames(tabId), loadTv(), loadKept()]);
   return {
     maximized: frames.some((f) => f.candidate.maximized),
     canMaximize: frames.some((f) => f.candidate.video),
     tv: Boolean(tv[tabId]),
+    maximizeKept: Boolean(kept[tabId]),
   };
 }
 
@@ -193,26 +234,34 @@ async function runOp(tabId: number, op: ViewOp): Promise<void> {
     case 'restore':
       return restore(tabId);
     case 'escape':
+      await keepMaximized(tabId, false);
       if ((await loadTv())[tabId]) return exitTv(tabId);
       return restore(tabId);
     case 'toggle-tv':
       return toggleTv(tabId);
     case 'play-pause':
-      return playPause(tabId);
+      return toPlaybackFrame(tabId, { type: VIEW_APPLY, op: 'play-pause' });
+    case 'skip-back':
+    case 'skip-forward':
+      return toPlaybackFrame(tabId, { type: VIEW_APPLY, op: 'skip', by: op === 'skip-back' ? -SKIP_S : SKIP_S });
     case 'mute':
       return toggleTabMute(tabId);
   }
 }
 
+/** A new page in the tab has its video up: maximize it again in TV mode, or kept maximized in a playlist. */
 function onReady(tabId: number): void {
-  void loadTv().then((tv) => {
-    if (!tv[tabId]) return;
+  void (async () => {
+    const [tv, kept] = await Promise.all([loadTv(), loadKept()]);
+    return Boolean(tv[tabId]) || (Boolean(kept[tabId]) && (await playlistIn(tabId)));
+  })().then((again) => {
+    if (!again) return;
     clearTimeout(readyTimers.get(tabId));
     readyTimers.set(
       tabId,
       setTimeout(() => {
         readyTimers.delete(tabId);
-        void maximize(tabId).catch((err: unknown) => console.warn('[wtv] TV re-maximize failed:', err));
+        void maximize(tabId).catch((err: unknown) => console.warn('[wtv] re-maximize failed:', err));
       }, READY_DELAY_MS),
     );
   });
@@ -292,5 +341,6 @@ export function startViewController(): void {
         await saveTv(store);
       })
       .catch(() => undefined);
+    void keepMaximized(tabId, false).catch(() => undefined);
   });
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { electFrame, type FrameReport } from './elect';
+import { skipKey } from './keys';
 import {
   VIEW_APPLY,
   VIEW_COMMAND,
@@ -70,6 +71,10 @@ describe('view messages', () => {
     expect(parseViewApply({ type: VIEW_APPLY, op: 'maximize', token })).toEqual({ type: VIEW_APPLY, op: 'maximize', token });
     expect(parseViewApply({ type: VIEW_APPLY, op: 'maximize' })).toBeNull();
     expect(parseViewApply({ type: VIEW_APPLY, op: 'restore' })).toEqual({ type: VIEW_APPLY, op: 'restore' });
+    expect(parseViewApply({ type: VIEW_APPLY, op: 'skip', by: -10 })).toEqual({ type: VIEW_APPLY, op: 'skip', by: -10 });
+    expect(parseViewApply({ type: VIEW_APPLY, op: 'skip', by: 0 })).toBeNull();
+    expect(parseViewApply({ type: VIEW_APPLY, op: 'skip', by: 'x' })).toBeNull();
+    expect(parseViewApply({ type: VIEW_APPLY, op: 'skip', by: 1e9 })).toBeNull();
     expect(parseViewApply({ type: VIEW_APPLY, op: 'nope' })).toBeNull();
   });
 
@@ -80,5 +85,22 @@ describe('view messages', () => {
       parseFrameCandidate({ maximized: 'media', video: { area: 10, playing: true }, media: { playing: true } }),
     ).toEqual({ maximized: 'media', video: { area: 10, playing: true }, media: { playing: true } });
     expect(parseFrameCandidate({ maximized: 'yes', video: { area: -1, playing: true } })).toEqual(none);
+  });
+});
+
+describe('skipKey', () => {
+  const key = (k: string, mods: Partial<Record<'ctrlKey' | 'metaKey' | 'altKey', boolean>> = {}) => ({
+    key: k,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    ...mods,
+  });
+  it('reads the arrows, without browser-shortcut modifiers', () => {
+    expect(skipKey(key('ArrowLeft'))).toBe('back');
+    expect(skipKey(key('ArrowRight'))).toBe('forward');
+    expect(skipKey(key('ArrowUp'))).toBeNull();
+    expect(skipKey(key('ArrowLeft', { metaKey: true }))).toBeNull();
+    expect(skipKey(key('ArrowRight', { altKey: true }))).toBeNull();
   });
 });

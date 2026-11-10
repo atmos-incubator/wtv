@@ -8,7 +8,7 @@
  *              EVT_COMMAND.
  */
 import { visibleAreaOf, isElementVisible } from '../dom/query';
-import { EVT_COMMAND, type BridgeCommand, type BridgedMediaState } from './protocol';
+import { EVT_COMMAND, skipElement, type BridgeCommand, type BridgedMediaState } from './protocol';
 import type { CandidateFeatures } from './score';
 
 export type HandleKind = 'direct' | 'bridged';
@@ -30,6 +30,8 @@ export interface MediaHandle {
   play(): Promise<PlayResult>;
   pause(): void;
   seek(seconds: number): void;
+  /** Seconds back (−) or forward from where it is, within the media. */
+  skip(by: number): void;
   setMuted(muted: boolean): void;
 }
 
@@ -92,6 +94,9 @@ class DirectHandle implements MediaHandle {
   seek(seconds: number): void {
     this.element.currentTime = seconds;
   }
+  skip(by: number): void {
+    skipElement(this.element, by);
+  }
   setMuted(muted: boolean): void {
     this.element.muted = muted;
   }
@@ -137,6 +142,9 @@ class BridgedHandle implements MediaHandle {
   }
   seek(seconds: number): void {
     this.send({ id: this.state.id, cmd: 'seek', time: seconds });
+  }
+  skip(by: number): void {
+    this.send({ id: this.state.id, cmd: 'skip', by });
   }
   setMuted(muted: boolean): void {
     this.send({ id: this.state.id, cmd: 'mute', muted });

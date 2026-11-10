@@ -43,7 +43,7 @@ export default defineContentScript({
     const ads = startAdWatcher(ctx, agent, { debug: DEV_TOOLS });
     startHealthMonitor(ctx, agent, ads);
     startContinuePrompt(ctx, agent);
-    const view = startViewService(ctx, agent);
+    const view = startViewService(ctx, agent, ads);
     const playlist = startPlaylistClient(ctx, agent, ads);
     const overlay = startOverlay(ctx, agent, ads, view, playlist);
     startPickerService(ctx, agent, overlay);

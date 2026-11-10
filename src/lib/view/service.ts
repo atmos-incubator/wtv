@@ -10,11 +10,14 @@
  * chain: the video then only fills its iframe.
  *
  * Esc (in any frame that has something maximized) or losing the maximized element
- * restores the whole tab via the background.
+ * restores the whole tab via the background. While something's maximized, ← / → skip
+ * back / forward (ahead of the site's own arrow keys, so it's the same step everywhere).
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
+import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
+import { skipKey } from './keys';
 import { maximizeElement } from './maximize';
 import {
   VIEW_COMMAND,
@@ -41,6 +44,13 @@ export interface ViewService {
   toggleMaximize(): void;
   /** Restore, and leave TV mode. */
   escape(): void;
+  /** Skip the tab's show back or forward (through the background, which picks the frame). */
+  skip(direction: 'back' | 'forward'): void;
+}
+
+function typingIn(target: EventTarget | null): boolean {
+  const el = target instanceof Element ? target : null;
+  return el !== null && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el as HTMLElement).isContentEditable);
 }
 
 interface Maximized {
@@ -68,7 +78,7 @@ function findFrameElement(source: MessageEventSource | null): HTMLIFrameElement 
   return null;
 }
 
-export function startViewService(ctx: ContentScriptContext, agent: MediaAgent): ViewService {
+export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, ads: AdWatcher): ViewService {
   const { signal } = ctx;
   let current: Maximized | null = null;
   /** Primary key we last told the background about (TV mode maximizes on VIEW_READY). */
@@ -184,10 +194,13 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent): 
   window.addEventListener(
     'keydown',
     (e) => {
-      if (!current || e.key !== 'Escape') return;
+      if (!current) return;
+      const skip = skipKey(e);
+      if (e.key !== 'Escape' && (!skip || typingIn(e.composedPath()[0] ?? e.target))) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      service.escape();
+      if (skip) service.skip(skip);
+      else service.escape();
     },
     { capture: true, signal },
   );
@@ -205,6 +218,11 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent): 
         break;
       case 'play-pause':
         togglePlayback(agent);
+        sendResponse(true);
+        break;
+      case 'skip':
+        // Not through an ad: the site would count it skipped, or play it again.
+        if (!ads.status()?.active) agent.primary()?.skip(msg.by);
         sendResponse(true);
         break;
       case 'candidate':
@@ -240,6 +258,7 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent): 
       release();
       command('escape');
     },
+    skip: (direction) => command(direction === 'back' ? 'skip-back' : 'skip-forward'),
   };
   return service;
 }

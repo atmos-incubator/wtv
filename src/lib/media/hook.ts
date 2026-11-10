@@ -22,6 +22,7 @@ import {
   EVT_HELLO,
   EVT_SHADOW,
   encodeDuration,
+  skipElement,
   parseBridgeCommand,
   type BridgeMessage,
   type BridgedMediaState,
@@ -234,6 +235,9 @@ export function installMediaHook(win: Window & typeof globalThis = window): void
         break;
       case 'seek':
         el.currentTime = cmd.time;
+        break;
+      case 'skip':
+        skipElement(el, cmd.by);
         break;
       case 'mute':
         el.muted = cmd.muted;

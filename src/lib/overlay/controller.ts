@@ -47,6 +47,7 @@ import { DEV_TOOLS } from '../env';
 import type { MediaAgent } from '../media/agent';
 import { scheduler } from '../schedule';
 import type { PlaylistClient } from '../playlist/client';
+import { skipKey } from '../view/keys';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
 import { PAUSE_PICTURES_DELAY_MS, pausePicturesDue } from './pause';
@@ -443,9 +444,15 @@ export function startOverlay(
       case 'pointer':
         playlist.pointerMoved();
         break;
-      case 'key':
-        forwardKey(event);
+      case 'key': {
+        // ← / → over the show: skip back / forward (not during an ad, a loading screen
+        // or a page show: those have nothing to skip).
+        const skip = skipKey(event);
+        const skippable = mode === 'shield' || mode === 'shield-full' || mode === 'shield-max' || mode === 'show-pictures' || mode === 'pause-pictures';
+        if (skip && skippable && !adActive()) view.skip(skip);
+        else forwardKey(event);
         break;
+      }
       case 'read-started':
         playlist.pageEvent({ type: 'started', id: event.id, durationS: event.durationS });
         break;

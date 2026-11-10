@@ -9,7 +9,7 @@
  *
  *   background → content (tabs.sendMessage, one frame or all)
  *     VIEW_APPLY    { op: 'maximize', token } → boolean
- *                   { op: 'restore' } | { op: 'play-pause' }
+ *                   { op: 'restore' } | { op: 'play-pause' } | { op: 'skip', by }   (seconds, ±)
  *                   { op: 'candidate' } → FrameCandidate   (fallback when executeScript can't run)
  *
  * The background picks a frame by reading every frame's FrameCandidate (see elect.ts).
@@ -28,7 +28,16 @@ export const VIEW_APPLY = 'wtv/view/apply';
  */
 export const VIEW_GLOBAL = 'wtv.view';
 
-export const VIEW_OPS = ['toggle-maximize', 'restore', 'escape', 'toggle-tv', 'play-pause', 'mute'] as const;
+export const VIEW_OPS = [
+  'toggle-maximize',
+  'restore',
+  'escape',
+  'toggle-tv',
+  'play-pause',
+  'mute',
+  'skip-back',
+  'skip-forward',
+] as const;
 export type ViewOp = (typeof VIEW_OPS)[number];
 
 export type ViewRequest =
@@ -39,6 +48,7 @@ export type ViewRequest =
 
 export type ViewApply =
   | { type: typeof VIEW_APPLY; op: 'maximize'; token: string }
+  | { type: typeof VIEW_APPLY; op: 'skip'; by: number }
   | { type: typeof VIEW_APPLY; op: 'restore' | 'play-pause' | 'candidate' };
 
 export interface ViewState {
@@ -46,6 +56,8 @@ export interface ViewState {
   /** Some frame has a video that could be maximized. */
   canMaximize: boolean;
   tv: boolean;
+  /** The user maximized in this tab: a playlist's next entries maximize too (until restored). */
+  maximizeKept: boolean;
 }
 
 /** What one frame can offer. */
@@ -95,6 +107,10 @@ export function parseViewApply(raw: unknown): ViewApply | null {
   switch (raw.op) {
     case 'maximize':
       return isViewToken(raw.token) ? { type: VIEW_APPLY, op: 'maximize', token: raw.token } : null;
+    case 'skip':
+      return typeof raw.by === 'number' && Number.isFinite(raw.by) && raw.by !== 0 && Math.abs(raw.by) <= 3600
+        ? { type: VIEW_APPLY, op: 'skip', by: raw.by }
+        : null;
     case 'restore':
     case 'play-pause':
     case 'candidate':

@@ -32,6 +32,7 @@ import { DEFAULT_AD_ITEMS, buildSlides, type ProgramItem } from '../../lib/overl
 import { planCard } from '../../lib/posts/card-layout';
 import { embedCardDurationS, embedLayout, type Box } from '../../lib/posts/embed-layout';
 import { createNavArrows } from '../../lib/playlist/nav-arrows';
+import { VIEW_STATE, type ViewState } from '../../lib/view/messages';
 import {
   PL_COMMAND,
   PL_HELLO,
@@ -100,6 +101,12 @@ let raf = 0;
 function report(event: MediaEvent): void {
   if (!entry) return;
   browser.runtime.sendMessage({ type: PL_MEDIA, gen: entry.gen, event }).catch(() => undefined);
+}
+
+/** This tab is in TV mode or kept maximized (view/controller.ts). */
+async function watchingFullView(): Promise<boolean> {
+  const state = (await browser.runtime.sendMessage({ type: VIEW_STATE }).catch(() => null)) as Partial<ViewState> | null;
+  return state?.tv === true || state?.maximizeKept === true;
 }
 
 function say(text: string): void {
@@ -446,7 +453,12 @@ async function main(): Promise<void> {
     return;
   }
   if (!result.ok) {
-    // Say why, either way: "unavailable" alone doesn't help fix a playlist.
+    // Gone, watching in TV mode or maximized: the picture stays up and the next entry
+    // comes straight on. Otherwise say why: "unavailable" alone doesn't help fix a playlist.
+    if (result.gone && (await watchingFullView())) {
+      report('gone');
+      return;
+    }
     say(result.gone ? `Unavailable: ${entry.title ?? 'this post'}\n${result.error}` : result.error);
     if (result.gone) report('gone');
     else setTimeout(() => report('ended'), ERROR_DWELL_MS);
