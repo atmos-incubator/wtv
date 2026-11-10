@@ -715,3 +715,68 @@ button.icon {
   padding: 0 7px;
   line-height: 1.6;
 }
+
+/* Every site's selectors (Wtv not on the page) */
+.all-sites {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.all-sites h2 {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.all-sites ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.all-sites .site-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.all-sites .site-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.all-sites .site-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.all-sites .site-list .note {
+  flex-basis: 100%;
+}
+
+.pending {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.pending p {
+  margin: 0;
+}
+
+.pending li {
+  overflow-wrap: anywhere;
+}
+
+.pending .skipped {
+  color: var(--muted);
+}

@@ -10,3 +10,14 @@ build; selectors live in source; no new install-time permission warnings.
 ---
 
 ## Bug Fixes
+
+
+## Questions
+
+
+## Notes
+
+- For publishing new updates to my windows laptop for testing
+
+npm run lan:build
+npm run lan:serve

@@ -5,6 +5,8 @@
  * Roles come in groups (picker/roles.ts); the Posts group has a card preview: the post
  * card this page would make (for `view=card` entries read from the page).
  * Dev builds can also write the resulting site config straight into src/sites/.
+ * Off any site (Wtv not on the page), it lists every site's saved selectors, exports and
+ * imports them all as one file, and (dev builds) writes such a file into src/sites/.
  *
  * Only talks to the page while it's the view showing (showSelectors / hideSelectors).
  */
@@ -44,11 +46,21 @@ import { siteConfigToJson } from '../../lib/picker/serialize';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore, saveOverrideStore } from '../../lib/sites/override-store';
 import {
+  makeSelectorsFile,
+  parseSelectorsFile,
+  planRepoWrite,
+  planSelectorsImport,
+  selectorsFileName,
+  type RepoPlan,
+  type SelectorsImportPlan,
+} from '../../lib/sites/selectors-file';
+import {
   resolveSite,
   withRoleOverride,
   withQuirk,
   withSelectorsRemoved,
   withoutRoleOverride,
+  type OverrideStore,
   type SiteOverride,
 } from '../../lib/sites/overrides';
 import { CONDITIONS, POST_ROLES, ROLE_DEFAULT_WHEN, USER_QUIRKS, type UserQuirk, type Condition, type Matcher, type RoleName } from '../../lib/sites/schema';
@@ -73,6 +85,11 @@ interface Editor {
   test: TestResult | null;
 }
 
+/** Waiting for a yes: an import into this browser, or (dev) a write into the repo. */
+type Pending =
+  | { kind: 'import'; file: string; sites: OverrideStore; plan: SelectorsImportPlan; warnings: string[] }
+  | { kind: 'repo'; file: string; sites: OverrideStore; warnings: string[]; dir: FileSystemDirectoryHandle | null; plan: RepoPlan | null };
+
 /** This view is showing. */
 let active = false;
 
@@ -92,6 +109,9 @@ const state: {
   post: PagePostReport | null;
   /** The site's switches as they apply now (built in + yours). */
   quirks: Partial<Record<UserQuirk, boolean>>;
+  /** Every site's saved selectors (listed when Wtv isn't on the page). */
+  allSites: OverrideStore;
+  pending: Pending | null;
 } = {
   tabId: null,
   frameId: 0,
@@ -105,6 +125,8 @@ const state: {
   metadata: null,
   post: null,
   quirks: {},
+  allSites: {},
+  pending: null,
 };
 
 // --- DOM helpers ---------------------------------------------------------------------
@@ -166,6 +188,7 @@ async function refresh(): Promise<void> {
   } catch {
     state.report = null;
     state.error = 'Wtv isn’t running on this page. Enable it from the toolbar popup, or reload the page.';
+    state.allSites = await loadOverrideStore(local);
   }
   render();
   await refreshPreview();
@@ -372,14 +395,12 @@ async function copyJson(): Promise<void> {
   render();
 }
 
-/** Dev only: write <siteId>.json into the repo's src/sites folder. */
-async function writeToRepo(): Promise<void> {
-  const out = await effectiveConfigJson();
-  if (!out) {
-    state.message = 'Nothing to write yet: this site has no selectors.';
-    render();
-    return;
-  }
+/**
+ * Dev only: the repo's src/sites folder, remembered. Asks for it (or for access again)
+ * when needed, which takes a click: call it straight from one.
+ */
+async function repoDir(): Promise<FileSystemDirectoryHandle> {
+  if (!DEV_TOOLS) throw new Error('dev builds only'); // Keeps the writer out of the store build.
   let dir = await getKv<FileSystemDirectoryHandle>(KV_REPO_SITES);
   if (dir && (await dir.queryPermission({ mode: 'readwrite' })) !== 'granted') {
     if ((await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') dir = undefined;
@@ -388,15 +409,260 @@ async function writeToRepo(): Promise<void> {
     dir = await window.showDirectoryPicker({ id: 'wtv-repo-sites', mode: 'readwrite' });
     await setKv(KV_REPO_SITES, dir);
   }
-  const file = await dir.getFileHandle(`${out.siteId}.json`, { create: true });
+  return dir;
+}
+
+/** The remembered folder, if Wtv may still use it without asking. */
+async function repoDirIfAllowed(): Promise<FileSystemDirectoryHandle | null> {
+  if (!DEV_TOOLS) return null;
+  const dir = await getKv<FileSystemDirectoryHandle>(KV_REPO_SITES);
+  return dir && (await dir.queryPermission({ mode: 'readwrite' })) === 'granted' ? dir : null;
+}
+
+async function writeRepoFile(dir: FileSystemDirectoryHandle, name: string, text: string): Promise<void> {
+  if (!DEV_TOOLS) return;
+  const file = await dir.getFileHandle(name, { create: true });
   const writable = await file.createWritable();
-  await writable.write(out.json);
+  await writable.write(text);
   await writable.close();
+}
+
+/** Dev only: write <siteId>.json into the repo's src/sites folder. */
+async function writeToRepo(): Promise<void> {
+  const out = await effectiveConfigJson();
+  if (!out) {
+    state.message = 'Nothing to write yet: this site has no selectors.';
+    render();
+    return;
+  }
+  const dir = await repoDir();
+  await writeRepoFile(dir, `${out.siteId}.json`, out.json);
   state.message =
     dir.name === 'sites'
       ? `Wrote sites/${out.siteId}.json. Rebuild to ship it; the local override is dropped automatically once the bundled config matches.`
       : `Wrote ${out.siteId}.json into “${dir.name}” (expected the repo’s src/sites folder).`;
   render();
+}
+
+// --- every site's selectors (off any site) ---------------------------------------------------
+
+const fileInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.json,application/json' });
+let onFile: ((file: File) => Promise<void>) | null = null;
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0];
+  fileInput.value = '';
+  if (!file || !onFile) return;
+  onFile(file).catch((err: unknown) => {
+    state.message = `Failed: ${(err as Error).message}`;
+    render();
+  });
+});
+
+function chooseFile(then: (file: File) => Promise<void>): void {
+  onFile = then;
+  fileInput.click();
+}
+
+async function readSelectorsFile(file: File): Promise<{ sites: OverrideStore; warnings: string[] } | null> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await file.text());
+  } catch {
+    state.message = `${file.name} isn’t JSON.`;
+    render();
+    return null;
+  }
+  const parsed = parseSelectorsFile(raw);
+  if (!parsed.ok) {
+    state.message = `${file.name}: ${parsed.error}`;
+    render();
+    return null;
+  }
+  return parsed;
+}
+
+async function exportAll(): Promise<void> {
+  const store = await loadOverrideStore(local);
+  const text = `${JSON.stringify(makeSelectorsFile(store), null, 2)}\n`;
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: selectorsFileName() }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const n = Object.keys(store).length;
+  state.pending = null;
+  state.message = `Exported your selectors for ${n} site${n === 1 ? '' : 's'}.`;
+  render();
+}
+
+function importAll(): void {
+  chooseFile(async (file) => {
+    const read = await readSelectorsFile(file);
+    if (!read) return;
+    const plan = planSelectorsImport(await loadOverrideStore(local), read.sites, BUNDLED_SITES);
+    state.message = null;
+    state.pending = { kind: 'import', file: file.name, ...read, plan };
+    render();
+  });
+}
+
+async function confirmImport(): Promise<void> {
+  const p = state.pending;
+  if (p?.kind !== 'import') return;
+  // Planned again: something may have been saved since.
+  const plan = planSelectorsImport(await loadOverrideStore(local), p.sites, BUNDLED_SITES);
+  await saveOverrideStore(local, plan.next);
+  state.pending = null;
+  state.message = `Imported ${plan.changes.length} site${plan.changes.length === 1 ? '’s' : 's’'} selectors. Open each site with this panel to check them: imported roles say “yours”.`;
+  await refresh();
+}
+
+/** Dev only: write the selectors in a file (reviewed, maybe trimmed) into src/sites. */
+function writeFileToRepo(): void {
+  chooseFile(async (file) => {
+    const read = await readSelectorsFile(file);
+    if (!read) return;
+    state.message = null;
+    state.pending = { kind: 'repo', file: file.name, ...read, dir: null, plan: null };
+    const dir = await repoDirIfAllowed();
+    if (dir) await planRepo(dir);
+    else render();
+  });
+}
+
+/** The pending repo write, planned against what's in the folder now. */
+async function planRepo(dir: FileSystemDirectoryHandle): Promise<void> {
+  const p = state.pending;
+  if (p?.kind !== 'repo') return;
+  const repo: Record<string, string> = {};
+  for await (const h of (dir as unknown as { values(): AsyncIterable<FileSystemHandle> }).values()) {
+    if (h.kind === 'file' && h.name.endsWith('.json')) repo[h.name] = await (await (h as FileSystemFileHandle).getFile()).text();
+  }
+  state.pending = { ...p, dir, plan: planRepoWrite(p.sites, repo) };
+  render();
+}
+
+async function confirmRepoWrite(): Promise<void> {
+  const p = state.pending;
+  if (p?.kind !== 'repo' || !p.dir || !p.plan) return;
+  for (const w of p.plan.writes) await writeRepoFile(p.dir, w.file, w.text);
+  const files = p.plan.writes.map((w) => w.file).join(', ');
+  state.pending = null;
+  state.message = `Wrote ${files} into ${p.dir.name}/. Check them with git diff, then rebuild: once the new build loads, your saved selectors for those roles are dropped, since they’re built in now.`;
+  render();
+}
+
+function siteSummary(siteId: string, site: SiteOverride): HTMLElement {
+  const bundled = BUNDLED_SITES.find((c) => c.id === siteId);
+  const stale = new Set(resolveSite(siteId, bundled, site)?.stale.map((s) => s.role));
+  const bits = (Object.entries(site.roles) as [RoleName, NonNullable<SiteOverride['roles'][RoleName]>][]).map(([role, ov]) => {
+    const label = ROLE_LABELS[role];
+    if (stale.has(role)) return `${label} (not applied: the built-in selectors changed)`;
+    return ov.matchers.length === 0 ? `${label} (off)` : label;
+  });
+  for (const q of USER_QUIRKS) {
+    const value = site.quirks?.[q];
+    if (value !== undefined) bits.push(`${QUIRK_TEXT[q].label}: ${value ? 'on' : 'off'}`);
+  }
+  return el(
+    'li',
+    {},
+    el('span', { className: 'site-name', text: siteId }),
+    el('span', { className: 'chip', text: bundled ? 'built-in site' : 'your site' }),
+    el('div', { className: 'note', text: bits.join(' · ') || 'Nothing saved.' }),
+  );
+}
+
+function bullets(lines: readonly string[], className = ''): HTMLElement | null {
+  return lines.length ? el('ul', { className }, ...lines.map((l) => el('li', { text: l }))) : null;
+}
+
+function pendingView(p: Pending): HTMLElement {
+  const cancel = button('Cancel', () => {
+    state.pending = null;
+    render();
+  });
+  const warnings = p.warnings.length
+    ? el('details', {}, el('summary', { text: `${p.warnings.length} problem(s) in the file, left out` }), bullets(p.warnings))
+    : null;
+
+  if (p.kind === 'import') {
+    const { plan } = p;
+    const any = plan.changes.length > 0;
+    return el(
+      'section',
+      { className: 'pending' },
+      el('p', { text: any ? `Import from ${p.file}:` : `Nothing to import: this browser already has everything in ${p.file}.` }),
+      bullets(plan.changes),
+      plan.unchanged ? el('p', { className: 'note', text: `${plan.unchanged} role(s) or switch(es) already match.` }) : null,
+      plan.skipped.length ? el('p', { className: 'note', text: 'Left out:' }) : null,
+      bullets(plan.skipped, 'skipped'),
+      warnings,
+      el('div', { className: 'actions' }, any ? button('Import', confirmImport, 'primary') : null, cancel),
+    );
+  }
+
+  if (!DEV_TOOLS) return cancel; // Repo writes are dev only; keeps them out of the store build.
+  if (!p.plan) {
+    return el(
+      'section',
+      { className: 'pending' },
+      el('p', { text: `To write ${p.file} into the repo, Wtv needs the repo’s src/sites folder.` }),
+      el(
+        'div',
+        { className: 'actions' },
+        button('Choose src/sites…', async () => planRepo(await repoDir()), 'primary'),
+        cancel,
+      ),
+    );
+  }
+
+  const { plan } = p;
+  const writes = plan.writes.map((w) => {
+    const what = [...w.roles, ...w.quirks].join(', ');
+    return `${w.file}: ${what}${w.isNew ? ' (new site: adds a host permission, a new install warning in the store build)' : ''}`;
+  });
+  return el(
+    'section',
+    { className: 'pending' },
+    p.dir && p.dir.name !== 'sites' ? el('p', { className: 'warn', text: `“${p.dir.name}” isn’t called sites: is it the repo’s src/sites?` }) : null,
+    plan.errors.length
+      ? el('p', { className: 'warn', text: 'Nothing written: the build would fail with these changes.' })
+      : el('p', { text: plan.writes.length ? `Write ${p.file} into ${p.dir?.name ?? 'the repo'}/:` : `Nothing to write from ${p.file}.` }),
+    bullets(plan.errors, 'skipped'),
+    bullets(writes),
+    plan.skipped.length ? el('p', { className: 'note', text: 'Left out:' }) : null,
+    bullets(plan.skipped, 'skipped'),
+    warnings,
+    el(
+      'div',
+      { className: 'actions' },
+      plan.writes.length ? button(`Write ${plan.writes.length} file${plan.writes.length === 1 ? '' : 's'}`, confirmRepoWrite, 'primary') : null,
+      cancel,
+    ),
+  );
+}
+
+function allSitesView(): HTMLElement {
+  const sites = Object.keys(state.allSites).sort();
+  const exportButton = button('Export all…', exportAll);
+  exportButton.disabled = sites.length === 0;
+  const actions = el('div', { className: 'actions' }, exportButton, button('Import…', importAll));
+  if (DEV_TOOLS) actions.append(button('Write a file to the repo…', writeFileToRepo));
+  return el(
+    'section',
+    { className: 'all-sites' },
+    el('h2', { text: 'Your selectors, every site' }),
+    sites.length
+      ? el('ul', { className: 'site-list' }, ...sites.map((id) => siteSummary(id, state.allSites[id]!)))
+      : el('p', { className: 'note', text: 'You haven’t saved any selectors yet.' }),
+    actions,
+    state.pending ? pendingView(state.pending) : null,
+    el('p', {
+      className: 'note',
+      text: DEV_TOOLS
+        ? 'Export all saves them as one file, to import on another computer. To put some into the source, review the exported file, delete what isn’t ready, then Write a file to the repo.'
+        : 'Export all saves them as one file, to import on another computer.',
+    }),
+  );
 }
 
 // --- incoming messages ---------------------------------------------------------------------
@@ -981,10 +1247,13 @@ function render(): void {
 function draw(): void {
   const report = state.report;
   if (!report) {
-    app.replaceChildren(
+    const parts: (Node | null)[] = [
       el('header', {}, el('h1', { text: 'Wtv selectors' }), button('Refresh', refresh)),
       el('p', { className: 'note', text: state.error ?? 'Loading…' }),
-    );
+      state.message ? el('p', { className: 'warn', text: state.message }) : null,
+      state.error ? allSitesView() : null,
+    ];
+    app.replaceChildren(...parts.filter((p): p is Node => p !== null));
     return;
   }
 
