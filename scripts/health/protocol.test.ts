@@ -16,6 +16,7 @@ import {
   judgePost,
   parseBuiltinFile,
   parseTargets,
+  playsVideo,
   summarize,
   summarizePlaylists,
   type EntryObservation,
@@ -48,15 +49,22 @@ describe('health runner protocol', () => {
     for (const r of [...AD_ROLES, ...MOMENT_ROLES]) expect(ROLE_NAMES).toContain(r);
   });
 
-  it('has a target for every bundled site', () => {
+  it('has a target for every bundled site with a video', () => {
     const dir = fileURLToPath(new URL('../../src/sites/', import.meta.url));
     const ids = readdirSync(dir)
-      .filter((f) => f.endsWith('.json'))
+      .filter((f) => f.endsWith('.json') && playsVideo(JSON.parse(readFileSync(`${dir}/${f}`, 'utf8'))))
       .map((f) => f.replace(/\.json$/, ''));
     const raw: unknown = JSON.parse(readFileSync(new URL('./targets.json', import.meta.url), 'utf8'));
     const { targets, errors } = parseTargets(raw);
     expect(errors).toEqual([]);
     for (const id of ids) expect(Object.keys(targets)).toContain(id);
+  });
+
+  it('checks only sites with a video role', () => {
+    expect(playsVideo({ roles: { video: ['video'], post: ['article'] } })).toBe(true);
+    expect(playsVideo({ roles: { post: ['article'], postText: ['p'] } })).toBe(false);
+    expect(playsVideo({ roles: { video: [] } })).toBe(false);
+    expect(playsVideo(null)).toBe(false);
   });
 
   it('passes a healthy run; ads are seen / not seen, never failures', () => {

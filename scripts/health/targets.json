@@ -2,5 +2,9 @@
   "youtube.com": {
     "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
     "note": "Big Buck Bunny, Blender Foundation's own upload: long-lived, ~10 minutes, often gets ads. Swap it if it ever goes away."
+  },
+  "reddit.com": {
+    "url": "https://www.reddit.com/r/videos/comments/1xspys1/massie_names_elementary_school_bombing_in/",
+    "note": "A video post in r/videos. Swap it if it's removed or the video stops playing."
   }
 }

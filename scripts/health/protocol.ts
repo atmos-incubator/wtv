@@ -132,6 +132,17 @@ export function summarize(results: readonly SiteResult[], startedAt: string): st
   return lines.join('\n');
 }
 
+/**
+ * The check plays a video, so it covers sites with a `video` role (`raw`: the site's JSON).
+ * A site of only post selectors (Bluesky) has nothing to play: it needs no target and isn't
+ * checked.
+ */
+export function playsVideo(raw: unknown): boolean {
+  const roles = (raw as { roles?: unknown } | null)?.roles;
+  const video = typeof roles === 'object' && roles !== null ? (roles as Record<string, unknown>).video : undefined;
+  return Array.isArray(video) && video.length > 0;
+}
+
 export function parseTargets(raw: unknown): { targets: Record<string, Target>; errors: string[] } {
   const targets: Record<string, Target> = {};
   const errors: string[] = [];

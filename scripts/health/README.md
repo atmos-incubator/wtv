@@ -47,8 +47,10 @@ seen / · not seen: ads aren't guaranteed, so not seeing one isn't a failure.
 
 ## Targets
 
-`targets.json` maps each site id to a stable video URL. Every bundled site needs one
-(a unit test checks). Pick something long-lived and long enough to get ads.
+`targets.json` maps each site id to a stable video URL. Every bundled site with a `video`
+role needs one (a unit test checks). Pick something long-lived and long enough to get ads.
+Sites with only post selectors (no `video` role, e.g. Bluesky) have nothing to play: they
+need no target and aren't checked.
 
 ## Daily (macOS)
 

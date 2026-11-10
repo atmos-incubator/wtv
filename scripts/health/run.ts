@@ -43,6 +43,7 @@ import {
   judgePost,
   parseBuiltinFile,
   parseTargets,
+  playsVideo,
   summarize,
   summarizePlaylists,
   type EntryObservation,
@@ -337,11 +338,15 @@ async function checkPlaylists(ext: Extension, context: BrowserContext): Promise<
   return results;
 }
 
+/** The bundled sites the check can play a video on (see playsVideo). */
 function loadSiteIds(): string[] {
-  return readdirSync(SITES)
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => f.replace(/\.json$/, ''))
-    .sort();
+  const ids: string[] = [];
+  for (const f of readdirSync(SITES).filter((f) => f.endsWith('.json')).sort()) {
+    const id = f.replace(/\.json$/, '');
+    if (playsVideo(JSON.parse(readFileSync(join(SITES, f), 'utf8')))) ids.push(id);
+    else console.info(`[health] ${id}: post selectors only, nothing to play; not checked`);
+  }
+  return ids;
 }
 
 function loadTargets(): Record<string, Target> {

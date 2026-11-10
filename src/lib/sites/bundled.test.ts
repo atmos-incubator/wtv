@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_LOAD_RESULT, BUNDLED_SITES } from './bundled';
 import { loadSiteConfigs } from './load';
+import { hasPostSelectors } from './schema';
 
 describe('bundled site configs (src/sites/*.json)', () => {
   it('are all valid', () => {
@@ -15,8 +16,10 @@ describe('bundled site configs (src/sites/*.json)', () => {
     expect(BUNDLED_SITES.length).toBeGreaterThan(0);
   });
 
-  it('every bundled site defines a video role', () => {
-    for (const site of BUNDLED_SITES) expect(site.roles.video?.length, site.id).toBeGreaterThan(0);
+  it('every bundled site has something to show: a video role, or post selectors', () => {
+    for (const site of BUNDLED_SITES) {
+      expect(Boolean(site.roles.video?.length) || hasPostSelectors(site.roles), site.id).toBe(true);
+    }
   });
 });
 
