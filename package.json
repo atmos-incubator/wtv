@@ -13,6 +13,8 @@
     "build": "npm run check && wxt build",
     "build:dev": "npm run check && wxt build --mode devtools",
     "zip": "npm run check && wxt zip",
+    "lan:build": "npm run check && wxt build --mode lan",
+    "lan:serve": "node --experimental-strip-types scripts/lan/serve.ts",
     "compile": "wxt prepare && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

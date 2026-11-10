@@ -3,8 +3,9 @@ import { startAdController } from '../lib/ads/controller';
 import { browserAreas } from '../lib/browser-storage';
 import { reopenNotedPages } from '../lib/dev/reload';
 import { startDevScreenshots } from '../lib/dev/screenshot';
-import { DEV_TOOLS } from '../lib/env';
+import { DEV_TOOLS, LAN_BUILD } from '../lib/env';
 import { injectIntoMatchingTabs, syncContentScripts } from '../lib/injection';
+import { startLanUpdates } from '../lib/lan/updates';
 import { runMigrations, type InstallDetails } from '../lib/migrate';
 import { BUNDLED_SITES } from '../lib/sites/bundled';
 import { pruneStoredOverrides } from '../lib/sites/override-store';
@@ -70,4 +71,6 @@ export default defineBackground(() => {
     // After Reload Wtv on the playlists page: its pages back where they were.
     reopenNotedPages().catch((err: unknown) => console.error('[wtv] reopening pages failed:', err));
   }
+  // Second computer: reload when a newer synced build lands on disk.
+  if (LAN_BUILD) startLanUpdates();
 });

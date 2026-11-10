@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'wxt';
-import { isDevToolsMode } from './src/lib/build-mode';
+import { LAN_MODE, isDevToolsMode } from './src/lib/build-mode';
+import { BUILD_FILE, newBuildId, type BuildInfo } from './src/lib/lan/build-info';
 import { checkSvg, loadBuiltinPlaylists } from './src/lib/playlist/builtin';
 import { loadSiteConfigs } from './src/lib/sites/load';
 import { hostPermissionPatterns } from './src/lib/sites/match';
@@ -11,6 +12,14 @@ const SITES_DIR = fileURLToPath(new URL('./src/sites/', import.meta.url));
 const PLAYLISTS_DIR = fileURLToPath(new URL('./src/playlists/', import.meta.url));
 /** Apache-2.0: Readability's license ships with the code that includes it (the overlay page). */
 const READABILITY_LICENSE = fileURLToPath(new URL('./node_modules/@mozilla/readability/LICENSE.md', import.meta.url));
+
+const VERSION = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version;
+/**
+ * This build's id, baked into the code (`__WTV_BUILD__`) and, for LAN builds, written to
+ * build.json (see src/lib/lan/). Kept in the environment so a second evaluation of this file in
+ * the same build agrees with the first.
+ */
+const BUILD_ID = (process.env.WTV_BUILD_ID ??= newBuildId(VERSION, new Date(), Math.random()));
 
 /** Validate bundled site configs at build time; any error fails the build. */
 function bundledSitesForBuild() {
@@ -53,20 +62,31 @@ function checkBuiltinPlaylists(): void {
 
 export default defineConfig({
   srcDir: 'src',
+  vite: () => ({ define: { __WTV_BUILD__: JSON.stringify(BUILD_ID) } }),
   hooks: {
     'build:publicAssets': (_wxt, files) => {
       files.push({ absoluteSrc: READABILITY_LICENSE, relativeDest: 'licenses/readability-LICENSE.md' });
     },
+    // LAN builds: build.json goes in last, once everything else is written, so a folder with
+    // it is a whole build (the LAN server and the sync script rely on that).
+    'build:done': (wxt, output) => {
+      if (wxt.config.mode !== LAN_MODE) return;
+      const info: BuildInfo = { id: BUILD_ID, version: output.manifest.version, builtAt: new Date().toISOString() };
+      writeFileSync(join(wxt.config.outDir, BUILD_FILE), `${JSON.stringify(info, null, 2)}\n`);
+      console.info(`[wtv] LAN build ${BUILD_ID}`);
+    },
   },
   manifest: ({ mode }) => {
     const dev = isDevToolsMode(mode);
+    const lan = mode === LAN_MODE;
     checkBuiltinPlaylists();
     return {
-      name: dev ? 'Wtv (dev)' : 'Wtv',
+      name: dev ? 'Wtv (dev)' : lan ? 'Wtv (LAN)' : 'Wtv',
       description: 'Web TV: the internet as a TV station. Mutes ads and shows something nicer instead.',
       // unlimitedStorage: the ad-picture library lives in IndexedDB. No install warning.
       // contextMenus: "Add to Wtv playlist". No install warning.
-      permissions: ['storage', 'unlimitedStorage', 'scripting', 'activeTab', 'contextMenus'],
+      // alarms (LAN builds only): check for a newer synced build every minute. No install warning.
+      permissions: ['storage', 'unlimitedStorage', 'scripting', 'activeTab', 'contextMenus', ...(lan ? ['alarms'] : [])],
       // Bundled sites: always on. Content scripts are registered at runtime for these plus
       // any optional origin the user grants (see src/lib/injection.ts).
       host_permissions: hostPermissionPatterns(bundledSitesForBuild()),

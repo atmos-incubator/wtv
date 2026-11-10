@@ -74,6 +74,7 @@ Round 2 (planned in `todo.md`, now merged here; F-numbers pointed into `docs/fut
 - **Framework:** [WXT](https://wxt.dev) + TypeScript. Two build modes:
     - `dev` — includes the selector-authoring tools (write configs to repo). Only for me.
     - `store` — dev tools stripped out, no extra permissions.
+    - `lan` — the store build plus self-reload, for a second computer that syncs it over the network (see LAN install). Never published.
 - **No local server.** Dev tooling writes site configs directly to the repo's `src/sites/` folder from an extension page using the File System Access API (`showDirectoryPicker()`, handle persisted in IndexedDB, "Allow on every visit" permission). Must run from the side panel / options page, not the popup (popups close when the picker steals focus).
 - **Selectors live in source.** No public webservice for selector sync. Users can override broken selectors locally until a fix release ships. A selector import system can come later if popularity grows.
 - **Site configs are data, not code.** JSON per site. Optional small code hooks are allowed, but only in source (never from overrides), to stay clear of store "remote code" rules.
@@ -469,6 +470,16 @@ The side panel's **Playlists** view, for browsing while watching (`src/entrypoin
     - Only on what looks like the show (long, not looping, audible or config-matched), not hover previews.
     - The background keeps per-site streaks in `wtv.siteHealth`. A role failing on **2 pages in a row** with no success between is "broken": orange **!** badge on that tab and a warning in the popup's Media row pointing at **Fix selectors…**. Streaks reset when that site's overrides change, and on every install / update.
 - **Badge** (`src/lib/badge.ts`, one owner per tab): **AD** (red) wins over **!** (orange); tooltip says which.
+
+### LAN install (second computer)
+
+Dev only, never published: a second computer (Windows) runs the current build unpacked and keeps it up to date over the home network. Only the build crosses the network; the playlists and settings made there stay there.
+
+- **Build:** `npm run lan:build` (`wxt build --mode lan` → `.output/chrome-mv3-lan`): the store build named **Wtv (LAN)**, plus the `alarms` permission (no install warning) and the update check below. Every build gets an id (`<version>+<date>-<time>-<random>`, `src/lib/lan/build-info.ts`, pure + tested), baked into the code and written to `build.json` once the rest of the build is written (`build:done` hook), so a folder with `build.json` holds a whole build.
+- **Server:** `npm run lan:serve` (`scripts/lan/serve.ts`, Node only, no dependencies) serves, read-only on port 8787: `/` (setup steps with its own address filled in), `/build.json` (503 while a build is being written), `/wtv.zip` (the folder zipped, once per build, by `scripts/lan/zip.ts`, tested) and `/wtv-sync.ps1`. It picks up each new build without a restart. This isn't the "no local server" decision going back: the extension never talks to it.
+- **Sync (Windows):** `scripts/lan/wtv-sync.ps1` (PowerShell 5.1). `-Install` copies itself to `%LOCALAPPDATA%\Wtv`, syncs, then checks every minute from then on and from each sign-in (a `.cmd` in the Startup folder; no admin). A check fetches `build.json`; when its id isn't the one in the folder (`%LOCALAPPDATA%\Wtv\extension`), it downloads the zip, unpacks it, and mirrors it into the folder, `build.json` last. It refuses to mirror into a non-empty folder without a `manifest.json`. Failures (the dev machine asleep) are logged once, to `wtv-sync.log`. `-Uninstall` stops it.
+- **Load once:** chrome://extensions → Developer mode → Load unpacked → the folder. The ID comes from the folder's path, which never changes, so playlists and settings survive every update (reloads keep storage; the schema check sees the current version). Removing the extension deletes them; Export everything first.
+- **Self-reload** (`src/lib/lan/updates.ts`, LAN builds only): every minute (an alarm) and at start, the background reads its own `build.json` from disk; when it names another build, it reloads, unless a playlist is playing or a Wtv page (playlists, options, side panel, popup) is open, in which case it waits for the next check. A reload that left the same build running isn't retried for that disk build (no reload loop).
 
 ### Misc
 
