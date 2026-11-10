@@ -46,6 +46,7 @@ describe('validateSiteConfig', () => {
     ['non-boolean adsInMainVideo', { quirks: { adsInMainVideo: 'yes' } }],
     ['thumbnail hosts that are not a list', { thumbnailHosts: 'i.ytimg.com' }],
     ['a thumbnail host with a scheme', { thumbnailHosts: ['https://i.ytimg.com'] }],
+    ['an unknown access', { access: 'maybe' }],
   ])('rejects %s', (_label, patch) => {
     const r = validateSiteConfig({ ...base, ...patch });
     expect(r.ok).toBe(false);
@@ -66,6 +67,14 @@ describe('validateSiteConfig', () => {
   it('keeps known quirks', () => {
     const r = validateSiteConfig({ ...base, quirks: { controlBarInset: 48, adsInMainVideo: true } });
     expect(r.ok && r.value.quirks).toEqual({ controlBarInset: 48, adsInMainVideo: true });
+  });
+
+  it('keeps optional access; required is the default, left unset', () => {
+    const optional = validateSiteConfig({ ...base, access: 'optional' });
+    expect(optional.ok && optional.value.access).toBe('optional');
+    const required = validateSiteConfig({ ...base, access: 'required' });
+    expect(required.ok && required.value).not.toHaveProperty('access');
+    expect(required.warnings).toEqual([]);
   });
 
   it('keeps thumbnail hosts, deduplicated', () => {

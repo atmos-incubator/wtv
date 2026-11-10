@@ -389,9 +389,12 @@ async function render(): Promise<void> {
 
   const actions = el('div', { className: 'actions' });
   const notes: Node[] = [];
+  // Built in and granted at install: only Chrome's site access settings turn it off. A built-in
+  // site with `access: "optional"` is turned on and off here, like any other.
+  const required = profile.kind === 'bundled' && profile.site.config.access !== 'optional';
 
   if (granted) {
-    if (profile.kind !== 'bundled') {
+    if (!required) {
       actions.append(
         button('Disable on this site', async () => {
           await browser.permissions.remove({ origins: [pattern] });
@@ -400,7 +403,7 @@ async function render(): Promise<void> {
       notes.push(note('Disabling takes full effect after the page reloads.'));
     }
   } else {
-    if (profile.kind === 'bundled') {
+    if (required) {
       notes.push(note('Site access for Wtv is turned off for this site in Chrome’s extension settings.', 'warn'));
     }
     actions.append(

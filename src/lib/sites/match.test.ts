@@ -36,4 +36,10 @@ describe('hostPermissionPatterns', () => {
       hostPermissionPatterns([{ domains: ['youtube.com', 'youtu.be'] }, { domains: ['youtube.com'] }]),
     ).toEqual(['*://*.youtu.be/*', '*://*.youtube.com/*']);
   });
+
+  it('leaves out sites whose access is optional', () => {
+    expect(hostPermissionPatterns([{ domains: ['youtube.com'] }, { domains: ['bsky.app'], access: 'optional' }])).toEqual([
+      '*://*.youtube.com/*',
+    ]);
+  });
 });

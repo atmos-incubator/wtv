@@ -117,7 +117,8 @@ describe('planRepoWrite', () => {
     expect(written.roles.title).toEqual(['h1.title']);
     expect(written.roles.video).toEqual(['video.main']);
     expect(written.quirks).toEqual({ startsItself: true });
-    expect(JSON.parse(plan.writes[0]!.text)).toMatchObject({ id: 'bsky.app', name: 'Bluesky', domains: ['bsky.app'] });
+    expect(JSON.parse(plan.writes[0]!.text)).toMatchObject({ id: 'bsky.app', name: 'Bluesky', domains: ['bsky.app'], access: 'optional' });
+    expect(JSON.parse(plan.writes[1]!.text)).not.toHaveProperty('access');
   });
 
   it('skips roles the repo changed since, and what is already there', () => {

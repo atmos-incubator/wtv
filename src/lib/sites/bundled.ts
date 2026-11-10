@@ -12,7 +12,11 @@ for (const w of result.warnings) console.warn('[wtv] bundled site config:', w);
 /** Validated bundled site configs (invalid ones are excluded and logged). */
 export const BUNDLED_SITES: readonly SiteConfig[] = result.configs;
 
-/** Match patterns for the bundled sites (same as the manifest's host_permissions). */
+/**
+ * Match patterns for the bundled sites granted at install (same as the manifest's
+ * host_permissions; `access: "optional"` sites aren't). WXT adds content scripts'
+ * `matches` to host_permissions, so this must leave the optional ones out too.
+ */
 export const BUNDLED_MATCHES: string[] = hostPermissionPatterns(BUNDLED_SITES);
 
 /** Exposed for tests: the full load result including errors. */

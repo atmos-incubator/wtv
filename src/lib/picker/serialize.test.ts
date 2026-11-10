@@ -28,6 +28,13 @@ describe('siteConfigToJson', () => {
     expect(file.roles.skip).toEqual([{ selector: '.skip', when: 'visible' }, '.skip-old']);
   });
 
+  it('writes optional access after the domains', () => {
+    const json = siteConfigToJson({ ...config, access: 'optional' });
+    expect(Object.keys(JSON.parse(json))).toEqual(['schemaVersion', 'id', 'name', 'domains', 'access', 'roles', 'quirks']);
+    const r = validateSiteConfig(JSON.parse(json), 'example.com');
+    expect(r.ok && r.value.access).toBe('optional');
+  });
+
   it('omits empty quirks and ends with a newline', () => {
     const json = siteConfigToJson({ ...config, quirks: {} });
     expect(json.endsWith('}\n')).toBe(true);

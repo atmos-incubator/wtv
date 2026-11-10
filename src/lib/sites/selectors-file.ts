@@ -15,7 +15,8 @@
  * Repo write (planRepoWrite) layers the file over the repo's own site files, the way the
  * extension layers overrides over its built-in configs, and gives the new file texts. Roles
  * saved over other selectors than the repo now has are skipped (redo them), and nothing is
- * written if the build would then fail.
+ * written if the build would then fail. A site new to the repo is written with
+ * `access: "optional"`: built in, but no new install warning (users turn it on, as now).
  */
 import { BACKUP_FORMAT } from '../backup';
 import { siteConfigToJson } from '../picker/serialize';
@@ -138,7 +139,7 @@ export interface RepoWrite {
   siteId: string;
   roles: RoleName[];
   quirks: UserQuirk[];
-  /** No file for it yet: a new built-in site, which adds a host permission. */
+  /** No file for it yet: a new built-in site, written with `access: "optional"`. */
   isNew: boolean;
 }
 
@@ -197,6 +198,8 @@ export function planRepoWrite(incoming: OverrideStore, repo: Readonly<Record<str
 
     // A switch that's off is no switch in a site file.
     const config = resolved.config;
+    // New to the repo: no new install warning (see SiteConfig.access).
+    if (!base) config.access = 'optional';
     if (config.quirks) {
       for (const q of USER_QUIRKS) if (config.quirks[q] === false) delete config.quirks[q];
       if (Object.keys(config.quirks).length === 0) delete config.quirks;

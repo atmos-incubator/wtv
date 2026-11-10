@@ -18,7 +18,7 @@ export type ValidationResult<T> =
 const HOSTNAME =
   /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
-const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'id', 'name', 'domains', 'roles', 'quirks', 'thumbnailHosts']);
+const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'id', 'name', 'domains', 'access', 'roles', 'quirks', 'thumbnailHosts']);
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -168,6 +168,10 @@ export function validateSiteConfig(raw: unknown, expectedId?: string): Validatio
     });
   }
 
+  if (raw.access !== undefined && raw.access !== 'optional' && raw.access !== 'required') {
+    errors.push('access: must be "required" (the default) or "optional"');
+  }
+
   const roles: Roles = {};
   if (!isRecord(raw.roles)) {
     errors.push('roles: must be an object');
@@ -205,6 +209,7 @@ export function validateSiteConfig(raw: unknown, expectedId?: string): Validatio
     domains,
     roles,
   };
+  if (raw.access === 'optional') value.access = 'optional';
   if (quirks && Object.keys(quirks).length > 0) value.quirks = quirks;
   if (thumbnailHosts.length > 0) value.thumbnailHosts = thumbnailHosts;
   return { ok: true, value, warnings };

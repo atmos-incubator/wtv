@@ -1,5 +1,7 @@
 export interface HasDomains {
   domains: string[];
+  /** `optional`: left out of host_permissions (see SiteConfig.access). */
+  access?: string;
 }
 
 export function normalizeHost(host: string): string {
@@ -30,9 +32,15 @@ export function findSite<T extends HasDomains>(host: string, sites: readonly T[]
   return best;
 }
 
-/** Manifest match patterns. `*.example.com` also matches `example.com` itself. */
+/**
+ * Manifest match patterns for the sites Wtv gets at install: every site but the
+ * `access: "optional"` ones. `*.example.com` also matches `example.com` itself.
+ */
 export function hostPermissionPatterns(sites: readonly HasDomains[]): string[] {
   const patterns = new Set<string>();
-  for (const site of sites) for (const d of site.domains) patterns.add(`*://*.${d}/*`);
+  for (const site of sites) {
+    if (site.access === 'optional') continue;
+    for (const d of site.domains) patterns.add(`*://*.${d}/*`);
+  }
   return [...patterns].sort();
 }

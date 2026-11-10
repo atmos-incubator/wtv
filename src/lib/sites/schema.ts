@@ -126,6 +126,13 @@ export interface SiteConfig {
   name: string;
   /** Hostnames this config applies to. Each matches itself and all subdomains. */
   domains: string[];
+  /**
+   * `optional`: the selectors ship built in, but Wtv doesn't get the site at install (it's
+   * not in the manifest's host_permissions, so no install warning). The user turns it on
+   * from the popup (Enable on this site) or grants it at Play, as for any other site.
+   * Absent: required, granted at install.
+   */
+  access?: 'optional';
   roles: Roles;
   quirks?: SiteQuirks;
   /**

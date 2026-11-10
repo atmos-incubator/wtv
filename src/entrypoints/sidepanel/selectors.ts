@@ -618,7 +618,7 @@ function pendingView(p: Pending): HTMLElement {
   const { plan } = p;
   const writes = plan.writes.map((w) => {
     const what = [...w.roles, ...w.quirks].join(', ');
-    return `${w.file}: ${what}${w.isNew ? ' (new site: adds a host permission, a new install warning in the store build)' : ''}`;
+    return `${w.file}: ${what}${w.isNew ? ' (new built-in site, access optional: turned on from the popup, no install warning)' : ''}`;
   });
   return el(
     'section',
