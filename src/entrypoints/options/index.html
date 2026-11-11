@@ -8,7 +8,10 @@
   </head>
   <body>
     <main>
-      <h1>Wtv</h1>
+      <header class="top">
+        <h1>Wtv</h1>
+        <button id="credits" type="button">Credits…</button>
+      </header>
 
       <section aria-labelledby="pictures-heading">
         <h2 id="pictures-heading">Ad pictures</h2>
@@ -30,6 +33,14 @@
           <button id="clear" type="button" hidden>Use built-in cats</button>
         </div>
         <ul id="groups" class="groups"></ul>
+        <label class="default-folder">
+          Pictures for <code>[img]</code> with no keyword (and ads with no playlist <code>[ads]</code>):
+          <select id="default-folder"></select>
+        </label>
+        <p class="note">
+          A keyword folder here lets the picked folder hold only keyword folders. A site’s own
+          folder still comes first; top-level files are the fallback.
+        </p>
       </section>
 
       <section aria-labelledby="test-heading">

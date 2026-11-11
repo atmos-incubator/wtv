@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { startActionMenu } from '../lib/action-menu';
 import { startAdController } from '../lib/ads/controller';
 import { browserAreas } from '../lib/browser-storage';
 import { reopenNotedPages } from '../lib/dev/reload';
@@ -66,6 +67,7 @@ export default defineBackground(() => {
   startViewController();
   startPlaylistRunner();
   startPlaylistMenus();
+  startActionMenu();
   if (DEV_TOOLS) {
     startDevScreenshots();
     // After Reload Wtv on the playlists page: its pages back where they were.

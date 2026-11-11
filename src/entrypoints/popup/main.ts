@@ -12,7 +12,7 @@ import {
   type MediaStatus,
 } from '../../lib/messages';
 import { isWebUrl, originPatternForHost } from '../../lib/permissions';
-import { parseSettings, type Settings } from '../../lib/settings';
+import { parseSettings, type SettingSwitch, type Settings } from '../../lib/settings';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore } from '../../lib/sites/override-store';
 import { profileForHost } from '../../lib/sites/registry';
@@ -23,6 +23,7 @@ import { addToPlaylist, listPlaylists, type StoredPlaylist } from '../../lib/pla
 import { FAIL_STREAK, brokenRoles, parseHealthStore, type HealthStore } from '../../lib/health/health';
 import { ROLE_LABELS } from '../../lib/picker/roles';
 import { requestSidePanelView, type SidePanelView } from '../../lib/sidepanel-view';
+import { creditsButton, openCredits } from '../../lib/ui/credits';
 
 const app = document.getElementById('app') as HTMLElement;
 const local = browserAreas().local;
@@ -41,6 +42,22 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 function row(label: string, ...content: Node[]): HTMLElement {
   return el('div', { className: 'row' }, el('div', { className: 'label', text: label }), ...content);
+}
+
+/** The logo (opens Credits) and the page's host. */
+function header(title: string): HTMLElement {
+  const logo = el('button', { className: 'logo' });
+  logo.type = 'button';
+  logo.title = 'Credits';
+  logo.setAttribute('aria-label', 'Wtv credits');
+  const img = el('img');
+  img.src = browser.runtime.getURL('/icon/48.png');
+  img.srcset = `${browser.runtime.getURL('/icon/48.png')} 1x, ${browser.runtime.getURL('/wtv-logo-96.png')} 2x`;
+  img.width = img.height = 48;
+  img.alt = '';
+  logo.append(img);
+  logo.addEventListener('click', openCredits);
+  return el('header', { className: 'top' }, logo, el('h1', { text: title }));
 }
 
 function note(text: string, className = 'note'): HTMLElement {
@@ -63,7 +80,7 @@ async function loadSettings(): Promise<Settings> {
   return parseSettings(await readKey<unknown>(local, KEYS.settings, undefined));
 }
 
-function toggle(label: string, key: keyof Settings, settings: Settings): HTMLElement {
+function toggle(label: string, key: SettingSwitch, settings: Settings): HTMLElement {
   const input = el('input');
   input.type = 'checkbox';
   input.checked = settings[key];
@@ -348,14 +365,14 @@ async function render(): Promise<void> {
     toggle('Show pictures during ads', 'adOverlay', settings),
     toggle('Show pictures while paused', 'pausePictures', settings),
     toggle('Click the video to play / pause (blocks ad clicks)', 'clickShield', settings),
-    el('div', { className: 'actions' }, pictures),
+    el('div', { className: 'actions' }, pictures, creditsButton()),
   );
 
   if (!tab?.id || !isWebUrl(tab.url)) {
     // A playlist can be on one of Wtv's own pages (a post's card): its controls still apply.
     const runner = tab?.id ? await runnerState(tab.id) : null;
     app.replaceChildren(
-      el('h1', { text: 'Wtv' }),
+      header('Wtv'),
       ...(runner && tab?.id
         ? [playlistRow({ id: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId }, runner, [])]
         : [
@@ -452,7 +469,7 @@ async function render(): Promise<void> {
       : [];
 
   app.replaceChildren(
-    el('h1', { text: host }),
+    header(host),
     el('div', { text: support }),
     ...(actions.childElementCount > 0 ? [actions] : []),
     ...notes,

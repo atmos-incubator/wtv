@@ -12,6 +12,10 @@ import {
 import { ensureReadPermission, importFolder } from '../../lib/images/import';
 import { resolveImages, type ImageMeta } from '../../lib/images/library';
 import { DEFAULT_IMAGE_MS } from '../../lib/overlay/program';
+import { browserAreas } from '../../lib/browser-storage';
+import { normalizeFolderName, parseSettings, type Settings } from '../../lib/settings';
+import { KEYS, readKey, writeKey } from '../../lib/storage';
+import { openCredits } from '../../lib/ui/credits';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const status = $<HTMLElement>('library-status');
@@ -23,8 +27,36 @@ const testForm = $<HTMLFormElement>('test');
 const testHost = $<HTMLInputElement>('test-host');
 const testKeyword = $<HTMLInputElement>('test-keyword');
 const testResult = $<HTMLUListElement>('test-result');
+const defaultFolder = $<HTMLSelectElement>('default-folder');
+const local = browserAreas().local;
 
 let library: ImageMeta[] = [];
+let settings: Settings = parseSettings(undefined);
+
+async function loadSettings(): Promise<Settings> {
+  return parseSettings(await readKey<unknown>(local, KEYS.settings, undefined));
+}
+
+/** The keyword folders in the library, plus the chosen one even if it's gone from it. */
+function renderDefaultFolder(): void {
+  const names = new Set(library.flatMap((m) => (m.folder ? [m.folder] : [])));
+  const chosen = settings.defaultImageFolder;
+  const option = (value: string, text: string) => Object.assign(document.createElement('option'), { value, textContent: text, selected: value === chosen });
+  defaultFolder.replaceChildren(
+    option('', 'Top-level files'),
+    ...[...names].sort().map((n) => option(n, `${n}/`)),
+    ...(chosen && !names.has(chosen) ? [option(chosen, `${chosen}/ (not in the folder)`)] : []),
+  );
+}
+
+defaultFolder.addEventListener('change', () => {
+  void (async () => {
+    const current = await loadSettings();
+    settings = { ...current, defaultImageFolder: normalizeFolderName(defaultFolder.value) };
+    await writeKey(local, KEYS.settings, settings);
+    renderDefaultFolder();
+  })().catch((err: unknown) => console.error('[wtv] options: saving the default folder failed:', err));
+});
 
 function li(text: string, aside?: string, asideClass = 'count'): HTMLLIElement {
   const item = document.createElement('li');
@@ -38,12 +70,15 @@ function seconds(ms: number | null): string {
 }
 
 async function render(): Promise<void> {
-  const [images, summary, handle] = await Promise.all([
+  const [images, summary, handle, stored] = await Promise.all([
     listImages(),
     getKv<ImportSummary>(KV_IMPORT_SUMMARY),
     getKv<FileSystemDirectoryHandle>(KV_FOLDER_HANDLE),
+    loadSettings(),
   ]);
   library = images;
+  settings = stored;
+  renderDefaultFolder();
 
   status.replaceChildren();
   if (!summary || images.length === 0) {
@@ -134,7 +169,7 @@ testForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const host = testHost.value.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0] ?? '';
   const keyword = testKeyword.value.trim() || null;
-  const found = resolveImages(library, host, keyword);
+  const found = resolveImages(library, host, keyword, settings.defaultImageFolder);
   if (found.length === 0) {
     testResult.replaceChildren(
       li('Nothing matched: built-in cats'),
@@ -144,5 +179,7 @@ testForm.addEventListener('submit', (e) => {
     testResult.replaceChildren(...found.map((m) => li(m.id, seconds(m.durationMs), 'duration')));
   }
 });
+
+$<HTMLButtonElement>('credits').addEventListener('click', openCredits);
 
 void render();

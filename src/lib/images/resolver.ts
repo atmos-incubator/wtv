@@ -1,6 +1,9 @@
 /**
  * Extension-page side of `[img ...]`: library first, bundled cats as the fallback.
  */
+import { browserAreas } from '../browser-storage';
+import { parseSettings } from '../settings';
+import { KEYS, readKey } from '../storage';
 import { BUNDLED_IMAGES } from './bundled';
 import { listImages } from './db';
 import { resolveImages, type ImageMeta } from './library';
@@ -18,8 +21,14 @@ export async function createImageResolver(host: string): Promise<(keyword: strin
   } catch (err) {
     console.warn('[wtv] image library unavailable, using bundled images:', err);
   }
+  let defaultFolder = '';
+  try {
+    defaultFolder = parseSettings(await readKey<unknown>(browserAreas().local, KEYS.settings, undefined)).defaultImageFolder;
+  } catch {
+    // No setting: top-level files, as before.
+  }
   return (keyword) => {
-    const found = resolveImages(library, host, keyword);
+    const found = resolveImages(library, host, keyword, defaultFolder);
     if (found.length === 0) return bundledResolved();
     return found.map((m) => ({
       src: { type: 'library', id: m.id },

@@ -83,6 +83,10 @@ export default defineConfig({
     return {
       name: dev ? 'Wtv (dev)' : lan ? 'Wtv (LAN)' : 'Wtv',
       description: 'Web TV: the internet as a TV station. Mutes ads and shows something nicer instead.',
+      // Made by scripts/brand/icons.swift from brand/source/. The logo's lettering doesn't
+      // survive under 48 px, so the toolbar (16 / 24 / 32) and tab icons get the play TV.
+      icons: { 16: 'icon/16.png', 32: 'icon/32.png', 48: 'icon/48.png', 128: 'icon/128.png' },
+      action: { default_icon: { 16: 'icon/16.png', 24: 'icon/24.png', 32: 'icon/32.png' } },
       // unlimitedStorage: the ad-picture library lives in IndexedDB. No install warning.
       // contextMenus: "Add to Wtv playlist". No install warning.
       // alarms (LAN builds only): check for a newer synced build every minute. No install warning.

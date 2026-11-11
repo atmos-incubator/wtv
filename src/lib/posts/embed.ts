@@ -33,7 +33,7 @@ import { WTV_UI_ATTR } from '../ads/probe';
 import { DEFAULT_CONTROL_INSET } from '../overlay/shield';
 import { notifyRestacked } from '../overlay/top-layer';
 import { VIEW_COMMAND } from '../view/messages';
-import { maximizeElement, placeMaximized } from '../view/maximize';
+import { maximizeElement, placeMaximized, reassertMaximized } from '../view/maximize';
 import { embedLayout } from './embed-layout';
 import { CARD_PAUSED, CARD_POINTER } from './preview-messages';
 
@@ -215,6 +215,8 @@ export function showEmbed(
 
   function lift(): void {
     if (lifted?.el.isConnected) {
+      // Moved by the page: back in the top layer, and the shield back above it.
+      if (reassertMaximized(lifted.el)) shield.raise();
       place();
       return;
     }

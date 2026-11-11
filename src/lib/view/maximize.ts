@@ -97,6 +97,28 @@ function ensureStyle(root: Document | ShadowRoot): void {
 }
 
 /**
+ * Put a maximized element back in the top layer if it fell out; true when it did.
+ *
+ * A page that moves its player in the DOM (YouTube does, re-laying out after a resize and
+ * between videos) takes it out of the top layer without a `toggle` event: removing an
+ * element hides its popover silently. It keeps our fixed, full-size styles, so it looks
+ * maximized, but now sits under whatever the page draws next.
+ */
+export function reassertMaximized(el: HTMLElement): boolean {
+  if (!el.hasAttribute(MAX_ATTR) || !el.isConnected || el.matches(':popover-open')) return false;
+  const root = el.getRootNode();
+  // It may have moved into another shadow root.
+  if (root instanceof Document || root instanceof ShadowRoot) ensureStyle(root);
+  if (!el.hasAttribute('popover')) el.popover = 'manual';
+  try {
+    el.showPopover();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns a release function, or null if the element can't be shown in the top layer.
  * `onClosed` fires if something other than release() closes it (e.g. the page's own
  * popover handling).

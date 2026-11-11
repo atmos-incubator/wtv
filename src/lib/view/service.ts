@@ -9,6 +9,10 @@
  * upward, so nested embeds fill the tab. A parent frame without Wtv running breaks the
  * chain: the video then only fills its iframe.
  *
+ * Sites re-lay out for a few seconds after a resize or a page change, and some (YouTube)
+ * move the player in the DOM as they do, which drops it out of the top layer silently. So
+ * after each of those, and after maximizing, it's checked a few times and put back.
+ *
  * Esc (in any frame that has something maximized) or losing the maximized element
  * restores the whole tab via the background. While something's maximized, ← / → skip
  * back / forward (ahead of the site's own arrow keys, so it's the same step everywhere).
@@ -18,7 +22,7 @@ import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
 import { skipKey } from './keys';
-import { maximizeElement } from './maximize';
+import { maximizeElement, reassertMaximized } from './maximize';
 import {
   VIEW_COMMAND,
   VIEW_GLOBAL,
@@ -33,6 +37,9 @@ import { togglePlayback } from './playback';
 
 /** postMessage key, child frame → parent: `{ [FRAME_MSG]: token }`. */
 const FRAME_MSG = 'wtv-view-frame';
+
+/** After a maximize, resize or page change: check (ms after it) that it's still on top. */
+const SETTLE_CHECKS_MS = [50, 250, 500, 1000, 2000, 3500, 5000];
 
 export interface ViewService {
   /** This frame's own primary video is maximized (not just an iframe in it). */
@@ -84,6 +91,7 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
   /** Primary key we last told the background about (TV mode maximizes on VIEW_READY). */
   let readyFor: string | null = null;
   const listeners = new Set<() => void>();
+  let settleTimers: ReturnType<typeof setTimeout>[] = [];
 
   function notify(): void {
     for (const cb of listeners) {
@@ -95,7 +103,20 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
     }
   }
 
+  /** Back in the top layer if the page took it out (and our overlay back above it). */
+  function reassert(): void {
+    if (current && reassertMaximized(current.el)) notify();
+  }
+
+  /** Check a few times over the next seconds; a new trigger starts the checks over. */
+  function settle(): void {
+    for (const t of settleTimers) clearTimeout(t);
+    settleTimers = current ? SETTLE_CHECKS_MS.map((ms) => setTimeout(reassert, ms)) : [];
+  }
+
   function release(): void {
+    for (const t of settleTimers) clearTimeout(t);
+    settleTimers = [];
     if (!current) return;
     const c = current;
     current = null;
@@ -126,6 +147,7 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
     if (!releaseEl) return false;
     current = { el, kind, release: releaseEl };
     notify();
+    settle();
     return true;
   }
 
@@ -171,7 +193,14 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
       }
     }
     maybeReady();
+    settle();
   });
+
+  window.addEventListener('resize', settle, { passive: true, signal });
+  // In-page navigation (history.pushState: YouTube's next video). Chrome has the Navigation API.
+  const nav = (window as unknown as { navigation?: EventTarget }).navigation;
+  nav?.addEventListener('navigatesuccess', settle, { signal });
+  window.addEventListener('popstate', settle, { signal });
 
   // Child frame asking us to maximize the iframe it lives in.
   window.addEventListener(

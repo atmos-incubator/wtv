@@ -5,8 +5,12 @@
  *
  * A link's target is added (with no title); anywhere else, the page itself (with the
  * tab's title).
+ *
+ * The rebuild starts with removeAll, so it also creates the toolbar icon's menu
+ * (action-menu.ts).
  */
 import { browser } from 'wxt/browser';
+import { ACTION_MENU_ITEMS } from '../action-menu';
 import { browserAreas } from '../browser-storage';
 import { isWebUrl } from '../permissions';
 import { KEYS } from '../storage';
@@ -33,6 +37,7 @@ function create(props: Parameters<typeof browser.contextMenus.create>[0]): Promi
 
 async function rebuild(): Promise<void> {
   await browser.contextMenus.removeAll();
+  for (const item of ACTION_MENU_ITEMS) await create(item);
   const playlists = await listPlaylists(browserAreas().local);
   await create({ id: ROOT, title: 'Add to Wtv playlist', contexts: [...CONTEXTS] });
   for (const p of playlists.slice(0, MAX_ITEMS)) {

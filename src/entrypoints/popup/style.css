@@ -50,6 +50,32 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top .logo {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  line-height: 0;
+}
+
+/* A long host wraps instead of widening the popup. */
+.top h1 {
+  min-width: 0;
+}
+
+.top .logo img {
+  display: block;
+  width: 48px;
+  height: 48px;
+}
+
 .label {
   color: var(--muted);
   font-size: 11px;

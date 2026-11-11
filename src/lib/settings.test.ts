@@ -14,7 +14,13 @@ describe('parseSettings', () => {
       adOverlay: true,
       clickShield: true,
       pausePictures: false,
+      defaultImageFolder: '',
     });
+  });
+
+  it('keeps the default picture folder as the library names folders', () => {
+    expect(parseSettings({ defaultImageFolder: '  TV ' }).defaultImageFolder).toBe('tv');
+    expect(parseSettings({ defaultImageFolder: 3 }).defaultImageFolder).toBe('');
   });
 
   it('does not mutate the defaults', () => {

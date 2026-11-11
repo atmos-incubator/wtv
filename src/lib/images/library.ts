@@ -72,11 +72,22 @@ type Matchable = Pick<ImageMeta, 'domain' | 'folder' | 'stem'>;
  *   4. top-level files with the keyword in the name
  * Without:
  *   1. <domain>/ top-level files
- *   2. top-level files
+ *   2. <domain>/<defaultFolder>/ folder   (when there's a default folder)
+ *   3. <defaultFolder>/ top-level folder  (likewise)
+ *   4. top-level files
+ *
+ * `defaultFolder` (setting `defaultImageFolder`) lets a library be all keyword folders,
+ * with nothing loose at the top.
  */
-export function resolveImages<T extends Matchable>(library: readonly T[], host: string, keyword: string | null): T[] {
+export function resolveImages<T extends Matchable>(
+  library: readonly T[],
+  host: string,
+  keyword: string | null,
+  defaultFolder: string | null = null,
+): T[] {
   const domain = domainFolderFor(host, library);
   const k = keyword?.trim().toLowerCase() || null;
+  const d = defaultFolder?.trim().toLowerCase() || null;
 
   const steps: ((m: T) => boolean)[] = [];
   if (k) {
@@ -88,6 +99,10 @@ export function resolveImages<T extends Matchable>(library: readonly T[], host: 
     steps.push((m) => m.domain === null && m.folder === null && m.stem.includes(k));
   } else {
     if (domain) steps.push((m) => m.domain === domain && m.folder === null);
+    if (d) {
+      if (domain) steps.push((m) => m.domain === domain && m.folder === d);
+      steps.push((m) => m.domain === null && m.folder === d);
+    }
     steps.push((m) => m.domain === null && m.folder === null);
   }
 

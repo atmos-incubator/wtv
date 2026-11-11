@@ -263,8 +263,12 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
 `[img]` with no keyword (and the default slideshow when no playlist `[ads]` block applies):
 
 1. Files at the top level of the domain folder.
-2. Top-level files.
-3. Bundled cat pack.
+2. `<domain>/<default>/` folder, when a default folder is set.
+3. `<default>/` top-level folder, likewise.
+4. Top-level files.
+5. Bundled cat pack.
+
+- **Default folder** (setting `defaultImageFolder`, a keyword folder name or none; options page under the folder summary, listing the library's keyword folders, and a chosen one that's gone from it marked "not in the folder"): lets the picked folder hold only keyword folders, with nothing loose at the top. The **Try it** box uses it too. Travels in backups with the other settings.
 
 - Single syntax for folders and filename keywords: folder match first, filename match as fallback. A separate syntax can be added later if there's a real need to force a filename match when a same-named folder exists.
 - **Bundled pack:** four original SVG cat cartoons in `public/cats/` (drawn for Wtv, so no licensing to track).
@@ -297,6 +301,7 @@ Steps 1–2 are skipped when there's no domain folder for the current site.
     - The overlay host re-enters the top layer after a maximize so the shield / ad pictures stay on top.
 - **Frames:** the background reads every frame's state with one `scripting.executeScript` (a `FrameCandidate` per frame id, exposed by the content script on its isolated-world global) and picks a frame (`src/lib/view/elect.ts`, pure + tested). An embedded frame maximizes its video, then asks its parent (postMessage with a background-issued token the parent verifies) to maximize the `<iframe>` element, recursively up to the top. A parent frame without Wtv running breaks the chain; the video then fills only its iframe.
 - Maximize state lives in the pages, not the background, so it can't go stale. Restore is broadcast to all frames. Esc (page or shield focus) restores; so does the maximized element disappearing. Players that swap `<video>` elements are followed.
+- **Kept on top while the page re-lays out.** A page that moves its player in the DOM (YouTube, for a few seconds after a resize and on its next video) takes it out of the top layer without a `toggle` event (removing an element hides its popover silently): it keeps the fixed, full-size styles but the page draws over it. So after maximizing, after each `resize`, in-page navigation (Navigation API `navigatesuccess`, `popstate`) and primary media change, the frame checks at 50 ms, 250 ms, 0.5, 1, 2, 3.5 and 5 s (a new trigger starts over) and shows it again if it fell out (`reassertMaximized`); the overlay then restacks above it. A post's lifted player gets the same check on its 1 s recheck.
 - **TV mode** = fullscreen window + maximized video, per tab, in `storage.session` with the window's previous state. `chrome.windows.update(windowId, { state: "fullscreen" })` needs no user gesture and **survives navigation**, unlike `requestFullscreen()`, which would exit on every playlist entry. New pages in a TV-mode tab re-maximize once a frame reports a viewable video (`VIEW_READY`). Esc, the shortcut, or the popup exit TV mode and restore the window; leaving fullscreen any other way also ends it.
 - **Maximize kept** (`wtv.maximizeKept`, session, per tab): maximizing by hand (shortcut, popup, double-click) is remembered, and while a playlist plays in the tab each new entry's page maximizes once its video is up, as in TV mode. Restoring by hand (the same toggle, Esc, leaving TV mode) forgets it; a page losing its maximized video doesn't. Outside a playlist, new pages aren't maximized.
 - Popup: **Maximize / Restore**, **TV mode / Exit TV mode**, the bound shortcuts, **Shortcuts…**.
@@ -432,7 +437,7 @@ What Wtv learns about each URL as it plays in a playlist, for the playlist featu
 
 ### Playlist explorer (side panel)
 
-The side panel's **Playlists** view, for browsing while watching (`src/entrypoints/sidepanel/explorer.ts`). Opened from the popup's **Explore…** (Playlist row), or the side panel's own tab; the panel reopens on the last view used.
+The side panel's **Playlists** view, for browsing while watching (`src/entrypoints/sidepanel/explorer.ts`). Opened from the popup's **Explore…** (Playlist row), or the side panel's own tab; the panel reopens on the last view used. The toolbar icon's right-click menu has **Open side panel** too (on the last view; `src/lib/action-menu.ts`, created with the playlist menus since their rebuild clears every menu).
 
 - **Cards:** built-in and yours together, most recently played first (`wtv.playlistPlays`), then never-played ones: yours, then built-ins, each by name (`explorerOrder`, tested). Each card: the cover (see Media library → Playlist covers), name, "Built in", entry count, length when known ("about 40 min", "+" while some entries are unknown), "played 2 h ago".
 - **Search** (one box): by playlist name and entry title (the entry's own, else the library's). Case- and accent-insensitive; every word must match, in the name or split between the name and one entry's title. A name match shows the whole playlist; otherwise the card lists just the matching entries, open (`matchPlaylist`, tested).
@@ -486,9 +491,19 @@ Dev only, never published: a second computer (Windows) runs the current build un
 - **Load once:** chrome://extensions → Developer mode → Load unpacked → the folder. The ID comes from the folder's path, which never changes, so playlists and settings survive every update (reloads keep storage; the schema check sees the current version). Removing the extension deletes them; Export everything first.
 - **Self-reload** (`src/lib/lan/updates.ts`, LAN builds only): every minute (an alarm) and at start, the background reads its own `build.json` from disk; when it names another build, it reloads, unless a playlist is playing or a Wtv page (playlists, options, side panel, popup) is open, in which case it waits for the next check. A reload that left the same build running isn't retried for that disk build (no reload loop).
 
+### Icons + Credits
+
+- **Artwork** in `brand/source/` (Wtv logo, play TV, static TV: rounded TVs on black). `npm run icons` (`scripts/brand/icons.swift`, macOS CoreGraphics; no npm dependency) cuts the black around each TV to transparent (a flood fill from the edges, so black inside the TV stays; edge brightness becomes alpha, keeping the anti-aliasing), crops to a square, and scales by exact area averaging (each pixel the average of the source under it; CoreGraphics' interpolation came out blurred and muddy at toolbar sizes), sharpened with an unsharp mask at 48 px and under (strongest at 32 and under). It writes:
+    - `brand/wtv-*.png`: the cut-outs at full size.
+    - `public/icon/{16,24,32}.png`: the play TV (toolbar button, tab icons of Wtv's pages); the logo's lettering doesn't survive under 48 px. `public/icon/{48,128}.png`: the logo, the 128 with 96 px of artwork and 16 px transparent each side (Chrome's icon guideline). Named in the manifest (`icons`, `action.default_icon`).
+    - `public/wtv-logo.png` (256 px): the Credits dialog. `public/wtv-logo-96.png`: the popup header (48 px on 2× screens; `icon/48.png` on 1×).
+    - `brand/store/`, not shipped, for the dashboards: `chrome-store-icon-128.png` (Chrome Web Store store icon), `edge-logo-300.png` (Edge Add-ons logo, 300 recommended), `promo-small-440x280.png` and `promo-marquee-1400x560.png` (both stores' small and marquee promo tiles: the logo on a dark purple glow). Screenshots (1280×800) are still to take.
+    - The static TV isn't used yet: it's for an "off" toolbar state (see Open).
+- **Credits** (`src/lib/ui/credits.ts`): a modal `<dialog>` with the logo, name and version over the about text in `src/credits.html` (plain HTML, edited by hand; links open in a new tab). Opened from **Credits…** in the popup's Settings row, the logo in the popup's header (left of the page's host, or "Wtv" off web pages), and the settings page header. Esc, Close or a click outside closes it.
+
 ### Misc
 
-- Toolbar badge state: on / ad / broken. (`AD` and `!` done; an "on" state isn't, since a badge on every page would be noise. Revisit with an icon variant instead.)
+- Toolbar badge state: on / ad / broken. (`AD` and `!` done; an "on" state isn't, since a badge on every page would be noise. Revisit with an icon variant instead: the static TV artwork is ready for "off".)
 - Per-site enable toggle. (Done as the popup's **Enable / Disable on this site**; bundled sites use Chrome's site-access menu.)
 - **Backup / restore** (`src/lib/backup.ts`, pure + tested; playlists page sidebar). **Export everything** downloads `wtv-backup-<date>.json`: `{ format: "wtv-backup", version: 1, exportedAt, playlists, overrides, settings }`. Not the image library (re-imported from its folder) or the media library (rebuilt by playing). **Import…** validates everything (malformed playlists, built-in ids, duplicates, bad selectors are dropped and listed), then confirms a merge before writing: playlists by id (added / replaced if different / unchanged), selector overrides per site and role (the backup's win), settings replaced. Other versions of the format are refused.
 - Unit tests (Vitest) for the playlist parser, filename durations, timestamp parsing, and override merging.

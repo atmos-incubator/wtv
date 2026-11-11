@@ -107,3 +107,29 @@ describe('resolveImages without a keyword', () => {
     expect(resolveImages([], 'youtube.com', null)).toEqual([]);
   });
 });
+
+describe('resolveImages with a default folder', () => {
+  const tagged = [
+    img(null, 'tv', 'test_card'),
+    img(null, 'cats', 'tabby'),
+    img('youtube.com', 'tv', 'red_card'),
+    img('youtube.com', null, 'sunset'),
+    img('vimeo.com', 'birds', 'parrot'),
+  ];
+
+  it('takes the place of top-level files for [img]', () => {
+    expect(stems(resolveImages(tagged, 'example.com', null, 'tv'))).toEqual(['test_card']);
+    expect(stems(resolveImages(tagged, 'example.com', null, 'TV '))).toEqual(['test_card']);
+  });
+
+  it('comes after the domain folder’s own top level, and its own default folder first', () => {
+    expect(stems(resolveImages(tagged, 'www.youtube.com', null, 'tv'))).toEqual(['sunset']);
+    expect(stems(resolveImages(tagged.filter((m) => m.stem !== 'sunset'), 'www.youtube.com', null, 'tv'))).toEqual(['red_card']);
+    expect(stems(resolveImages(tagged, 'vimeo.com', null, 'tv'))).toEqual(['test_card']);
+  });
+
+  it('still falls back to top-level files, and leaves keywords alone', () => {
+    expect(stems(resolveImages(lib, 'vimeo.com', null, 'missing'))).toEqual(['relax', 'sleepy_cats']);
+    expect(stems(resolveImages(tagged, 'example.com', 'cats', 'tv'))).toEqual(['tabby']);
+  });
+});
