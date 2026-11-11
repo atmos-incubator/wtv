@@ -28,6 +28,9 @@
 
 .PARAMETER Uninstall
   Stop checking (now and at sign-in). The extension folder is left alone.
+
+.PARAMETER Force
+  Copy the build again even when the folder says it's up to date (repairs a bad copy).
 #>
 [CmdletBinding()]
 param(
@@ -35,7 +38,8 @@ param(
   [string]$Target = (Join-Path $env:LOCALAPPDATA 'Wtv\extension'),
   [int]$Every = 0,
   [switch]$Install,
-  [switch]$Uninstall
+  [switch]$Uninstall,
+  [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,7 +85,7 @@ function Assert-Target {
 function Sync-Once {
   $remote = Invoke-RestMethod -Uri "$Server/build.json" -TimeoutSec 15 -UseBasicParsing
   if (-not $remote.id) { throw "$Server/build.json has no build id" }
-  if ($remote.id -eq (Get-BuildId $Target)) { return $false }
+  if (-not $Force -and $remote.id -eq (Get-BuildId $Target)) { return $false }
 
   Assert-Target
   $work = Join-Path ([IO.Path]::GetTempPath()) ('wtv-sync-' + [guid]::NewGuid())
@@ -96,8 +100,17 @@ function Sync-Once {
       throw 'the download is not a whole Wtv build'
     }
     New-Item -ItemType Directory -Force -Path $Target | Out-Null
-    # Everything but build.json, then build.json: Wtv only reloads once the rest is in place.
-    robocopy $unpacked $Target /MIR /XF build.json /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    # /IS /IT: copy every file, always. The zip gives every file the same date, so robocopy
+    # took a page whose size hadn't changed (sidepanel.html) for "the same file" and kept the
+    # old one, which named scripts and styles /MIR had just deleted.
+    # In three steps, so the folder is never a mix that doesn't work:
+    #   1. the new scripts and styles (new names), keeping the old ones;
+    #   2. the pages and manifest that name them, then the old files go;
+    #   3. build.json last: Wtv only reloads once the rest is in place.
+    $quiet = @('/R:3', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS', '/NP')
+    robocopy $unpacked $Target /E /IS /IT /XF build.json manifest.json *.html @quiet | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "copying into $Target failed (robocopy $LASTEXITCODE)" }
+    robocopy $unpacked $Target /MIR /IS /IT /XF build.json @quiet | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "copying into $Target failed (robocopy $LASTEXITCODE)" }
     Copy-Item -LiteralPath (Join-Path $unpacked 'build.json') -Destination (Join-Path $Target 'build.json') -Force
     Write-Log "updated to $id"

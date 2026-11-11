@@ -91,6 +91,8 @@ from then on (from each sign-in too). Then, once, in Chrome:
 
 New builds reload Wtv by themselves once no playlist is playing and no Wtv page is open.
 Never Remove the extension: that deletes its playlists. Reload is fine.
+If Wtv looks broken after an update (unstyled pages), run the line above again with -Force
+added: it updates this script, copies the whole build again, then Reload Wtv in Chrome.
 To stop syncing: powershell -ExecutionPolicy Bypass -File %LOCALAPPDATA%\\Wtv\\wtv-sync.ps1 -Uninstall
 `;
 }
