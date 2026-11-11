@@ -33,6 +33,10 @@ export interface MediaHandle {
   /** Seconds back (−) or forward from where it is, within the media. */
   skip(by: number): void;
   setMuted(muted: boolean): void;
+  /** 0–1, as the element has it (muted aside). */
+  volume(): number;
+  setVolume(volume: number): void;
+  muted(): boolean;
 }
 
 const MEDIA_EVENTS = [
@@ -100,6 +104,15 @@ class DirectHandle implements MediaHandle {
   setMuted(muted: boolean): void {
     this.element.muted = muted;
   }
+  volume(): number {
+    return this.element.volume;
+  }
+  setVolume(volume: number): void {
+    this.element.volume = volume;
+  }
+  muted(): boolean {
+    return this.element.muted;
+  }
 }
 
 class BridgedHandle implements MediaHandle {
@@ -148,6 +161,17 @@ class BridgedHandle implements MediaHandle {
   }
   setMuted(muted: boolean): void {
     this.send({ id: this.state.id, cmd: 'mute', muted });
+  }
+  volume(): number {
+    return this.state.volume;
+  }
+  setVolume(volume: number): void {
+    this.send({ id: this.state.id, cmd: 'volume', volume });
+    // The page reports the change back, but the next ↑ / ↓ may come first.
+    this.state = { ...this.state, volume };
+  }
+  muted(): boolean {
+    return this.state.muted;
   }
 }
 

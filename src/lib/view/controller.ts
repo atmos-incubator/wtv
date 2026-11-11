@@ -16,10 +16,12 @@
  * playlist plays there its next entries maximize too, the same way, until the user
  * restores (or Esc). A page losing its maximized video doesn't count as restoring.
  *
- * Skip back / forward (arrow keys over the video): to the frame play / pause goes to.
+ * Skip back / forward and volume up / down (arrow keys over the video): to the frame play /
+ * pause goes to.
  */
 import { browser } from 'wxt/browser';
 import { toggleTabMute } from '../ads/controller';
+import { VOLUME_STEP } from '../media/protocol';
 import { KEYS } from '../storage';
 import { electFrame, type FrameReport } from './elect';
 import {
@@ -244,6 +246,9 @@ async function runOp(tabId: number, op: ViewOp): Promise<void> {
     case 'skip-back':
     case 'skip-forward':
       return toPlaybackFrame(tabId, { type: VIEW_APPLY, op: 'skip', by: op === 'skip-back' ? -SKIP_S : SKIP_S });
+    case 'volume-up':
+    case 'volume-down':
+      return toPlaybackFrame(tabId, { type: VIEW_APPLY, op: 'volume', by: op === 'volume-up' ? VOLUME_STEP : -VOLUME_STEP });
     case 'mute':
       return toggleTabMute(tabId);
   }

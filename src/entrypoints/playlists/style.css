@@ -225,17 +225,62 @@ code,
   align-items: start;
 }
 
+/* The text over a backdrop of the same lines, where a line can be highlighted (line-link.ts).
+   The two must lay text out identically: same font, padding, border and wrapping. */
+.text-wrap {
+  position: relative;
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+textarea,
+.text-backdrop {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 13px/1.55 var(--mono);
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  letter-spacing: normal;
+}
+
 textarea {
+  position: relative;
+  display: block;
   width: 100%;
   min-height: 360px;
   resize: vertical;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg);
+  background: transparent;
   color: var(--fg);
-  font: 13px/1.55 var(--mono);
-  tab-size: 4;
+}
+
+.text-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-color: transparent;
+  color: transparent;
+  pointer-events: none;
+}
+
+.text-lines > div {
+  border-radius: 3px;
+}
+
+.text-lines > div.hl {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.text-lines > div.flash {
+  animation: line-flash 1.2s ease-out;
+}
+
+@keyframes line-flash {
+  from {
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
 }
 
 .problems {
@@ -277,6 +322,7 @@ textarea {
 }
 
 .entries li {
+  cursor: pointer;
   display: grid;
   grid-template-columns: auto 64px minmax(0, 1fr) auto;
   gap: 2px 10px;
@@ -285,6 +331,13 @@ textarea {
   border-radius: 8px;
   background: var(--panel);
   counter-increment: entry;
+}
+
+/* Its line in the text is under the pointer (or the pointer is on it). */
+.entries li.hl,
+.entries li:hover {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: -2px;
 }
 
 .entries li::before {

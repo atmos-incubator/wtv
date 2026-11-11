@@ -45,6 +45,7 @@ export default defineContentScript({
     startContinuePrompt(ctx, agent);
     const view = startViewService(ctx, agent, ads);
     const playlist = startPlaylistClient(ctx, agent, ads);
+    view.onVolume((volume) => playlist.rememberVolume(volume));
     const overlay = startOverlay(ctx, agent, ads, view, playlist);
     startPickerService(ctx, agent, overlay);
     if (DEV_TOOLS) startSnapshotButton(ctx, agent, ads);

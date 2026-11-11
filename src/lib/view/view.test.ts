@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { electFrame, type FrameReport } from './elect';
-import { skipKey } from './keys';
+import { skipKey, volumeKey } from './keys';
 import {
   VIEW_APPLY,
   VIEW_COMMAND,
@@ -102,5 +102,17 @@ describe('skipKey', () => {
     expect(skipKey(key('ArrowUp'))).toBeNull();
     expect(skipKey(key('ArrowLeft', { metaKey: true }))).toBeNull();
     expect(skipKey(key('ArrowRight', { altKey: true }))).toBeNull();
+  });
+});
+
+describe('volumeKey', () => {
+  const key = (k: string, mods: Partial<KeyboardEvent> = {}) =>
+    ({ key: k, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent;
+  it('answers plain ↑ / ↓ only', () => {
+    expect(volumeKey(key('ArrowUp'))).toBe('up');
+    expect(volumeKey(key('ArrowDown'))).toBe('down');
+    expect(volumeKey(key('ArrowUp', { shiftKey: true }))).toBeNull();
+    expect(volumeKey(key('ArrowDown', { metaKey: true }))).toBeNull();
+    expect(volumeKey(key('ArrowLeft'))).toBeNull();
   });
 });

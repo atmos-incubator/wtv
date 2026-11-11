@@ -132,6 +132,33 @@ main > *,
   cursor: pointer;
 }
 
+.toggle-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.each {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.each .seconds {
+  width: 56px;
+  padding: 2px 6px;
+  font: inherit;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.each .seconds:disabled {
+  opacity: 0.5;
+}
+
 .toggle input {
   margin: 0;
   accent-color: var(--accent);

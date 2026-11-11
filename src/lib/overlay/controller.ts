@@ -47,7 +47,7 @@ import { DEV_TOOLS } from '../env';
 import type { MediaAgent } from '../media/agent';
 import { scheduler } from '../schedule';
 import type { PlaylistClient } from '../playlist/client';
-import { skipKey } from '../view/keys';
+import { skipKey, volumeKey } from '../view/keys';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
 import { PAUSE_PICTURES_DELAY_MS, pausePicturesDue } from './pause';
@@ -315,6 +315,7 @@ export function startOverlay(
             host: location.hostname,
             items: [...(playlist.show() ?? DEFAULT_AD_ITEMS)],
             paused: showPaused(),
+            slideS: null,
           },
           showTarget,
         );
@@ -327,6 +328,7 @@ export function startOverlay(
             host: location.hostname,
             items: [...(playlist.ads() ?? DEFAULT_AD_ITEMS)],
             paused: true,
+            slideS: ads.settings().pausePictureSeconds || null,
           },
           coverTarget,
         );
@@ -447,9 +449,12 @@ export function startOverlay(
       case 'key': {
         // ← / → over the show: skip back / forward (not during an ad, a loading screen
         // or a page show: those have nothing to skip).
+        // ↑ / ↓: volume, likewise.
         const skip = skipKey(event);
+        const vol = volumeKey(event);
         const skippable = mode === 'shield' || mode === 'shield-full' || mode === 'shield-max' || mode === 'show-pictures' || mode === 'pause-pictures';
         if (skip && skippable && !adActive()) view.skip(skip);
+        else if (vol && skippable && !adActive()) view.volume(vol);
         else forwardKey(event);
         break;
       }

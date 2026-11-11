@@ -12,7 +12,7 @@ import {
   type MediaStatus,
 } from '../../lib/messages';
 import { isWebUrl, originPatternForHost } from '../../lib/permissions';
-import { parseSettings, type SettingSwitch, type Settings } from '../../lib/settings';
+import { MAX_PICTURE_SECONDS, parseSettings, pictureSeconds, type SettingSwitch, type Settings } from '../../lib/settings';
 import { BUNDLED_SITES } from '../../lib/sites/bundled';
 import { loadOverrideStore } from '../../lib/sites/override-store';
 import { profileForHost } from '../../lib/sites/registry';
@@ -92,6 +92,30 @@ function toggle(label: string, key: SettingSwitch, settings: Settings): HTMLElem
     })();
   });
   return el('label', { className: 'toggle' }, input, document.createTextNode(label));
+}
+
+/** "Show pictures while paused", and how long each stays (empty: as the pictures say). */
+function pausePicturesRow(settings: Settings): HTMLElement {
+  const input = el('input', { className: 'seconds' });
+  input.type = 'number';
+  input.min = '1';
+  input.max = String(MAX_PICTURE_SECONDS);
+  input.step = '1';
+  input.placeholder = 'auto';
+  input.value = settings.pausePictureSeconds ? String(settings.pausePictureSeconds) : '';
+  input.disabled = !settings.pausePictures;
+  input.title = 'How long each picture stays while paused. Empty: as the picture says (its file name), else 5 s.';
+  input.setAttribute('aria-label', 'Seconds each picture shows while paused');
+  input.addEventListener('change', () => {
+    void (async () => {
+      const seconds = pictureSeconds(input.value);
+      input.value = seconds ? String(seconds) : '';
+      const current = await loadSettings();
+      await writeKey(local, KEYS.settings, { ...current, pausePictureSeconds: seconds });
+    })();
+  });
+  const each = el('label', { className: 'each' }, document.createTextNode('each'), input, document.createTextNode('s'));
+  return el('div', { className: 'toggle-line' }, toggle('Show pictures while paused', 'pausePictures', settings), each);
 }
 
 async function viewState(tabId: number): Promise<ViewState | null> {
@@ -363,7 +387,7 @@ async function render(): Promise<void> {
     toggle('Mute ads', 'muteAds', settings),
     toggle('Auto-skip ads', 'autoSkip', settings),
     toggle('Show pictures during ads', 'adOverlay', settings),
-    toggle('Show pictures while paused', 'pausePictures', settings),
+    pausePicturesRow(settings),
     toggle('Click the video to play / pause (blocks ad clicks)', 'clickShield', settings),
     el('div', { className: 'actions' }, pictures, creditsButton()),
   );

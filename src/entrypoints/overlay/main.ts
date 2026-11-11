@@ -8,10 +8,11 @@
  */
 import './style.css';
 import { getImageBlob } from '../../lib/images/db';
-import { fitMode } from '../../lib/overlay/fit';
+import { fitMode, pans, placePicture, type Point } from '../../lib/overlay/fit';
 import { bundledResolved, createImageResolver } from '../../lib/images/resolver';
 import {
   DEFAULT_AD_ITEMS,
+  DEFAULT_IMAGE_MS,
   OVERLAY_INIT,
   buildSlides,
   parseOverlayCommand,
@@ -62,11 +63,55 @@ function emit(event: OverlayEvent): void {
   port?.postMessage(event);
 }
 
-/** Cover if that crops < 20% of the picture, else letterbox. Re-run on resize. */
+/** Pans and the slide they belong to: when it started (performance.now()) and how long it shows. */
+const PAN_ID = 'wtv-pan';
+const panTimes = new WeakMap<HTMLImageElement, { start: number; durationMs: number }>();
+
+const translate = (p: Point) => `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+
+/**
+ * Videos: cover if that crops < 20%, else letterbox. Pictures (fit.ts placePicture): the
+ * same, but one that doesn't fit pans across the frame over the time it shows. Re-run on
+ * resize: a pan carries on from where it's got to.
+ */
 function applyFit(media: HTMLImageElement | HTMLVideoElement): void {
-  const [w, h] =
-    media instanceof HTMLVideoElement ? [media.videoWidth, media.videoHeight] : [media.naturalWidth, media.naturalHeight];
-  media.style.objectFit = fitMode(w, h, window.innerWidth, window.innerHeight);
+  if (media instanceof HTMLVideoElement) {
+    media.style.objectFit = fitMode(media.videoWidth, media.videoHeight, window.innerWidth, window.innerHeight);
+    return;
+  }
+  const times = panTimes.get(media) ?? { start: performance.now(), durationMs: DEFAULT_IMAGE_MS };
+  panTimes.set(media, times);
+  for (const a of media.getAnimations()) if (a.id === PAN_ID) a.cancel();
+  const place = placePicture(media.naturalWidth, media.naturalHeight, window.innerWidth, window.innerHeight, times.durationMs);
+  if (!pans(place)) {
+    media.classList.remove('pan');
+    media.style.removeProperty('width');
+    media.style.removeProperty('height');
+    media.style.objectFit = fitMode(media.naturalWidth, media.naturalHeight, window.innerWidth, window.innerHeight);
+    return;
+  }
+  media.classList.add('pan');
+  media.style.width = `${place.width}px`;
+  media.style.height = `${place.height}px`;
+  const done = Math.min(1, Math.max(0, (performance.now() - times.start) / times.durationMs));
+  const at = { x: place.from.x + (place.to.x - place.from.x) * done, y: place.from.y + (place.to.y - place.from.y) * done };
+  const anim = media.animate([{ transform: translate(at) }, { transform: translate(place.to) }], {
+    duration: Math.max(1, times.durationMs * (1 - done)),
+    // Eases in and out from the start; after a resize, just glides on to the end.
+    easing: done === 0 ? 'ease-in-out' : 'linear',
+    fill: 'forwards',
+  });
+  anim.id = PAN_ID;
+  if (frozen) anim.pause();
+}
+
+/** Pictures as the show, paused: the pan holds with the slide. */
+function holdPans(hold: boolean): void {
+  for (const a of document.getAnimations()) {
+    if (a.id !== PAN_ID) continue;
+    if (hold) a.pause();
+    else a.play();
+  }
 }
 
 function refitAll(): void {
@@ -193,6 +238,7 @@ async function renderSlide(slide: Slide, gen: number): Promise<void> {
       for (const u of urls) URL.revokeObjectURL(u);
       return;
     }
+    panTimes.set(img, { start: performance.now(), durationMs: slide.durationMs });
     applyFit(img);
     present(img, urls);
   }
@@ -200,7 +246,7 @@ async function renderSlide(slide: Slide, gen: number): Promise<void> {
 
 const adKey = (cmd: Extract<OverlayCommand, { type: 'ad' }>) => JSON.stringify(['ad', cmd.host, cmd.items]);
 const picturesKey = (cmd: Extract<OverlayCommand, { type: 'pictures' }>) =>
-  JSON.stringify(['pictures', cmd.purpose, cmd.host, cmd.items]);
+  JSON.stringify(['pictures', cmd.purpose, cmd.host, cmd.items, cmd.slideS]);
 
 async function playAd(cmd: Extract<OverlayCommand, { type: 'ad' }>): Promise<void> {
   reset();
@@ -222,6 +268,7 @@ function setPicturesState(cmd: Extract<OverlayCommand, { type: 'pictures' }>): v
   root.classList.toggle('dim', cmd.paused);
   pausedMark.hidden = !cmd.paused;
   frozen = cmd.paused;
+  holdPans(frozen);
   if (!frozen && resumeSlides) {
     const go = resumeSlides;
     resumeSlides = null;
@@ -234,7 +281,7 @@ function showPictures(cmd: Extract<OverlayCommand, { type: 'pictures' }>): void 
     reset();
     programKey = picturesKey(cmd);
     interactive = true;
-    void playProgram(cmd.host, cmd.items);
+    void playProgram(cmd.host, cmd.items, null, cmd.slideS);
   }
   setPicturesState(cmd);
 }
@@ -246,7 +293,12 @@ function showPictures(cmd: Extract<OverlayCommand, { type: 'pictures' }>): void 
  * its entry), so one move doesn't flash one picture and then another; a new move starts
  * with a different one. It remembers what it shows.
  */
-async function playProgram(host: string, items: readonly ProgramItem[], loading: { gen: number | null } | null = null): Promise<void> {
+async function playProgram(
+  host: string,
+  items: readonly ProgramItem[],
+  loading: { gen: number | null } | null = null,
+  slideS: number | null = null,
+): Promise<void> {
   const gen = generation;
   const resolve = await createImageResolver(host);
   let slides: Slide[] = [];
@@ -260,8 +312,9 @@ async function playProgram(host: string, items: readonly ProgramItem[], loading:
       return;
     }
     if (index >= slides.length) {
-      slides = buildSlides(items, resolve);
-      if (slides.length === 0) slides = buildSlides(DEFAULT_AD_ITEMS, bundledResolved);
+      const pictureMs = slideS === null ? null : slideS * 1000;
+      slides = buildSlides(items, resolve, Math.random, pictureMs);
+      if (slides.length === 0) slides = buildSlides(DEFAULT_AD_ITEMS, bundledResolved, Math.random, pictureMs);
       if (loading && first) {
         const ordered = orderLoadingSlides(slides, loadingPicture(loading.gen));
         slides = ordered.slides;

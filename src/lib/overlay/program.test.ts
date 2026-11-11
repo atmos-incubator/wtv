@@ -98,7 +98,11 @@ describe('pictures command', () => {
       host: 'a.com',
       items: [{ kind: 'img', keyword: 'sea', durationS: null }],
       paused: true,
+      slideS: null,
     });
+    expect(
+      parseOverlayCommand({ type: 'pictures', purpose: 'pause', host: 'a.com', items: [], paused: true, slideS: 30 }),
+    ).toMatchObject({ slideS: 30 });
     expect(parseOverlayCommand({ type: 'pictures', purpose: 'pause', host: 'a.com', items: [], paused: true })).toMatchObject({
       items: [{ kind: 'img', keyword: null, durationS: null }],
     });
@@ -215,6 +219,19 @@ describe('buildSlides', () => {
     );
     expect(slides.map((s) => s.kind)).toEqual(['text', 'img', 'text']);
     expect(slides[0]).toEqual({ kind: 'text', text: 'Take a moment to breathe', durationMs: 20_000 });
+  });
+
+  it('gives every picture the set duration, and leaves quotes theirs', () => {
+    const slides = buildSlides(
+      [
+        { kind: 'img', keyword: 'cats', durationS: 3 },
+        { kind: 'text', text: 'Relax', durationS: 5 },
+      ],
+      () => [url('a', 7000)],
+      noShuffle,
+      30_000,
+    );
+    expect(slides.map((s) => s.durationMs)).toEqual([30_000, 5000]);
   });
 
   it('skips image items that resolve to nothing', () => {

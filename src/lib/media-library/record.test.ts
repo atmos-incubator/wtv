@@ -66,6 +66,15 @@ describe('mergeRecord', () => {
     expect(thumbnailStale(mergeRecord(cached, { url, thumbnailUrl: 'https://i.ytimg.com/b.jpg' }, 3)!)).toBe(true);
   });
 
+  it('remembers a volume until another is set', () => {
+    const r = mergeRecord(null, { url, volume: 0.4 }, 1)!;
+    expect(r.volume).toBe(0.4);
+    expect(mergeRecord(r, { url, title: 'T' }, 2)!.volume).toBe(0.4);
+    expect(mergeRecord(r, { url, volume: 0.7 }, 3)!.volume).toBe(0.7);
+    expect(mergeRecord(null, { url }, 1)!.volume).toBeNull();
+    expect(parseRecord({ key: 'k', url: 'u', volume: 3 })?.volume).toBeNull();
+  });
+
   it('round-trips through storage, dropping malformed records', () => {
     const r = mergeRecord(null, { url, title: 'T', lastPlayedAt: 5 }, 1)!;
     expect(parseRecord(JSON.parse(JSON.stringify(r)))).toEqual(r);

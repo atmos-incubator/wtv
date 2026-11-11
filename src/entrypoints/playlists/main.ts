@@ -56,6 +56,7 @@ import { findPostAdapter } from '../../lib/posts/adapters';
 import { cardSource } from '../../lib/posts/source';
 import { KEYS, readKey, writeKey } from '../../lib/storage';
 import { cover, picture } from '../../lib/ui/cover';
+import { linkLines } from './line-link';
 
 const local = browserAreas().local;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -81,6 +82,12 @@ const lengthNote = $('length');
 const removeGone = $<HTMLButtonElement>('remove-gone');
 
 textInput.placeholder = 'Paste URLs here, one per line.\n\nhttps://www.youtube.com/watch?v=… | Title | t=1:37';
+
+/** The pointer over an entry's line in the text: that entry stands out in the list, and back. */
+const lineLink = linkLines(textInput, (line) => {
+  const index = line === null ? -1 : compiled.entries.findIndex((e) => e.line === line);
+  entriesList.querySelectorAll(':scope > li').forEach((li, i) => li.classList.toggle('hl', i === index));
+});
 
 type AnyPlaylist = StoredPlaylist | BuiltinPlaylist;
 const isBuiltin = (p: AnyPlaylist | null): p is BuiltinPlaylist => p !== null && 'builtin' in p;
@@ -229,6 +236,14 @@ function renderPreview(): void {
         if (isMediaView(e.view)) meta.push(describeProgram('ads', e.ads, e.ads !== null && e.ads === compiled.defaultAds));
         const li = el('li');
         li.classList.toggle('gone', record?.status === 'gone');
+        // Hover: its line stands out in the text; a click (not on ▶ / ↗) scrolls the text to it.
+        li.addEventListener('mouseenter', () => lineLink.highlight(e.line));
+        li.addEventListener('mouseleave', () => lineLink.highlight(null));
+        li.addEventListener('click', (ev) => {
+          if ((ev.target as Element).closest('button, a')) return;
+          lineLink.reveal(e.line);
+        });
+        li.title = `Line ${e.line + 1}: click to go to it in the text`;
         const play = el('button', '', '▶');
         play.type = 'button';
         play.title = 'Play from here';

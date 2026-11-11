@@ -10,6 +10,7 @@
  *   background → content (tabs.sendMessage, one frame or all)
  *     VIEW_APPLY    { op: 'maximize', token } → boolean
  *                   { op: 'restore' } | { op: 'play-pause' } | { op: 'skip', by }   (seconds, ±)
+ *                   { op: 'volume', by }   (of 1, ±)
  *                   { op: 'candidate' } → FrameCandidate   (fallback when executeScript can't run)
  *
  * The background picks a frame by reading every frame's FrameCandidate (see elect.ts).
@@ -37,6 +38,8 @@ export const VIEW_OPS = [
   'mute',
   'skip-back',
   'skip-forward',
+  'volume-up',
+  'volume-down',
 ] as const;
 export type ViewOp = (typeof VIEW_OPS)[number];
 
@@ -49,6 +52,7 @@ export type ViewRequest =
 export type ViewApply =
   | { type: typeof VIEW_APPLY; op: 'maximize'; token: string }
   | { type: typeof VIEW_APPLY; op: 'skip'; by: number }
+  | { type: typeof VIEW_APPLY; op: 'volume'; by: number }
   | { type: typeof VIEW_APPLY; op: 'restore' | 'play-pause' | 'candidate' };
 
 export interface ViewState {
@@ -110,6 +114,10 @@ export function parseViewApply(raw: unknown): ViewApply | null {
     case 'skip':
       return typeof raw.by === 'number' && Number.isFinite(raw.by) && raw.by !== 0 && Math.abs(raw.by) <= 3600
         ? { type: VIEW_APPLY, op: 'skip', by: raw.by }
+        : null;
+    case 'volume':
+      return typeof raw.by === 'number' && Number.isFinite(raw.by) && raw.by !== 0 && Math.abs(raw.by) <= 1
+        ? { type: VIEW_APPLY, op: 'volume', by: raw.by }
         : null;
     case 'restore':
     case 'play-pause':

@@ -30,6 +30,8 @@ export interface MediaRecord {
   thumbnailCachedFrom: string | null;
   status: MediaStatus;
   lastPlayedAt: number | null;
+  /** The volume (0–1) last set with Wtv's ↑ / ↓ while it played; applied when it plays again. Null: the site's own. */
+  volume: number | null;
   updatedAt: number;
 }
 
@@ -44,6 +46,7 @@ export interface MediaPatch {
   thumbnailCachedFrom?: string | null;
   status?: MediaStatus;
   lastPlayedAt?: number;
+  volume?: number | null;
 }
 
 const DROP_PARAMS = new Set(['t', 'start', 'si', 'pp', 'feature']);
@@ -78,6 +81,11 @@ const httpUrl = (v: string | null | undefined): string | null =>
 const seconds = (v: number | null | undefined): number | null =>
   typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.round(v * 10) / 10 : null;
 
+/** A volume 0–1 (to two places), or null. */
+export function volumeLevel(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? Math.round(v * 100) / 100 : null;
+}
+
 /**
  * Apply a patch. Missing fields keep what's known; a page that couldn't find a title
  * (null) doesn't erase one found before. A new thumbnail URL keeps the cached picture until
@@ -97,6 +105,7 @@ export function mergeRecord(old: MediaRecord | null, patch: MediaPatch, now: num
     thumbnailCachedFrom: null,
     status: 'ok',
     lastPlayedAt: null,
+    volume: null,
     updatedAt: now,
   };
   const live = patch.live ?? base.live;
@@ -112,6 +121,7 @@ export function mergeRecord(old: MediaRecord | null, patch: MediaPatch, now: num
     thumbnailCachedFrom: patch.thumbnailCachedFrom !== undefined ? patch.thumbnailCachedFrom : base.thumbnailCachedFrom,
     status: patch.status ?? base.status,
     lastPlayedAt: patch.lastPlayedAt ?? base.lastPlayedAt,
+    volume: patch.volume !== undefined ? volumeLevel(patch.volume) : (base.volume ?? null),
     updatedAt: now,
   };
 }
@@ -137,6 +147,7 @@ export function parseRecord(raw: unknown): MediaRecord | null {
     thumbnailCachedFrom: str(r.thumbnailCachedFrom),
     status: r.status === 'gone' ? 'gone' : 'ok',
     lastPlayedAt: typeof r.lastPlayedAt === 'number' ? r.lastPlayedAt : null,
+    volume: volumeLevel(r.volume),
     updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : 0,
   };
 }

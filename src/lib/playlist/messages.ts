@@ -4,7 +4,8 @@
  *   content → background (runtime.sendMessage)
  *     PL_HELLO                       → EntryInfo | null   "is this page a playlist entry?" (every frame, at start)
  *     PL_MEDIA  { gen, event }                             playing / near-end / ended / blocked / gone, from frames that got an EntryInfo
- *     PL_INFO   { gen, info }                              what the page says about the entry (title, duration…), for the media library
+ *     PL_INFO   { gen, info }                              what the page says about the entry (title, duration…), for the media library;
+ *                                                          also the volume the viewer set with ↑ / ↓
  *     PL_PAGE_POST { gen, result, inPage }                 `view=card` read from the post's own page (top frame): the post, or why not.
  *                                                          `inPage`: it has an embedded player, so the card shows on that page (posts/embed.ts)
  *
@@ -31,6 +32,7 @@
  */
 import { parseProgramItem, type ProgramItem } from '../overlay/program';
 import { parsePost, type PostResult } from '../posts/adapters';
+import { volumeLevel } from '../media-library/record';
 import { isViewMode, type ViewMode } from './format';
 
 export const PL_HELLO = 'wtv/playlist/hello';
@@ -68,6 +70,8 @@ export interface EntryInfo {
   show: ProgramItem[] | null;
   /** `view: read`: words per minute; `scroll`: pixels a second; null: the default. */
   speed: number | null;
+  /** The volume (0–1) the viewer last set for this media (media library); null: the site's own. */
+  volume: number | null;
 }
 
 export type { PostResult } from '../posts/adapters';
@@ -101,6 +105,8 @@ export interface MediaInfo {
   thumbnailUrl?: string;
   durationS?: number;
   live?: boolean;
+  /** The viewer set the volume (↑ / ↓): remember it for the media. */
+  volume?: number;
 }
 
 export type ContentRequest =
@@ -189,6 +195,8 @@ function parseMediaInfo(raw: Record<string, unknown>): MediaInfo {
   if (thumbnailUrl && /^https?:\/\//i.test(thumbnailUrl)) info.thumbnailUrl = thumbnailUrl;
   if (typeof raw.durationS === 'number' && Number.isFinite(raw.durationS) && raw.durationS > 0) info.durationS = raw.durationS;
   if (raw.live === true) info.live = true;
+  const volume = volumeLevel(raw.volume);
+  if (volume !== null) info.volume = volume;
   return info;
 }
 
@@ -209,7 +217,7 @@ export function parsePlaylistApply(raw: unknown): PlaylistApply | null {
 
 export function parseEntryInfo(raw: unknown): EntryInfo | null {
   if (!isObj(raw)) return null;
-  const { gen, index, total, playlist, title, startS, endS, ads, view, show, speed } = raw;
+  const { gen, index, total, playlist, title, startS, endS, ads, view, show, speed, volume } = raw;
   const seconds = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
   const program = (v: unknown) =>
     Array.isArray(v) ? v.map(parseProgramItem).filter((i): i is ProgramItem => i !== null) : null;
@@ -226,6 +234,7 @@ export function parseEntryInfo(raw: unknown): EntryInfo | null {
     view: isViewMode(view) ? view : 'video',
     show: program(show),
     speed: typeof speed === 'number' && Number.isFinite(speed) && speed > 0 ? speed : null,
+    volume: volumeLevel(volume),
   };
 }
 

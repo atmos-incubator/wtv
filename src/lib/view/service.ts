@@ -15,13 +15,15 @@
  *
  * Esc (in any frame that has something maximized) or losing the maximized element
  * restores the whole tab via the background. While something's maximized, ← / → skip
- * back / forward (ahead of the site's own arrow keys, so it's the same step everywhere).
+ * back / forward and ↑ / ↓ change the volume (ahead of the site's own arrow keys, so it's
+ * the same step everywhere). A playlist remembers the volume for the media (client.ts).
  */
 import { browser } from 'wxt/browser';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
-import { skipKey } from './keys';
+import { volumeTarget } from '../media/protocol';
+import { skipKey, volumeKey } from './keys';
 import { maximizeElement, reassertMaximized } from './maximize';
 import {
   VIEW_COMMAND,
@@ -53,6 +55,10 @@ export interface ViewService {
   escape(): void;
   /** Skip the tab's show back or forward (through the background, which picks the frame). */
   skip(direction: 'back' | 'forward'): void;
+  /** The tab's show louder or quieter (through the background, like skip). */
+  volume(direction: 'up' | 'down'): void;
+  /** This frame changed its show's volume (↑ / ↓): the new level, 0–1. */
+  onVolume(cb: (volume: number) => void): () => void;
 }
 
 function typingIn(target: EventTarget | null): boolean {
@@ -91,6 +97,7 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
   /** Primary key we last told the background about (TV mode maximizes on VIEW_READY). */
   let readyFor: string | null = null;
   const listeners = new Set<() => void>();
+  const volumeListeners = new Set<(volume: number) => void>();
   let settleTimers: ReturnType<typeof setTimeout>[] = [];
 
   function notify(): void {
@@ -225,10 +232,12 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
     (e) => {
       if (!current) return;
       const skip = skipKey(e);
-      if (e.key !== 'Escape' && (!skip || typingIn(e.composedPath()[0] ?? e.target))) return;
+      const vol = volumeKey(e);
+      if (e.key !== 'Escape' && (!(skip || vol) || typingIn(e.composedPath()[0] ?? e.target))) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (skip) service.skip(skip);
+      else if (vol) service.volume(vol);
       else service.escape();
     },
     { capture: true, signal },
@@ -254,6 +263,18 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
         if (!ads.status()?.active) agent.primary()?.skip(msg.by);
         sendResponse(true);
         break;
+      case 'volume': {
+        // Not during an ad: it plays at its own level (or muted), and isn't the show's.
+        const primary = agent.primary();
+        if (primary && !ads.status()?.active) {
+          const to = volumeTarget(primary.volume(), msg.by);
+          if (msg.by > 0 && primary.muted()) primary.setMuted(false);
+          primary.setVolume(to);
+          for (const cb of volumeListeners) cb(to);
+        }
+        sendResponse(true);
+        break;
+      }
       case 'candidate':
         sendResponse(candidate());
         break;
@@ -288,6 +309,11 @@ export function startViewService(ctx: ContentScriptContext, agent: MediaAgent, a
       command('escape');
     },
     skip: (direction) => command(direction === 'back' ? 'skip-back' : 'skip-forward'),
+    volume: (direction) => command(direction === 'up' ? 'volume-up' : 'volume-down'),
+    onVolume(cb) {
+      volumeListeners.add(cb);
+      return () => volumeListeners.delete(cb);
+    },
   };
   return service;
 }

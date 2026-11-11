@@ -354,7 +354,15 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
     view: entry.view ?? 'video',
     show: entry.show ?? null,
     speed: entry.speed ?? null,
+    volume: await savedVolume(entry.url),
   };
+}
+
+/** The volume the viewer last set for this media, from the library. */
+async function savedVolume(url: string): Promise<number | null> {
+  const key = libraryKey(url);
+  if (!key) return null;
+  return (await getRecord(key).catch(() => null))?.volume ?? null;
 }
 
 /**

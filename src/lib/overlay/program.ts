@@ -40,8 +40,10 @@ export type OverlayCommand =
    * Pictures that aren't about an ad: `pause` while the show is paused (a click resumes
    * it), `show` for a playlist entry shown as pictures (clicks play / pause; `paused` dims
    * the pictures and shows ⏸). The slideshow keeps going when only `paused` changes.
+   * `slideS`: every picture stays this long (the `pausePictureSeconds` setting); null: as
+   * the pictures say.
    */
-  | { type: 'pictures'; purpose: PicturesPurpose; host: string; items: ProgramItem[]; paused: boolean }
+  | { type: 'pictures'; purpose: PicturesPurpose; host: string; items: ProgramItem[]; paused: boolean; slideS: number | null }
   /** A small "Show pictures" button in a corner of the player, after ✕ during an ad. */
   | { type: 'pill' }
   /**
@@ -194,6 +196,7 @@ export function parseOverlayCommand(raw: unknown): OverlayCommand | null {
         host: raw.host,
         items: parseItems(raw.items),
         paused: raw.paused,
+        slideS: isPositive(raw.slideS) ? raw.slideS : null,
       };
     }
     default:
@@ -270,13 +273,15 @@ export function shuffle<T>(items: readonly T[], rng: () => number = Math.random)
 
 /**
  * One pass through the program. Image items expand to their (shuffled) images; an
- * item's explicit duration beats the file name's, which beats the default.
+ * item's explicit duration beats the file name's, which beats the default, and
+ * `pictureMs` (pictures over a paused show) beats them all. Quotes keep their own.
  * The overlay loops by calling this again, so each loop gets a fresh shuffle.
  */
 export function buildSlides(
   items: readonly ProgramItem[],
   resolve: (keyword: string | null) => readonly ResolvedImage[],
   rng: () => number = Math.random,
+  pictureMs: number | null = null,
 ): Slide[] {
   const slides: Slide[] = [];
   for (const item of items) {
@@ -289,7 +294,7 @@ export function buildSlides(
         kind: 'img',
         src: img.src,
         isVideo: img.isVideo,
-        durationMs: item.durationS !== null ? item.durationS * 1000 : (img.durationMs ?? DEFAULT_IMAGE_MS),
+        durationMs: pictureMs ?? (item.durationS !== null ? item.durationS * 1000 : (img.durationMs ?? DEFAULT_IMAGE_MS)),
       });
     }
   }

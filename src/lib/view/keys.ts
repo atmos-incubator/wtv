@@ -1,5 +1,11 @@
 /** Keys Wtv answers over the show. Pure. */
 
+/** ↑ / ↓ with no modifier: volume up / down. */
+export function volumeKey(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>): 'up' | 'down' | null {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null;
+  return e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : null;
+}
+
 /** ← / → with no modifier (Shift aside): skip back / forward. */
 export function skipKey(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'>): 'back' | 'forward' | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;

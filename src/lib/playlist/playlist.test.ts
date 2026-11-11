@@ -160,7 +160,10 @@ describe('playlist messages', () => {
       view: 'video',
       show: null,
       speed: null,
+      volume: null,
     });
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', volume: 0.456 })?.volume).toBe(0.46);
+    expect(parseEntryInfo({ gen: 1, index: 0, total: 1, playlist: 'P', volume: 2 })?.volume).toBeNull();
     expect(
       parseEntryInfo({
         gen: 1,

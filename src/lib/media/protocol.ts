@@ -50,7 +50,8 @@ export type BridgeCommand =
   | { id: number; cmd: 'seek'; time: number }
   /** Seconds back (−) or forward from where it is now (the page's state can be stale). */
   | { id: number; cmd: 'skip'; by: number }
-  | { id: number; cmd: 'mute'; muted: boolean };
+  | { id: number; cmd: 'mute'; muted: boolean }
+  | { id: number; cmd: 'volume'; volume: number };
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -116,9 +117,27 @@ export function parseBridgeCommand(raw: unknown): BridgeCommand | null {
       return isNum(v.by) && v.by !== 0 && Math.abs(v.by) <= 3600 ? { id: v.id, cmd: 'skip', by: v.by } : null;
     case 'mute':
       return isBool(v.muted) ? { id: v.id, cmd: 'mute', muted: v.muted } : null;
+    case 'volume':
+      return isNum(v.volume) && v.volume >= 0 && v.volume <= 1 ? { id: v.id, cmd: 'volume', volume: v.volume } : null;
     default:
       return null;
   }
+}
+
+/** ↑ / ↓ change the volume this much (of 1). */
+export const VOLUME_STEP = 0.1;
+
+/**
+ * The volume after a step `by` from `current`: within 0–1, on the step grid (a site's 0.73
+ * goes to 0.8, not 0.83), to two places. Pure.
+ */
+export function volumeTarget(current: number, by: number): number {
+  const from = Number.isFinite(current) ? Math.min(1, Math.max(0, current)) : 1;
+  const steps = from / VOLUME_STEP;
+  // Already on the grid (give or take float noise): a whole step; else to the next line.
+  const onGrid = Math.abs(steps - Math.round(steps)) < 0.01;
+  const next = by > 0 ? (onGrid ? Math.round(steps) + 1 : Math.ceil(steps)) : onGrid ? Math.round(steps) - 1 : Math.floor(steps);
+  return Math.round(Math.min(1, Math.max(0, next * VOLUME_STEP)) * 100) / 100;
 }
 
 /** Encode a media duration for JSON (Infinity and NaN don't survive JSON). */

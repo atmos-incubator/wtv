@@ -242,6 +242,9 @@ export function installMediaHook(win: Window & typeof globalThis = window): void
       case 'mute':
         el.muted = cmd.muted;
         break;
+      case 'volume':
+        el.volume = cmd.volume;
+        break;
     }
   });
 }

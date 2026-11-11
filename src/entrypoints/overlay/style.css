@@ -73,6 +73,17 @@ body {
   display: block;
 }
 
+/* A picture panning across the frame (main.ts applyFit): its own size, moved by transform. */
+.layer img.pan {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
+  will-change: transform;
+}
+
 .quote {
   max-width: min(80%, 28em);
   margin: 0;

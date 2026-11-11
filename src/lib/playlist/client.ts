@@ -32,6 +32,8 @@
  *     own (an embed page) sends the page metadata after 8 s instead;
  *   - until then, every frame looks for the site's `unavailable` role once a second and
  *     reports `gone` if it shows (the runner shows "Unavailable" and moves on);
+ *   - the volume the viewer last set for the media with ↑ / ↓ (media library) is set once
+ *     it's played half a second ad-free; a new ↑ / ↓ is remembered for next time;
  *   - the entry's `[ads]` program replaces the default for the ad overlay, and
  *     `view=pictures` entries have their `[show]` program cover the media throughout.
  *
@@ -102,6 +104,8 @@ const SITE_AUTOPLAY_GRACE_MS = 2000;
 const ATTEMPT_DELAYS_MS = [0, 1500, 3000];
 /** Bridged media can't report its play() result; check whether it's playing after this. */
 const BRIDGED_CHECK_MS = 600;
+/** Set the entry's remembered volume once it's played this long with no ad. */
+const VOLUME_AFTER_MS = 500;
 /** Tell the runner about the entry once it's played this long with no ad. */
 const INFO_AFTER_MS = 3000;
 /** Top frame with no player of its own (the player is embedded): send the page metadata after this. */
@@ -186,6 +190,8 @@ export interface PlaylistClient {
   pointerMoved(): void;
   /** Hide the arrows (the selector picker is running). */
   suspendNav(on: boolean): void;
+  /** The viewer set the show's volume (↑ / ↓): remembered for the media, in a playlist. */
+  rememberVolume(volume: number): void;
 }
 
 export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent, ads: AdWatcher): PlaylistClient {
@@ -201,6 +207,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   /** Paused at the end time already (once: the viewer may play on). */
   let endDone = false;
   let seekDone = false;
+  /** The entry's remembered volume is set (or the viewer set one themselves). */
+  let volumeDone = false;
   /** Since when the primary has been playing with no ad showing (ms epoch), else null. */
   let cleanSince: number | null = null;
   let blackout: Blackout | null = null;
@@ -392,6 +400,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     const ad = adActive();
     if (ad || el.paused) cleanSince = null;
     else cleanSince ??= Date.now();
+    maybeSetVolume(el);
     if (seekDone || startS === null) return;
     const decision = seekDecision({
       startS,
@@ -408,6 +417,18 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
       console.info(`[wtv] seeking to the entry's start time, ${startS}s`);
       el.currentTime = startS;
     }
+  }
+
+  /**
+   * The volume the viewer last set for this media, once it's played a moment with no ad
+   * (a site sets its own level as the show starts; an ad isn't the show).
+   */
+  function maybeSetVolume(el: HTMLMediaElement): void {
+    const volume = entry?.volume ?? null;
+    if (volumeDone || volume === null || cleanSince === null || Date.now() - cleanSince < VOLUME_AFTER_MS) return;
+    volumeDone = true;
+    console.info(`[wtv] setting the volume this media had last time, ${Math.round(volume * 100)}%`);
+    el.volume = volume;
   }
 
   /** The page's metadata, for the top frame's report. */
@@ -792,6 +813,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     startS = hash?.t ?? (endS !== null ? 0 : null);
     endDone = false;
     seekDone = false;
+    volumeDone = false;
     cleanSince = null;
     infoSent = false;
     stopWatching();
@@ -881,6 +903,13 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     suspendNav(on) {
       navSuspended = on;
       nav?.suspend(on);
+    },
+    rememberVolume(volume) {
+      if (!entry) return;
+      // Theirs now: the remembered level mustn't come back over it.
+      volumeDone = true;
+      entry = { ...entry, volume };
+      browser.runtime.sendMessage({ type: PL_INFO, gen: entry.gen, info: { volume } }).catch(() => undefined);
     },
   };
 }

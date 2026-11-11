@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeDuration, parseBridgeCommand, parseBridgeMessage, skipTarget, type BridgedMediaState } from './protocol';
+import { encodeDuration, parseBridgeCommand, parseBridgeMessage, skipTarget, volumeTarget, type BridgedMediaState } from './protocol';
 
 const state: BridgedMediaState = {
   id: 1,
@@ -83,5 +83,23 @@ describe('skipTarget', () => {
     expect(skipTarget(1000, 10, Infinity, { start: 900, end: 1005 })).toBe(1005);
     expect(skipTarget(1000, 10, Infinity, null)).toBeNull();
     expect(skipTarget(10, 10, NaN, null)).toBeNull();
+  });
+});
+
+describe('volume', () => {
+  it('steps on a grid of tenths, within 0–1', () => {
+    expect(volumeTarget(0.5, 0.1)).toBe(0.6);
+    expect(volumeTarget(0.5, -0.1)).toBe(0.4);
+    expect(volumeTarget(0.73, 0.1)).toBe(0.8);
+    expect(volumeTarget(0.73, -0.1)).toBe(0.7);
+    expect(volumeTarget(1, 0.1)).toBe(1);
+    expect(volumeTarget(0, -0.1)).toBe(0);
+    expect(volumeTarget(0.30000000000000004, 0.1)).toBe(0.4);
+    expect(volumeTarget(NaN, -0.1)).toBe(0.9);
+  });
+
+  it('carries a volume command to the page', () => {
+    expect(parseBridgeCommand(JSON.stringify({ id: 1, cmd: 'volume', volume: 0.4 }))).toEqual({ id: 1, cmd: 'volume', volume: 0.4 });
+    expect(parseBridgeCommand(JSON.stringify({ id: 1, cmd: 'volume', volume: 1.5 }))).toBeNull();
   });
 });
