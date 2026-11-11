@@ -89,6 +89,7 @@ https://x.com/someone/status/123 | view=card | dur=20s   ← a post, on a title 
 [shuffle]                  ← before the first URL: random order
 https://www.youtube.com/watch?v=abc | t=1:00 | end=2:30
 https://www.youtube.com/watch?v=def | t=30 | dur=45s
+https://www.youtube.com/watch?v=ghi | vol=60          ← plays at 60% volume
 [loop]                     ← after the last URL: start again</pre>
               <p class="note">
                 Each line is a URL (with an optional <code>| title</code> and <code>| t=1:37</code> start time), an
@@ -113,6 +114,10 @@ https://www.youtube.com/watch?v=def | t=30 | dur=45s
                 <code>end=2:30</code> stops an entry at that time; <code>dur=45s</code> plays it that long from its start.
                 Ads don't count towards either. <code>[shuffle]</code> and <code>[loop]</code> tick the Shuffle and Loop
                 boxes by default; a shuffled loop reshuffles every lap.
+              </p>
+              <p class="note">
+                <code>vol=60</code> plays an entry at 60% volume. Changing the volume with ↑ / ↓ while an entry plays
+                writes it here for you, into unsaved edits too.
               </p>
             </details>
           </section>

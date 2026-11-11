@@ -70,7 +70,7 @@ export interface EntryInfo {
   show: ProgramItem[] | null;
   /** `view: read`: words per minute; `scroll`: pixels a second; null: the default. */
   speed: number | null;
-  /** The volume (0–1) the viewer last set for this media (media library); null: the site's own. */
+  /** The entry's volume, 0–1: its `vol=`, else what the viewer last set for the media (library); null: the site's own. */
   volume: number | null;
 }
 

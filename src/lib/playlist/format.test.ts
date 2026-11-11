@@ -6,6 +6,9 @@ import {
   parsePlaylist,
   renderEntry,
   serializePlaylist,
+  formatVolume,
+  parseVolume,
+  withEntryOption,
   withEntryTitle,
   withoutEntries,
 } from './format';
@@ -302,7 +305,37 @@ describe('end times, [shuffle] and [loop]', () => {
   });
 });
 
+describe('vol=', () => {
+  it('reads a percentage as 0–1', () => {
+    expect(parseVolume('60')).toBe(0.6);
+    expect(parseVolume('60%')).toBe(0.6);
+    expect(parseVolume(' 0 ')).toBe(0);
+    expect(parseVolume('100')).toBe(1);
+    expect(parseVolume('101')).toBeNull();
+    expect(parseVolume('loud')).toBeNull();
+    expect(formatVolume(0.6000000001)).toBe('60');
+  });
+
+  it('gives entries their volume, and flags a bad one', () => {
+    const { entries, problems } = compilePlaylist(parsePlaylist('https://a.com/x | vol=40\nhttps://a.com/y | vol=loud\nhttps://a.com/z'));
+    expect(entries.map((e) => e.volume)).toEqual([0.4, null, null]);
+    expect(problems).toEqual([{ line: 2, message: 'vol=loud: expected 0 to 100, like vol=60' }]);
+  });
+});
+
 describe('edits', () => {
+  it('sets an option on one entry: in place, else at the end, null removes it', () => {
+    const text = 'https://a.com/x | Title | vol=20 | t=5\n  https://a.com/y | Other\n';
+    const set = serializePlaylist(withEntryOption(parsePlaylist(text), 0, 'vol', '60'));
+    expect(set).toBe('https://a.com/x | Title | vol=60 | t=5\n  https://a.com/y | Other\n');
+    const added = serializePlaylist(withEntryOption(parsePlaylist(text), 1, 'vol', '60'));
+    expect(added).toBe('https://a.com/x | Title | vol=20 | t=5\n  https://a.com/y | Other | vol=60\n');
+    const removed = serializePlaylist(withEntryOption(parsePlaylist(text), 0, 'vol', null));
+    expect(removed).toBe('https://a.com/x | Title | t=5\n  https://a.com/y | Other\n');
+    const dupes = serializePlaylist(withEntryOption(parsePlaylist('https://a.com/x | vol=1 | vol=2'), 0, 'vol', '3'));
+    expect(dupes).toBe('https://a.com/x | vol=3');
+  });
+
   it('retitles one entry and leaves every other line untouched', () => {
     const doc = withEntryTitle(parsePlaylist(SAMPLE), 1, 'Renamed');
     const out = serializePlaylist(doc);

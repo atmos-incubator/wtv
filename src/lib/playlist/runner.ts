@@ -26,6 +26,10 @@
  * frames report what they learn about the entry (PL_INFO: title, creator, duration,
  * thumbnail), always filed under the runner's own entry URL, never one a page names.
  *
+ * Volume: an entry plays at its `vol=`, else the level the viewer last set for the media
+ * (library; first for built-ins, whose text can't change). A ↑ / ↓ during the entry
+ * (PL_INFO { volume }) goes to the library, the run, and the playlist's text as `vol=`.
+ *
  * Order (order.ts): entries play in `order`, which is shuffled once at start when
  * shuffling, so Previous retraces it. Looping: past the last entry, a new lap starts
  * (reshuffled when shuffling); otherwise the run finishes.
@@ -56,6 +60,7 @@ import { isWebUrl } from '../permissions';
 import { KEYS } from '../storage';
 import { setTvMode, watchingFullView } from '../view/controller';
 import { compilePlaylist, isPageView, parsePlaylist, type ViewMode } from './format';
+import { withEntryVolume } from './volume-edit';
 import { withWtvHash } from './hash';
 import { sameEntryUrl } from './match';
 import { nextLap, reshuffle, startOrder, validOrder } from './order';
@@ -81,7 +86,7 @@ import {
 } from './messages';
 import { parsePlays, withPlay } from './explore';
 import { getBuiltinPlaylist } from './builtin-bundle';
-import { getPlaylist } from './store';
+import { getPlaylist, savePlaylist } from './store';
 import { getRecord } from '../media-library/db';
 import { libraryKey } from '../media-library/record';
 import { updateMedia } from '../media-library/service';
@@ -106,6 +111,8 @@ interface RunEntry {
   show?: ProgramItem[] | null;
   /** Missing in runs started before page views: the default. */
   speed?: number | null;
+  /** `vol=`, 0–1 (kept up to date with ↑ / ↓ during the run). Missing in older runs: none. */
+  volume?: number | null;
 }
 
 export interface RunnerState {
@@ -267,7 +274,7 @@ async function start(
   const state: RunnerState = {
     playlistId,
     name: playlist.name,
-    entries: entries.map(({ url, title, startS, endS, ads, view, show, speed }) => ({
+    entries: entries.map(({ url, title, startS, endS, ads, view, show, speed, volume }) => ({
       url,
       title,
       startS,
@@ -276,6 +283,7 @@ async function start(
       view,
       show,
       speed,
+      volume,
     })),
     order,
     index,
@@ -354,7 +362,7 @@ async function hello(tabId: number, frameId: number, url: string): Promise<Entry
     view: entry.view ?? 'video',
     show: entry.show ?? null,
     speed: entry.speed ?? null,
-    volume: await savedVolume(entry.url),
+    volume: await entryVolume(state, entry),
   };
 }
 
@@ -363,6 +371,45 @@ async function savedVolume(url: string): Promise<number | null> {
   const key = libraryKey(url);
   if (!key) return null;
   return (await getRecord(key).catch(() => null))?.volume ?? null;
+}
+
+/**
+ * The entry's volume: its `vol=` first (the playlist's own, shared with it), else the
+ * library's. A built-in playlist's text can't be changed, so there the viewer's level (the
+ * library's) comes first.
+ */
+async function entryVolume(state: RunnerState, entry: RunEntry): Promise<number | null> {
+  const own = entry.volume ?? null;
+  if (own !== null && !getBuiltinPlaylist(state.playlistId)) return own;
+  return (await savedVolume(entry.url)) ?? own;
+}
+
+/**
+ * The viewer set the volume while the entry played: keep it with the run, and write it
+ * into the playlist's text as `vol=` (your own playlists; a built-in's is kept by the
+ * library only). The entry is found at its index in the saved text, if that's still the
+ * same URL, else as the one entry with that URL (locateEntry); otherwise (edited since) it's left.
+ */
+async function rememberVolume(tabId: number, state: RunnerState, volume: number): Promise<void> {
+  const index = playOrder(state)[state.index];
+  const entry = index === undefined ? undefined : state.entries[index];
+  if (index === undefined || !entry) return;
+  const entries = state.entries.map((e, i) => (i === index ? { ...e, volume } : e));
+  await put(tabId, { ...state, entries });
+
+  if (getBuiltinPlaylist(state.playlistId)) return;
+  const local = browserAreas().local;
+  const playlist = await getPlaylist(local, state.playlistId);
+  if (!playlist) return;
+  const text = withEntryVolume(playlist.text, index, entry.url, volume);
+  if (text === null) {
+    console.info(`[wtv] "${playlist.name}" changed since it started; the volume for ${entry.url} isn't written to it`);
+    return;
+  }
+  if (text === playlist.text) return;
+  // An open playlists page with unsaved edits carries this into them (volume-edit.ts carryVolumes).
+  await savePlaylist(local, { id: playlist.id, name: playlist.name, text });
+  console.info(`[wtv] "${playlist.name}": ${entry.url} at vol=${Math.round(volume * 100)}`);
 }
 
 /**
@@ -463,7 +510,9 @@ async function info(tabId: number, gen: number, report: MediaInfo): Promise<void
   const state = (await load())[tabId];
   if (!state || state.gen !== gen || state.phase === 'detached') return;
   const entry = entryAt(state);
-  if (entry) await updateMedia({ url: entry.url, ...report });
+  if (!entry) return;
+  await updateMedia({ url: entry.url, ...report });
+  if (report.volume !== undefined) await rememberVolume(tabId, state, report.volume);
 }
 
 async function tabUpdated(tabId: number, url: string | undefined, complete: boolean): Promise<void> {

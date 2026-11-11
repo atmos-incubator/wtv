@@ -32,8 +32,9 @@
  *     own (an embed page) sends the page metadata after 8 s instead;
  *   - until then, every frame looks for the site's `unavailable` role once a second and
  *     reports `gone` if it shows (the runner shows "Unavailable" and moves on);
- *   - the volume the viewer last set for the media with ↑ / ↓ (media library) is set once
- *     it's played half a second ad-free; a new ↑ / ↓ is remembered for next time;
+ *   - the entry's volume (its `vol=`, else what the viewer last set for the media) is set
+ *     once it's played half a second ad-free; a new ↑ / ↓ goes to the runner, which writes
+ *     it into the playlist as `vol=` (and the media library);
  *   - the entry's `[ads]` program replaces the default for the ad overlay, and
  *     `view=pictures` entries have their `[show]` program cover the media throughout.
  *

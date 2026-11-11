@@ -41,6 +41,10 @@
  *     either, depends on the user's selectors, so it isn't checked here: the playlists
  *     page says per entry.
  *
+ * Volume: `vol=60` (or `vol=60%`) plays the entry at 60%, 0–100. Wtv writes it itself when
+ * the viewer changes the volume with ↑ / ↓ while the entry plays (`withEntryOption`), so
+ * the level travels with the playlist.
+ *
  * Times: `t=` starts the entry there; `end=` stops it there, or `dur=` that long after the
  * start. `end=` wins if both are given (flagged). An end at or before the start is
  * ignored (flagged).
@@ -107,6 +111,8 @@ export interface PlaylistEntry {
   show: ProgramItem[] | null;
   /** `view=read`: words per minute; `view=scroll`: pixels a second; null: the default (or another view). */
   speed: number | null;
+  /** From `vol=`, 0–1; null: the site's own level (or what the viewer last set, media library). */
+  volume: number | null;
   /** Index into `doc.lines`. */
   line: number;
 }
@@ -132,7 +138,7 @@ export interface CompiledPlaylist {
 }
 
 const MAX_TEXT = 500;
-const KNOWN_OPTIONS = new Set(['t', 'end', 'dur', 'view', 'speed']);
+const KNOWN_OPTIONS = new Set(['t', 'end', 'dur', 'view', 'speed', 'vol']);
 const ADS_RE = /^\[ads\]$/i;
 const SHOW_RE = /^\[show\]$/i;
 const SHUFFLE_RE = /^\[shuffle\]$/i;
@@ -253,6 +259,7 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
         let durOpt: EntryOption | null = null;
         let view: ViewMode | null = null;
         let speed: Speed | null = null;
+        let volume: number | null = null;
         for (const opt of line.options) {
           if (opt.key === 't') {
             startS = parseTimestamp(opt.value);
@@ -268,6 +275,9 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
           } else if (opt.key === 'speed') {
             speed = parseSpeed(opt.value);
             if (!speed) problems.push({ line: at, message: `speed=${opt.value}: expected a number, like speed=200 (wpm) or speed=40 (px/s)` });
+          } else if (opt.key === 'vol') {
+            volume = parseVolume(opt.value);
+            if (volume === null) problems.push({ line: at, message: `vol=${opt.value}: expected 0 to 100, like vol=60` });
           } else if (!KNOWN_OPTIONS.has(opt.key)) {
             problems.push({ line: at, message: `unknown option ${opt.key}= (kept, ignored)` });
           }
@@ -279,7 +289,7 @@ export function compilePlaylist(doc: PlaylistDoc): CompiledPlaylist {
         }
         if (speed) speed = checkSpeed(speed, shown, (message) => problems.push({ line: at, message }));
         const endS = entryEnd(startS, endOpt, durOpt, (message) => problems.push({ line: at, message }));
-        entries.push({ url: line.url, title: line.title, startS, endS, view, ownSpeed: speed, line: i, ownAds: [], ownShow: [] });
+        entries.push({ url: line.url, title: line.title, startS, endS, view, ownSpeed: speed, volume, line: i, ownAds: [], ownShow: [] });
         block = null;
         if (loopAt !== null) {
           problems.push({ line: loopAt, message: '[loop] goes after the last entry (ignored)' });
@@ -411,6 +421,19 @@ function entryEnd(
   return null;
 }
 
+/** `vol=` → 0–1: a percentage, 0–100, `%` optional. Null if it isn't one. */
+export function parseVolume(value: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(value.trim());
+  if (!m) return null;
+  const pct = Number(m[1]);
+  return pct >= 0 && pct <= 100 ? Math.round(pct) / 100 : null;
+}
+
+/** 0–1 → the `vol=` value: a whole percentage. */
+export function formatVolume(volume: number): string {
+  return String(Math.round(Math.min(1, Math.max(0, volume)) * 100));
+}
+
 // --- edits ---------------------------------------------------------------------------
 
 /** Titles can't contain line breaks, and a bare `key=value` would read back as an option. */
@@ -439,6 +462,31 @@ export function withEntryTitle(doc: PlaylistDoc, entryIndex: number, title: stri
     if (line.kind !== 'entry' || ++seen !== entryIndex) return line;
     const raw = renderEntry(line.url, title, line.options, indentOf(line.raw));
     return { ...line, raw, title: cleanTitle(title) };
+  });
+  return { ...doc, lines };
+}
+
+/**
+ * Set an entry's option (entryIndex counts entries, not lines): replaces the first one
+ * with that key in place (dropping any repeats), else adds it at the end; null removes it.
+ * Only that line is re-rendered.
+ */
+export function withEntryOption(doc: PlaylistDoc, entryIndex: number, key: string, value: string | null): PlaylistDoc {
+  let seen = -1;
+  const lines = doc.lines.map((line): Line => {
+    if (line.kind !== 'entry' || ++seen !== entryIndex) return line;
+    const options: EntryOption[] = [];
+    let placed = false;
+    for (const o of line.options) {
+      if (o.key !== key) options.push(o);
+      else if (!placed && value !== null) {
+        options.push({ key, value });
+        placed = true;
+      }
+    }
+    if (!placed && value !== null) options.push({ key, value });
+    const raw = renderEntry(line.url, line.title, options, indentOf(line.raw));
+    return { ...line, raw, options };
   });
   return { ...doc, lines };
 }

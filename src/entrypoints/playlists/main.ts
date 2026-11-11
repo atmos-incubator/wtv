@@ -57,6 +57,7 @@ import { cardSource } from '../../lib/posts/source';
 import { KEYS, readKey, writeKey } from '../../lib/storage';
 import { cover, picture } from '../../lib/ui/cover';
 import { linkLines } from './line-link';
+import { carryVolumes } from '../../lib/playlist/volume-edit';
 
 const local = browserAreas().local;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -225,6 +226,7 @@ function renderPreview(): void {
         if (e.startS !== null && e.endS !== null) meta.push(`${formatTime(e.startS)}–${formatTime(e.endS)}`);
         else if (e.startS !== null) meta.push(`from ${formatTime(e.startS)}`);
         else if (e.endS !== null) meta.push(isMediaView(e.view) ? `until ${formatTime(e.endS)}` : `for ${formatTime(e.endS)}`);
+        if (e.volume !== null) meta.push(`volume ${Math.round(e.volume * 100)}%`);
         if (e.view === 'read') meta.push(`read as an article, ${e.speed ?? DEFAULT_WPM} wpm`);
         else if (e.view === 'scroll') meta.push(`the page, scrolled ${e.speed ?? DEFAULT_SCROLL_PX_S} px/s`);
         else if (e.view === 'card') meta.push(describeCard(e.url));
@@ -500,9 +502,41 @@ browser.storage.onChanged.addListener((changes, area) => {
   });
 });
 
-// Playlists changed elsewhere (context menu, another tab).
+/**
+ * Unsaved edits, and the player wrote an entry's `vol=` into the saved copy (↑ / ↓ while it
+ * played): make the same change to the edits, so Save keeps it. The text around it, and
+ * the caret, stay where they are.
+ */
+function carryVolumeChange(change: { oldValue?: unknown; newValue?: unknown }): void {
+  const id = currentId;
+  const p = current();
+  if (!id || !p || isBuiltin(p)) return;
+  const textOf = (store: unknown) => {
+    const entry = (store as Record<string, { text?: unknown } | undefined> | null | undefined)?.[id];
+    return typeof entry?.text === 'string' ? entry.text : null;
+  };
+  const before = textOf(change.oldValue);
+  const after = textOf(change.newValue);
+  if (before === null || after === null || before === after) return;
+  const carried = carryVolumes(before, after, textInput.value);
+  if (carried.entries.length === 0) return;
+  // Replace only what differs, so the caret and selection keep their places.
+  const old = textInput.value;
+  const next = carried.text;
+  let start = 0;
+  while (start < old.length && start < next.length && old[start] === next[start]) start++;
+  let end = 0;
+  while (end < old.length - start && end < next.length - start && old[old.length - 1 - end] === next[next.length - 1 - end]) end++;
+  textInput.setRangeText(next.slice(start, next.length - end), start, old.length - end, 'preserve');
+  renderPreview();
+  const which = carried.entries.map((i) => i + 1).join(', ');
+  setStatus(`Volume from the player added to entr${carried.entries.length === 1 ? 'y' : 'ies'} ${which}; Save keeps it.`);
+}
+
+// Playlists changed elsewhere (context menu, another tab, the player's vol=).
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !(KEYS.playlists in changes)) return;
+  if (dirty) carryVolumeChange(changes[KEYS.playlists]!);
   void (async () => {
     await refresh();
     if (dirty) return;
