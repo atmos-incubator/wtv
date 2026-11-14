@@ -14,7 +14,8 @@
  *   5. Playlist entry with view=pictures → its [show] slideshow over the media for the
  *                                        whole entry (dimmed with ⏸ while paused); the
  *                                        tab if the media has no box (audio)
- *   6. Paused show, `pausePictures` on → slideshow until it plays again (pause.ts)
+ *   6. Paused show, `pausePictures` on → slideshow until it plays again (pause.ts; sound
+ *                                        doesn't matter, isPausedShow)
  *   7. Click shield on, and the primary video is
  *        maximized                     → transparent shield over everything, idle cursor hides
  *        in an ad (pictures off)       → transparent shield over everything
@@ -50,7 +51,7 @@ import type { PlaylistClient } from '../playlist/client';
 import { skipKey, volumeKey } from '../view/keys';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
-import { PAUSE_PICTURES_DELAY_MS, pausePicturesDue } from './pause';
+import { PAUSE_PICTURES_DELAY_MS, isPausedShow, pausePicturesDue } from './pause';
 import { DEFAULT_AD_ITEMS, type ForwardedKey } from './program';
 import {
   DEFAULT_CONTROL_INSET,
@@ -191,7 +192,7 @@ export function startOverlay(
       readyState: el.readyState,
       currentTime: el.currentTime,
       pausedForMs: pausedAt === null ? null : performance.now() - pausedAt,
-      isShow: isShow(f),
+      isShow: isPausedShow(f),
       adActive: adActive(),
     });
   }

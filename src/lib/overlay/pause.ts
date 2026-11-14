@@ -6,6 +6,8 @@
  * a moment, so a quick pause / play doesn't flash. Hover previews and clips (not a show)
  * never get pictures, and ads have their own.
  */
+import type { CandidateFeatures } from '../media/score';
+import { isShow } from './shield';
 
 export const PAUSE_PICTURES_DELAY_MS = 1500;
 
@@ -24,6 +26,21 @@ export interface PauseFacts {
 }
 
 const HAVE_CURRENT_DATA = 2;
+
+/** A muted video must cover this much of the window to count as a paused show. */
+export const MUTED_SHOW_MIN_SHARE = 0.3;
+
+/**
+ * Whether a paused primary is a show, for pause pictures: `isShow`, but sound doesn't
+ * matter (plenty of people keep a site muted). Muted hover previews are what the sound
+ * test keeps out, and they're small tiles, so a muted video has to fill a good part of
+ * the window instead.
+ */
+export function isPausedShow(f: CandidateFeatures): boolean {
+  if (isShow(f)) return true;
+  if (f.audible || !isShow({ ...f, audible: true })) return false;
+  return f.viewportArea > 0 && f.visibleArea / f.viewportArea >= MUTED_SHOW_MIN_SHARE;
+}
 
 export function pausePicturesDue(f: PauseFacts): boolean {
   if (!f.enabled || f.adActive || !f.isShow) return false;

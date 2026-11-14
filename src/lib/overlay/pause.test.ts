@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PAUSE_PICTURES_DELAY_MS, pausePicturesDue, type PauseFacts } from './pause';
+import type { CandidateFeatures } from '../media/score';
+import { MUTED_SHOW_MIN_SHARE, PAUSE_PICTURES_DELAY_MS, isPausedShow, pausePicturesDue, type PauseFacts } from './pause';
 
 const paused: PauseFacts = {
   enabled: true,
@@ -34,5 +35,42 @@ describe('pausePicturesDue', () => {
     ['an ad is on', { adActive: true }],
   ])('not when %s', (_why, patch) => {
     expect(pausePicturesDue({ ...paused, ...patch })).toBe(false);
+  });
+});
+
+describe('isPausedShow', () => {
+  const viewportArea = 1920 * 1080;
+  const show: CandidateFeatures = {
+    key: 'd1',
+    isVideo: true,
+    playing: false,
+    audible: true,
+    loop: false,
+    visibleArea: 1280 * 720,
+    viewportArea,
+    duration: 600,
+    hasSource: true,
+    configMatch: false,
+  };
+
+  it('takes any show', () => {
+    expect(isPausedShow(show)).toBe(true);
+    expect(isPausedShow({ ...show, audible: false, visibleArea: 10, configMatch: true })).toBe(true);
+  });
+
+  it('takes a muted one that fills a good part of the window', () => {
+    expect(isPausedShow({ ...show, audible: false })).toBe(true);
+    expect(isPausedShow({ ...show, audible: false, visibleArea: viewportArea * MUTED_SHOW_MIN_SHARE })).toBe(true);
+  });
+
+  it('not a small muted one (a hover preview)', () => {
+    expect(isPausedShow({ ...show, audible: false, visibleArea: viewportArea * MUTED_SHOW_MIN_SHARE - 1 })).toBe(false);
+    expect(isPausedShow({ ...show, audible: false, viewportArea: 0 })).toBe(false);
+  });
+
+  it('not a muted clip or loop, however big', () => {
+    expect(isPausedShow({ ...show, audible: false, duration: 12 })).toBe(false);
+    expect(isPausedShow({ ...show, audible: false, loop: true })).toBe(false);
+    expect(isPausedShow({ ...show, audible: false, isVideo: false })).toBe(false);
   });
 });
