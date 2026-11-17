@@ -48,7 +48,8 @@ export function readRoleValue(el: Element): string {
   if (el instanceof HTMLMetaElement) value = el.content;
   else if (el instanceof HTMLLinkElement) value = el.href;
   else if (el instanceof HTMLImageElement) value = el.alt;
-  else if (el instanceof HTMLElement) value = el.innerText;
+  // innerText leaves out `visibility: hidden` text: the page may be hidden while it settles.
+  else if (el instanceof HTMLElement) value = el.innerText || null;
   return (value ?? el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_VALUE);
 }
 

@@ -26,10 +26,12 @@
  *   - at the entry's end time (`end=` / `dur=`, or the hash's `e=`) the media pauses and,
  *     in a playlist, reports `ended`. An end time without a start time starts from 0, so a
  *     site resuming where the viewer left off can't skip past it;
- *   - once the primary has played 3 s with no ad, the frame tells the runner what it knows
- *     about the entry for the media library: the media's duration, and in the top frame
- *     the page metadata (title, creator, thumbnail). A top frame with no player of its
- *     own (an embed page) sends the page metadata after 8 s instead;
+ *   - as soon as the entry plays (an ad counts), the top frame sends the page metadata
+ *     (title, creator, thumbnail) for the media library, so an entry skipped early still
+ *     gets its thumbnail; once the primary has played 3 s with no ad, the frame sends what
+ *     it knows again with the media's own duration (an ad's isn't the entry's). A top
+ *     frame with no player of its own (an embed page) sends the page metadata after 8 s
+ *     instead;
  *   - until then, every frame looks for the site's `unavailable` role once a second and
  *     reports `gone` if it shows (the runner shows "Unavailable" and moves on);
  *   - the entry's volume (its `vol=`, else what the viewer last set for the media) is set
@@ -222,6 +224,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
   let primaryCleanup: (() => void) | null = null;
   /** The entry's info went to the runner (it really played, or the fallback fired). */
   let infoSent = false;
+  /** The page metadata went to the runner as the entry started playing. */
+  let earlyInfoSent = false;
   let infoTimer: ReturnType<typeof setTimeout> | undefined;
   let gonePoll: ReturnType<typeof setInterval> | undefined;
   const sent = new Set<MediaEvent>();
@@ -458,6 +462,13 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     browser.runtime.sendMessage({ type: PL_INFO, gen: entry.gen, info }).catch(() => undefined);
   }
 
+  /** Started playing (maybe an ad): the page's metadata, before anything else can change. */
+  function maybeSendEarlyInfo(): void {
+    if (!entry || !isTop || infoSent || earlyInfoSent) return;
+    earlyInfoSent = true;
+    browser.runtime.sendMessage({ type: PL_INFO, gen: entry.gen, info: pageInfo() }).catch(() => undefined);
+  }
+
   /** Played long enough, ad-free: report the entry for the media library. */
   function maybeSendInfo(el: HTMLMediaElement): void {
     if (!entry || infoSent || cleanSince === null || Date.now() - cleanSince < INFO_AFTER_MS) return;
@@ -510,6 +521,8 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     trySeek(el);
     maybeSendInfo(el);
     if (type === 'playing') {
+      // Before the blackout lifts: the page is hidden around the player while it settles.
+      maybeSendEarlyInfo();
       lift();
       report('playing');
       return;
@@ -817,6 +830,7 @@ export function startPlaylistClient(ctx: ContentScriptContext, agent: MediaAgent
     volumeDone = false;
     cleanSince = null;
     infoSent = false;
+    earlyInfoSent = false;
     stopWatching();
     sent.clear();
     stopPageShow();
