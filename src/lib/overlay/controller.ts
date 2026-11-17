@@ -29,6 +29,12 @@
  * The ✕ on the ad slideshow hides the overlay, shield included, for the rest of that ad.
  * The ad program is the playlist entry's `[ads]` block, or the default `[img]` slideshow.
  *
+ * Settling (settle.ts, settler.ts): when the blackout lifts, and when cover pictures (ad,
+ * pause, show) come up just after a new video appeared (the primary media changing, an
+ * in-page navigation) or are up when one does, everything but the player is hidden until
+ * it holds still and the video can play. Under cover pictures the host's curtain hides
+ * the rest of the tab as well.
+ *
  * Clicks on the non-ad pictures play / pause the show (so a click on pause pictures
  * resumes it), and double-clicks maximize.
  *
@@ -52,6 +58,8 @@ import { skipKey, volumeKey } from '../view/keys';
 import type { ViewService } from '../view/service';
 import { createOverlayHost, type OverlayTarget } from './host';
 import { PAUSE_PICTURES_DELAY_MS, isPausedShow, pausePicturesDue } from './pause';
+import { recentlyUnsettled, videoReady } from './settle';
+import { createSettler } from './settler';
 import { DEFAULT_AD_ITEMS, type ForwardedKey } from './program';
 import {
   DEFAULT_CONTROL_INSET,
@@ -104,6 +112,8 @@ const PRIMARY_EVENTS = [
   'emptied',
 ] as const;
 const SYNC_DELAY_MS = 100;
+/** Opaque pictures over the player box: the modes that get the curtain while a page settles. */
+const COVER_MODES: ReadonlySet<Mode> = new Set<Mode>(['ad', 'pause-pictures', 'show-pictures']);
 /** The "Show pictures" pill: size and inset from the player's top-right corner. */
 const PILL = { width: 140, height: 32, inset: 12 };
 
@@ -125,6 +135,8 @@ export function startOverlay(
   /** When the primary last paused (performance.now()), until it plays again. */
   let pausedAt: number | null = null;
   let pauseTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When a new video last appeared (performance.now()): its page may still be laying out. */
+  let unsettledAt: number | null = null;
 
   const adActive = () => ads.status()?.active ?? false;
   const siteHasAds = () => Boolean(agent.profile().site?.config.roles.adIndicator?.length);
@@ -175,6 +187,22 @@ export function startOverlay(
     if (!primary) return null;
     return primary.features(null).isVideo ? null : 'viewport';
   };
+  const settler = createSettler({
+    signal,
+    keep: () => {
+      if (view.mediaMaximized()) return primaryVideo();
+      playerRect();
+      return playerEl?.deref() ?? primaryVideo();
+    },
+    ready: () => videoReady(primaryVideo()) && document.readyState === 'complete',
+    onChange: (active) => overlay.curtain(active && COVER_MODES.has(mode)),
+  });
+  /** A new video appeared: cover pictures shown soon settle; ones up now do. */
+  function unsettle(why: string): void {
+    unsettledAt = performance.now();
+    if (COVER_MODES.has(mode)) settler.start(why);
+  }
+
   const showPaused = () => {
     const primary = agent.primary();
     return primary ? !primary.features(null).playing : false;
@@ -267,6 +295,14 @@ export function startOverlay(
           : '';
     if (next === mode && signature === shownSignature && !force) return;
     if (DEV_TOOLS && next !== mode) noteModeChange(mode, next);
+    // The blackout lifting is the new video appearing (a video here, not a page or an embed).
+    const settle =
+      (mode === 'blackout' && next !== 'blackout' && next !== 'read' && primaryVideo() !== null && !playlist.embedding())
+        ? 'the blackout lifted'
+        : next !== mode && COVER_MODES.has(next) && recentlyUnsettled(unsettledAt, performance.now())
+          ? `${next} just after a new video`
+          : null;
+    if (mode === 'blackout' && next !== 'blackout') unsettledAt = performance.now();
     mode = next;
     shownSignature = signature;
     switch (next) {
@@ -345,6 +381,9 @@ export function startOverlay(
       default:
         overlay.hide();
     }
+    // Before this task ends, so no frame paints the page in between.
+    if (settle) settler.start(settle);
+    overlay.curtain(settler.active() && COVER_MODES.has(next));
   }
   const syncSoon = scheduler(() => sync(), SYNC_DELAY_MS, signal);
 
@@ -520,8 +559,13 @@ export function startOverlay(
   const offPrimary = agent.onPrimaryChange((p) => {
     record('overlay', 'primary media changed', p ? (p.rect() ? 'has a box' : 'no box') : 'none');
     watchPrimary();
+    if (p) unsettle('new primary media');
     sync();
   });
+  // In-page navigation (YouTube's next video keeps its <video> element: no primary change).
+  const nav = (window as unknown as { navigation?: EventTarget }).navigation;
+  nav?.addEventListener('navigatesuccess', () => unsettle('in-page navigation'), { signal });
+  window.addEventListener('popstate', () => unsettle('history navigation'), { signal });
   const offPlaylist = playlist.onChange(() => sync());
   const offView = view.onChange(() => {
     sync();

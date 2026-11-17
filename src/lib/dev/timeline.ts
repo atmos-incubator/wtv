@@ -6,7 +6,7 @@
  */
 import { DEV_TOOLS } from '../env';
 
-const MAX_ENTRIES = 300;
+const MAX_ENTRIES = 3000;
 const entries: string[] = [];
 
 function format(v: unknown): string {

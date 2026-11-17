@@ -11,11 +11,14 @@
  *   background tabs, which is fine because nothing is painted there either.
  * - If the target briefly has no box (the site re-laying out its player, say on first
  *   load), it stays where it last was for HOLD_MS rather than flashing what it covers.
+ * - The curtain: an opaque popover just under the overlay that hides the rest of the page
+ *   while a new video's page lays out (settler.ts decides when). It lets clicks through.
  */
 import { browser } from 'wxt/browser';
 import { WTV_UI_ATTR } from '../ads/probe';
 import { record } from '../dev/timeline';
 import { DEV_TOOLS } from '../env';
+import { CURTAIN_FADE_MS } from './settle';
 import { OVERLAY_INIT, OVERLAY_PAGE, parseOverlayEvent, type OverlayCommand, type OverlayEvent } from './program';
 import type { Box } from './shield';
 import { notifyRestacked } from './top-layer';
@@ -26,6 +29,8 @@ export interface OverlayHost {
   /** Create the iframe now so the first show is instant. */
   preload(): void;
   show(command: Exclude<OverlayCommand, { type: 'hide' }>, target: OverlayTarget): void;
+  /** The curtain under the overlay, over the rest of the tab: up, or down (fading out). */
+  curtain(up: boolean): void;
   hide(): void;
   /** Re-enter the top layer, above anything that entered it after us (fullscreen, maximize). */
   restack(): void;
@@ -41,6 +46,21 @@ const BASE_STYLE = [
   'border: 0',
   'background: transparent',
   'overflow: hidden',
+  'z-index: 2147483647',
+  'display: none',
+].join(';');
+
+const CURTAIN_STYLE = [
+  'all: initial',
+  'position: fixed',
+  'inset: 0',
+  'width: 100%',
+  'height: 100%',
+  'margin: 0',
+  'padding: 0',
+  'border: 0',
+  'background: #000',
+  'pointer-events: none',
   'z-index: 2147483647',
   'display: none',
 ].join(';');
@@ -70,6 +90,10 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
   /** Whether the overlay is currently placed on a real box, and since when it's had none. */
   let placed = false;
   let lostAt = 0;
+  let curtain: HTMLDivElement | null = null;
+  let curtainUp = false;
+  let curtainSince = 0;
+  let curtainFade: ReturnType<typeof setTimeout> | undefined;
 
   function send(cmd: OverlayCommand): void {
     if (port) port.postMessage(cmd);
@@ -149,20 +173,79 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
     });
   }
 
+  function ensureCurtain(): HTMLDivElement | null {
+    if (curtain?.isConnected) return curtain;
+    if (!document.documentElement || signal.aborted) return null;
+    const el = document.createElement('div');
+    el.style.cssText = CURTAIN_STYLE;
+    el.popover = 'manual';
+    el.setAttribute(WTV_UI_ATTR, '');
+    document.documentElement.append(el);
+    curtain = el;
+    return el;
+  }
+
+  /** restack() then puts it in the top layer, under the overlay. */
+  function raiseCurtain(): void {
+    const el = ensureCurtain();
+    if (!el) return;
+    if (!curtainUp) {
+      trace('curtain up');
+      curtainSince = performance.now();
+    }
+    curtainUp = true;
+    clearTimeout(curtainFade);
+    curtainFade = undefined;
+    el.style.transition = 'none';
+    el.style.opacity = '1';
+    el.style.display = 'block';
+  }
+
+  function lowerCurtain(why: string, fade: boolean): void {
+    if (!curtainUp) return;
+    curtainUp = false;
+    trace(`curtain down (${why}) after ${Math.round(performance.now() - curtainSince)}ms`);
+    const el = curtain;
+    if (!el) return;
+    const close = () => {
+      curtainFade = undefined;
+      try {
+        if (el.matches(':popover-open')) el.hidePopover();
+      } catch {
+        // Ignore.
+      }
+      el.style.display = 'none';
+    };
+    clearTimeout(curtainFade);
+    if (!fade) {
+      close();
+      return;
+    }
+    el.style.transition = `opacity ${CURTAIN_FADE_MS}ms linear`;
+    el.style.opacity = '0';
+    curtainFade = setTimeout(close, CURTAIN_FADE_MS);
+  }
+
   function loop(): void {
     place();
     raf = requestAnimationFrame(loop);
   }
 
+  function enterTopLayer(el: HTMLElement): void {
+    try {
+      if (el.matches(':popover-open')) el.hidePopover();
+      el.showPopover();
+    } catch {
+      // Not connected; recreated on the next show.
+    }
+  }
+
   /** Re-enter the top layer so we stack above anything that went fullscreen after us. */
   function restack(): void {
     if (!host || !target) return;
-    try {
-      if (host.matches(':popover-open')) host.hidePopover();
-      host.showPopover();
-    } catch {
-      // Not connected; ensure() on the next show will recreate it.
-    }
+    // The curtain first, so the overlay lands above it.
+    if (curtainUp && curtain) enterTopLayer(curtain);
+    enterTopLayer(host);
     trace('restacked');
     notifyRestacked();
   }
@@ -170,7 +253,9 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
   document.addEventListener('fullscreenchange', restack, { signal });
   signal.addEventListener('abort', () => {
     cancelAnimationFrame(raf);
+    clearTimeout(curtainFade);
     host?.remove();
+    curtain?.remove();
   });
 
   return {
@@ -207,6 +292,14 @@ export function createOverlayHost(signal: AbortSignal): OverlayHost {
         // Ignore.
       }
       host.style.display = 'none';
+      lowerCurtain('overlay hidden', false);
+    },
+    curtain(up) {
+      if (!up) lowerCurtain('settled', true);
+      else if (host && target && !curtainUp) {
+        raiseCurtain();
+        restack();
+      }
     },
     restack,
     onEvent(cb) {

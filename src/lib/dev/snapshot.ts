@@ -118,6 +118,8 @@ export function startSnapshotButton(ctx: ContentScriptContext, agent: MediaAgent
       const layout = layoutOf(areas);
       const data = {
         takenAt: takenAt.toISOString(),
+        /** The timeline's clock (its `+…ms`) at the click. */
+        takenAtMs: Math.round(performance.now()),
         url: location.href,
         title: document.title,
         viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY, devicePixelRatio },
