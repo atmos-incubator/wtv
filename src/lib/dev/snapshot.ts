@@ -1,6 +1,6 @@
 /**
- * Dev builds only (top frame): a big "Snapshot" button at the top right of the viewport
- * that saves everything needed to debug a short-lived page state (a new ad format, say)
+ * Dev builds only (top frame): a big "Snapshot" button at the top right of the viewport,
+ * on the sites it's turned on for (popup → Dev → "Snapshot button on this site"), that saves everything needed to debug a short-lived page state (a new ad format, say)
  * after it's gone, as one JSON file in Downloads:
  *
  *   - `html`: the whole DOM as it is at the click, open shadow roots included
@@ -23,6 +23,7 @@ import type { AdWatcher } from '../ads/watcher';
 import type { MediaAgent } from '../media/agent';
 import { onRestacked } from '../overlay/top-layer';
 import { DEV_SCREENSHOT, type ScreenshotReply } from './messages';
+import { SNAPSHOT_HOSTS_KEY, parseSnapshotHosts } from './snapshot-hosts';
 import { timeline } from './timeline';
 
 /** Elements kept in `layout`; the rest are counted. */
@@ -187,7 +188,7 @@ export function startSnapshotButton(ctx: ContentScriptContext, agent: MediaAgent
   }
 
   function mount(): void {
-    if (host?.isConnected || !document.documentElement || signal.aborted) return;
+    if (!enabled || host?.isConnected || !document.documentElement || signal.aborted) return;
     host = document.createElement('div');
     host.setAttribute(WTV_UI_ATTR, '');
     host.popover = 'manual';
@@ -241,14 +242,40 @@ export function startSnapshotButton(ctx: ContentScriptContext, agent: MediaAgent
     raise();
   }
 
+  let enabled = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  function setEnabled(on: boolean): void {
+    if (on === enabled || (on && signal.aborted)) return;
+    enabled = on;
+    if (on) {
+      // The page can replace <html>'s children; come back if it does.
+      timer = setInterval(mount, 2000);
+      if (document.documentElement) mount();
+      else document.addEventListener('DOMContentLoaded', mount, { once: true, signal });
+    } else {
+      clearInterval(timer);
+      timer = undefined;
+      host?.remove();
+      host = toast = null;
+    }
+  }
+
+  const site = location.hostname;
+  const sync = (raw: unknown) => setEnabled(parseSnapshotHosts(raw).includes(site));
+  void browser.storage.local
+    .get(SNAPSHOT_HOSTS_KEY)
+    .then((r) => sync(r[SNAPSHOT_HOSTS_KEY]))
+    .catch(() => undefined);
+  const onStorageChanged = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+    if (area === 'local' && SNAPSHOT_HOSTS_KEY in changes) sync(changes[SNAPSHOT_HOSTS_KEY]?.newValue);
+  };
+  browser.storage.onChanged.addListener(onStorageChanged);
+
   const off = onRestacked(raise);
-  // The page can replace <html>'s children; come back if it does.
-  const timer = setInterval(mount, 2000);
   ctx.onInvalidated(() => {
     off();
-    clearInterval(timer);
-    host?.remove();
+    browser.storage.onChanged.removeListener(onStorageChanged);
+    setEnabled(false);
   });
-  if (document.documentElement) mount();
-  else document.addEventListener('DOMContentLoaded', mount, { once: true, signal });
 }

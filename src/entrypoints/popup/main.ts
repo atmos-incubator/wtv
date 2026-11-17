@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser';
 import { browserAreas } from '../../lib/browser-storage';
 import { injectIntoTab } from '../../lib/injection';
 import { DEV_TOOLS } from '../../lib/env';
+import { SNAPSHOT_HOSTS_KEY, parseSnapshotHosts } from '../../lib/dev/snapshot-hosts';
 import {
   MSG_PREVIEW_OVERLAY,
   MSG_SHOW_AD_PICTURES,
@@ -116,6 +117,21 @@ function pausePicturesRow(settings: Settings): HTMLElement {
   });
   const each = el('label', { className: 'each' }, document.createTextNode('each'), input, document.createTextNode('s'));
   return el('div', { className: 'toggle-line' }, toggle('Show pictures while paused', 'pausePictures', settings), each);
+}
+
+/** Dev builds: the 📸 Snapshot button on this site or not (the page picks it up at once). */
+async function snapshotToggle(host: string): Promise<HTMLElement> {
+  const read = async () => parseSnapshotHosts(await readKey<unknown>(local, SNAPSHOT_HOSTS_KEY, []));
+  const input = el('input');
+  input.type = 'checkbox';
+  input.checked = (await read()).includes(host);
+  input.addEventListener('change', () => {
+    void (async () => {
+      const rest = (await read()).filter((h) => h !== host);
+      await writeKey(local, SNAPSHOT_HOSTS_KEY, input.checked ? [...rest, host] : rest);
+    })();
+  });
+  return el('label', { className: 'toggle' }, input, document.createTextNode('📸 Snapshot button on this site'));
 }
 
 async function viewState(tabId: number): Promise<ViewState | null> {
@@ -475,7 +491,7 @@ async function render(): Promise<void> {
         else out.textContent = 'Nothing on screen to cover (no visible primary video).';
       })();
     });
-    devRow.push(row('Dev', el('div', { className: 'actions' }, preview), out));
+    devRow.push(row('Dev', await snapshotToggle(host), el('div', { className: 'actions' }, preview), out));
   }
 
   const selectors = sidePanelButton('Fix selectors…', 'selectors', tab.windowId);

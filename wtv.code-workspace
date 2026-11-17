@@ -1,7 +1,7 @@
 {
 	"folders": [
 		{
-			"path": "../../../private/var/data/wtv"
+			"path": "/private/var/data/wtv"
 		}
 	],
 	"settings": {}
